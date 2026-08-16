@@ -12,6 +12,7 @@ import { StudioBackend } from './host/backend.js'
 import { dshHomeFromProfile, StudioDraftRegistry, studioCommands } from './host/drafts.js'
 import { applyPreviewWorker } from './host/preview-worker.js'
 import { createStudioRoutes } from './host/routes.js'
+import { StudioWorkspaceStore } from './host/workspace.js'
 
 export const name = 'harmony-studio'
 export const inject = ['harmony', 'agents', 'tools', 'systemPrompt', 'webServer', 'subprocess']
@@ -43,11 +44,13 @@ export function apply(ctx: Context): void {
     }
     const token = randomBytes(32).toString('hex')
     const host = `127.0.0.1:${ctx.webServer.port}`
+    const dshHome = dshHomeFromProfile(harmony.profileDir)
     const backend = new StudioBackend(
       harmony,
       ctx.agents,
       ctx.subprocess,
-      new StudioDraftRegistry(dshHomeFromProfile(harmony.profileDir)),
+      new StudioDraftRegistry(dshHome),
+      new StudioWorkspaceStore(dshHome),
       studioCommands,
       `http://${host}`,
     )
@@ -73,3 +76,4 @@ export { StudioDraftRegistry, dshHomeFromProfile } from './host/drafts.js'
 export { inspectReadiness, StudioPackRunner } from './host/readiness.js'
 export { StudioPreviewSupervisor } from './host/preview.js'
 export { createStudioRoutes, isTrustedStudioRequest } from './host/routes.js'
+export { StudioWorkspaceStore } from './host/workspace.js'

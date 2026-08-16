@@ -190,6 +190,11 @@ export interface StudioCreateDraftInput {
   profileMode: StudioDraftProfileMode
 }
 
+export interface StudioWorkspaceState {
+  openDraftIds: string[]
+  selectedDraftId?: string
+}
+
 export interface StudioBuildOutput {
   argv: string[]
   stdout: string

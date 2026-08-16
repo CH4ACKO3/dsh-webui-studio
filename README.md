@@ -84,6 +84,7 @@ Its managed data lives under `$DSH_HOME/studio/`:
 
 ```text
 studio/
+├── workspace.json
 ├── drafts/<draft-id>.json
 ├── repositories/<draft-id>/
 ├── worktrees/<draft-id>/
@@ -97,10 +98,11 @@ its Web Client manifest, then copies an isolated snapshot without `.git` or
 and the original folder is never modified.
 
 Draft display names are independent from npm package identities and can be
-renamed in the instance panel. Open Draft tabs persist locally; closing a tab
-only removes it from the current workspace and never stops or deletes the
-Draft. Plugin Management can reopen any persisted Draft. Unsaved Source changes
-must be saved with `Ctrl+S` or `Command+S` before switching or closing tabs.
+renamed in the instance panel. Studio persists the ordered open tabs and active
+Draft in `workspace.json`; closing a tab only removes it from the current
+workspace and never stops or deletes the Draft. Plugin Management can reopen
+any persisted Draft. Unsaved Source changes must be saved with `Ctrl+S` or
+`Command+S` before switching or closing tabs.
 
 ## Getting started
 

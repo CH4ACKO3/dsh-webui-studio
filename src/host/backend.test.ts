@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { StudioClientRequest, StudioDraftRecord, StudioHarmonyService } from '../contracts.js'
 import { StudioBackend } from './backend.js'
 import type { StudioCommandRunner, StudioDraftRegistry } from './drafts.js'
+import type { StudioWorkspaceStore } from './workspace.js'
 
 const previewState = vi.hoisted(() => ({
   project: { name: 'draft-plugin', root: '', state: 'staged' as const, graphRev: 'graph-1' },
@@ -65,8 +66,12 @@ function backend(draft: StudioDraftRecord): StudioBackend {
     create: vi.fn(async () => draft),
     rename: vi.fn(async (_id: string, label: string) => ({ ...draft, label: label.trim() })),
   } as unknown as StudioDraftRegistry
+  const workspace = {
+    read: vi.fn(async () => ({ openDraftIds: [] })),
+    write: vi.fn(async (state: unknown) => state),
+  } as unknown as StudioWorkspaceStore
   const commands = { run: vi.fn() } as unknown as StudioCommandRunner
-  return new StudioBackend(harmony, agents, subprocess, registry, commands, 'http://127.0.0.1:3081')
+  return new StudioBackend(harmony, agents, subprocess, registry, workspace, commands, 'http://127.0.0.1:3081')
 }
 
 describe('StudioBackend', () => {
@@ -99,6 +104,22 @@ describe('StudioBackend', () => {
 
     expect(renamed.result).toMatchObject({ ok: true, value: { name: 'draft-plugin', label: 'Header experiment' } })
     expect(listed.result).toMatchObject({ ok: true, value: [{ name: 'draft-plugin', label: 'Header experiment' }] })
+  })
+
+  it('reads and updates the persistent workspace without requiring a Draft id', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-studio-backend-'))
+    temporaryDirectories.push(root)
+    const draft = record(root)
+    const studio = backend(draft)
+
+    const initial = await studio.call(request('studio.workspace.get', {}))
+    const updated = await studio.call(request('studio.workspace.update', {
+      openDraftIds: [draft.id],
+      selectedDraftId: draft.id,
+    }))
+
+    expect(initial.result).toEqual({ ok: true, value: { openDraftIds: [] } })
+    expect(updated.result).toEqual({ ok: true, value: { openDraftIds: [draft.id], selectedDraftId: draft.id } })
   })
 
   it('routes activation and Preview selection by Draft id', async () => {

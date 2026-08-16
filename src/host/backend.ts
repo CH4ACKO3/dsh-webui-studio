@@ -15,6 +15,7 @@ import type {
   StudioReadinessReport,
   StudioServerResponse,
   StudioSourceLocation,
+  StudioWorkspaceState,
 } from '../contracts.js'
 import { StudioAgentController, type StudioAgentWorkspace } from './agent.js'
 import { StudioBuildError, StudioBuildRunner } from './build.js'
@@ -22,6 +23,7 @@ import type { StudioCommandRunner, StudioDraftRegistry } from './drafts.js'
 import { StudioPreviewSupervisor } from './preview.js'
 import { applyProjectPatch, listProjectFiles, readProjectFile, writeProjectFile } from './project-files.js'
 import { inspectReadiness, StudioPackRunner } from './readiness.js'
+import type { StudioWorkspaceStore } from './workspace.js'
 
 function failure<T = never>(rpcId: string, code: string, message: string, details: unknown = {}): StudioServerResponse<T> {
   return { type: 'server-response', rpcId, result: { ok: false, error: { code, message, details } } }
@@ -198,6 +200,7 @@ export class StudioBackend {
     private readonly agents: AgentRegistry,
     private readonly subprocess: SubprocessRuntime,
     private readonly registry: StudioDraftRegistry,
+    private readonly workspace: StudioWorkspaceStore,
     private readonly commands: StudioCommandRunner,
     private readonly parentOrigin: string,
   ) {}
@@ -207,6 +210,17 @@ export class StudioBackend {
     try {
       if (method === 'studio.drafts.list') return success(rpcId, await this.list())
       if (method === 'studio.drafts.create') return success(rpcId, await this.create(payload))
+      if (method === 'studio.workspace.get') {
+        const records = await this.registry.list()
+        return success(rpcId, await this.workspace.read(records.map(record => record.id)))
+      }
+      if (method === 'studio.workspace.update') {
+        const records = await this.registry.list()
+        return success(rpcId, await this.workspace.write(
+          objectPayload(payload) as unknown as StudioWorkspaceState,
+          records.map(record => record.id),
+        ))
+      }
       const controller = await this.controller(draftId(payload))
       if (method === 'studio.drafts.rename') {
         const label = objectPayload(payload).label

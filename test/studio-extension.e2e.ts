@@ -11,6 +11,7 @@ import type {
   StudioProjectFile,
   StudioProjectState,
   StudioServerResponse,
+  StudioWorkspaceState,
 } from '../src/contracts.js'
 
 const packageRoot = fileURLToPath(new URL('..', import.meta.url))
@@ -137,6 +138,8 @@ try {
     return envelope.result.value
   }
 
+  assert.deepEqual(await call<StudioWorkspaceState>('studio.workspace.get', {}), { openDraftIds: [] })
+
   const created = await call<StudioDraftView>('studio.drafts.create', {
     source: { kind: 'existing', directory: draftRoot },
     profileMode: 'main-home',
@@ -144,6 +147,14 @@ try {
   assert.notEqual(created.root, draftRoot)
   assert.equal(created.label, 'draft-plugin')
   assert.match(created.worktreeDir, /studio\/worktrees/)
+  assert.deepEqual(await call<StudioWorkspaceState>('studio.workspace.update', {
+    openDraftIds: [created.id],
+    selectedDraftId: created.id,
+  }), { openDraftIds: [created.id], selectedDraftId: created.id })
+  assert.deepEqual(await call<StudioWorkspaceState>('studio.workspace.get', {}), {
+    openDraftIds: [created.id],
+    selectedDraftId: created.id,
+  })
   const renamed = await call<StudioDraftView>('studio.drafts.rename', { draftId: created.id, label: 'Toolbar experiment' })
   assert.equal(renamed.label, 'Toolbar experiment')
   assert.equal(renamed.name, 'studio-draft')
@@ -219,6 +230,8 @@ try {
   assert.equal(restopped.runtime.state, 'stopped')
   const secondStopped = await call<StudioDraftView>('studio.drafts.stop', { draftId: secondCreated.id })
   assert.equal(secondStopped.runtime.state, 'stopped')
+  assert.deepEqual(await call<StudioWorkspaceState>('studio.workspace.update', { openDraftIds: [] }), { openDraftIds: [] })
+  assert.deepEqual(await call<StudioWorkspaceState>('studio.workspace.get', {}), { openDraftIds: [] })
 } finally {
   const runningChild = child
   if (runningChild?.exitCode === null) {

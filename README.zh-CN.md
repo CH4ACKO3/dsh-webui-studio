@@ -80,6 +80,7 @@ http://127.0.0.1:<dsh-port>/studio
 
 ```text
 studio/
+├── workspace.json
 ├── drafts/<draft-id>.json
 ├── repositories/<draft-id>/
 ├── worktrees/<draft-id>/
@@ -91,10 +92,10 @@ Studio 只接受本机绝对文件夹路径；验证 Web Client manifest 后，�
 `node_modules`，将快照复制到 Studio 自有 Git repository。符号链接会被拒绝，原插件
 文件夹始终保持只读且不会被修改。
 
-Draft 显示名与 npm package identity 相互独立，可在实例面板中重命名。打开的 Draft
-标签会保存在本地；关闭标签只会将其移出当前工作区，不会停止或删除 Draft。所有持久化
-Draft 都可以从插件管理页重新打开。Source 存在未保存修改时，必须先按 `Ctrl+S` 或
-`Command+S` 保存，才能切换或关闭标签。
+Draft 显示名与 npm package identity 相互独立，可在实例面板中重命名。Studio 会在
+`workspace.json` 中保存标签顺序与当前 Draft；关闭标签只会将其移出当前工作区，不会
+停止或删除 Draft。所有持久化 Draft 都可以从插件管理页重新打开。Source 存在未保存
+修改时，必须先按 `Ctrl+S` 或 `Command+S` 保存，才能切换或关闭标签。
 
 ## 快速开始
 

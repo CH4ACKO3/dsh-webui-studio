@@ -93,6 +93,7 @@ button, input, textarea, select, iframe { border: 0; }
 .draft-tab-label[data-state="failed"] .draft-tab-dot { background: var(--studio-danger); }
 .draft-tab-dirty { width: 5px; height: 5px; flex: none; border-radius: 50%; background: currentColor; }
 .draft-tabs-empty { min-width: 0; flex: 1; color: var(--studio-text-secondary); font-size: 11px; }
+.draft-tabs-spacer { min-width: 0; flex: 1; }
 
 .studio-main {
   --studio-left-sidebar: 260px;

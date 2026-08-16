@@ -22,6 +22,7 @@ import {
   type StudioReadinessReport,
   type StudioServerRequest,
   type StudioSourceCandidate,
+  type StudioWorkspaceState,
   STUDIO_PATH,
 } from '../contracts'
 import { apiValue, studioApi, subscribeStudioEvents } from './events'
@@ -87,7 +88,6 @@ const RIGHT_SIDEBAR_MAX = 560
 const PREVIEW_GUTTER = 32
 const PREVIEW_MIN_SIZE = { width: 1, height: 1 }
 const TERMINAL_MIN_SIZE = { width: 280, height: 220 }
-const OPEN_DRAFTS_KEY = 'dsh-webui-studio:open-drafts'
 const resizeDirections: readonly ResizeDirection[] = ['n', 'e', 's', 'w', 'ne', 'se', 'sw', 'nw']
 
 const EMPTY_REGISTRY: StudioRegistrySnapshot = { elements: [], variables: [] }
@@ -158,17 +158,6 @@ function previewBounds(width: number, height: number): LayoutRect {
     y: PREVIEW_GUTTER,
     width: Math.max(0, width - PREVIEW_GUTTER * 2),
     height: Math.max(0, height - PREVIEW_GUTTER * 2),
-  }
-}
-
-function storedOpenDraftIds(): string[] | undefined {
-  const stored = localStorage.getItem(OPEN_DRAFTS_KEY)
-  if (stored === null) return undefined
-  try {
-    const value = JSON.parse(stored) as unknown
-    return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : undefined
-  } catch {
-    return undefined
   }
 }
 
@@ -312,9 +301,8 @@ function eventSessionId(envelope: StudioServerRequest<Record<string, unknown>>):
 
 export function App(): JSX.Element {
   const initialViewport = useMemo(deviceViewport, [])
-  const initialOpenDraftIds = useMemo(storedOpenDraftIds, [])
   const [drafts, setDrafts] = useState<StudioDraftView[]>([])
-  const [openDraftIds, setOpenDraftIds] = useState<string[]>(initialOpenDraftIds ?? [])
+  const [openDraftIds, setOpenDraftIds] = useState<string[]>([])
   const [loadingDrafts, setLoadingDrafts] = useState(true)
   const [selectedDraftId, setSelectedDraftId] = useState<string>()
   const [showCreate, setShowCreate] = useState(false)
@@ -383,6 +371,7 @@ export function App(): JSX.Element {
   const previewNonce = useRef(crypto.randomUUID())
   const previewModeRef = useRef(previewMode)
   const previewUpdateQueue = useRef<Promise<void>>(Promise.resolve())
+  const workspaceUpdateQueue = useRef<Promise<void>>(Promise.resolve())
   const selectionResolve = useRef(0)
   const fileRequest = useRef(0)
   const activeDragCleanupRef = useRef<() => void>()
@@ -439,8 +428,6 @@ export function App(): JSX.Element {
   useEffect(() => {
     sessionRef.current = sessionId
   }, [sessionId])
-
-  useEffect(() => localStorage.setItem(OPEN_DRAFTS_KEY, JSON.stringify(openDraftIds)), [openDraftIds])
 
   useEffect(() => {
     setProject(selectedDraft?.project)
@@ -519,6 +506,18 @@ export function App(): JSX.Element {
     }).catch(() => undefined)
   }
 
+  const queueWorkspaceUpdate = (open: string[], selected: string | undefined): void => {
+    const next: StudioWorkspaceState = {
+      openDraftIds: open,
+      ...(selected === undefined ? {} : { selectedDraftId: selected }),
+    }
+    workspaceUpdateQueue.current = workspaceUpdateQueue.current.then(async () => {
+      await callStudio<StudioWorkspaceState>('studio.workspace.update', next)
+    }).catch(cause => {
+      setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+    })
+  }
+
   useEffect(() => {
     previewModeRef.current = previewMode
   }, [previewMode])
@@ -564,12 +563,14 @@ export function App(): JSX.Element {
   }, [previewKey, previewSession, selectedDraftId])
 
   useEffect(() => {
-    void callStudio<StudioDraftView[]>('studio.drafts.list', {}).then(next => {
+    void Promise.all([
+      callStudio<StudioDraftView[]>('studio.drafts.list', {}),
+      callStudio<StudioWorkspaceState>('studio.workspace.get', {}),
+    ]).then(([next, workspace]) => {
       setDrafts(next)
-      const available = new Set(next.map(draft => draft.id))
-      const open = (initialOpenDraftIds ?? next.map(draft => draft.id)).filter(id => available.has(id))
-      setOpenDraftIds(open)
-      activateDraft(selectedDraftId !== undefined && open.includes(selectedDraftId) ? selectedDraftId : open[0])
+      setOpenDraftIds(workspace.openDraftIds)
+      activateDraft(workspace.selectedDraftId)
+      if (next.length === 0) setShowCreate(true)
     }).catch(cause => setError(cause instanceof Error ? cause.message : String(cause)))
       .finally(() => setLoadingDrafts(false))
   }, [])
@@ -689,8 +690,10 @@ export function App(): JSX.Element {
         : { kind: 'existing', directory: pluginDirectory.trim() }
       const next = await callStudio<StudioDraftView>('studio.drafts.create', { source, profileMode })
       updateDraft(next)
-      setOpenDraftIds(current => current.includes(next.id) ? current : [...current, next.id])
+      const nextOpenDraftIds = openDraftIds.includes(next.id) ? openDraftIds : [...openDraftIds, next.id]
+      setOpenDraftIds(nextOpenDraftIds)
       activateDraft(next.id)
+      queueWorkspaceUpdate(nextOpenDraftIds, next.id)
       setProject(next.project)
       setShowCreate(false)
     } catch (cause) {
@@ -1085,7 +1088,7 @@ export function App(): JSX.Element {
     }
   }
 
-  const selectDraft = (draftId: string): boolean => {
+  const selectDraft = (draftId: string, nextOpenDraftIds = openDraftIds): boolean => {
     if (draftId !== selectedDraftId && hasUnsavedSource) {
       setPanel('source')
       setError('当前文件尚未保存。请先按 Ctrl+S 或 Command+S 保存，再切换草稿。')
@@ -1095,12 +1098,14 @@ export function App(): JSX.Element {
     setSelection(undefined)
     setRegistry(EMPTY_REGISTRY)
     setFocusedElementId(undefined)
+    queueWorkspaceUpdate(nextOpenDraftIds, draftId)
     return true
   }
 
   const openDraft = (draftId: string): void => {
-    setOpenDraftIds(current => current.includes(draftId) ? current : [...current, draftId])
-    selectDraft(draftId)
+    const nextOpenDraftIds = openDraftIds.includes(draftId) ? openDraftIds : [...openDraftIds, draftId]
+    if (!selectDraft(draftId, nextOpenDraftIds)) return
+    setOpenDraftIds(nextOpenDraftIds)
   }
 
   const closeDraft = (draftId: string): void => {
@@ -1112,8 +1117,11 @@ export function App(): JSX.Element {
     const index = openDraftIds.indexOf(draftId)
     const nextOpenDraftIds = openDraftIds.filter(id => id !== draftId)
     setOpenDraftIds(nextOpenDraftIds)
+    const nextDraftId = draftId === selectedDraftId
+      ? nextOpenDraftIds[Math.min(index, nextOpenDraftIds.length - 1)]
+      : selectedDraftId
+    queueWorkspaceUpdate(nextOpenDraftIds, nextDraftId)
     if (draftId !== selectedDraftId) return
-    const nextDraftId = nextOpenDraftIds[Math.min(index, nextOpenDraftIds.length - 1)]
     activateDraft(nextDraftId)
     setSelection(undefined)
     setRegistry(EMPTY_REGISTRY)
@@ -1344,7 +1352,7 @@ export function App(): JSX.Element {
         {loadingDrafts
           ? <span className="draft-tabs-empty" aria-live="polite">正在载入草稿…</span>
           : openDrafts.length === 0
-            ? <span className="draft-tabs-empty">没有打开的草稿</span>
+            ? <span className="draft-tabs-spacer" aria-hidden="true" />
             : <div className="draft-tab-list" role="tablist" aria-label="草稿标签页">
                 {openDrafts.map((draft, index) => {
                   const state = (instanceOperations[draft.id] === 'start' || instanceOperations[draft.id] === 'restart')
@@ -1431,7 +1439,8 @@ export function App(): JSX.Element {
             disabled={profileMode === 'custom'}>创建草稿</Button>
         </form>}
         {drafts.length === 0
-          ? !showCreate && <EmptyState title="创建第一个草稿" description="从一个新插件开始，或导入已有本地插件。" />
+          ? !showCreate && <EmptyState title="创建第一个草稿" description="从一个新插件开始，或导入已有本地插件。"
+              action={<Button size="small" variant="primary" onClick={() => setShowCreate(true)}>新建草稿</Button>} />
           : <>
               <Tabs id="left-sidebar" className="left-sidebar-tabs" label="DSH 控制页面" value={leftPanel}
                 onChange={(value: LeftPanel) => setLeftPanel(value)}
@@ -1516,8 +1525,23 @@ export function App(): JSX.Element {
               transform: `scale(${previewScale})`,
             }}>
                 {previewUrl === undefined
-                  ? <EmptyState className="preview-empty" title="选择并启动一个 Draft"
-                      description="Preview Host 将使用隔离的 DSH_HOME 和端口。" />
+                  ? <EmptyState className="preview-empty"
+                      title={selectedDraft !== undefined ? `启动 ${selectedDraft.label}`
+                        : drafts.length === 0 ? '创建第一个 Draft' : '工作区没有打开的 Draft'}
+                      description={selectedDraft !== undefined ? 'Preview Host 将使用隔离的 DSH_HOME 和端口。'
+                        : drafts.length === 0 ? '创建新插件，或导入已有的本地 WebUI 插件。'
+                          : '已保存的草稿仍在插件管理中，可以随时重新打开。'}
+                      action={selectedDraft === undefined
+                        ? drafts.length === 0
+                          ? <Button variant="primary" onClick={() => {
+                              setLeftSidebarCollapsed(false)
+                              setShowCreate(true)
+                            }}>创建草稿</Button>
+                          : <Button variant="primary" onClick={() => {
+                              setLeftSidebarCollapsed(false)
+                              setLeftPanel('plugins')
+                            }}>打开插件管理</Button>
+                        : undefined} />
                   : <iframe ref={previewRef} key={`${selectedDraftId}:${previewKey}`} title="DSH WebUI preview"
                       src={previewUrl} onLoad={connectPreview} />}
             </div>
