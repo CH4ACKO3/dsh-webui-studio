@@ -8,7 +8,7 @@
   <p>
     <strong>DSH WebUI 插件的可视化优先开发环境。</strong>
     <br />
-    在不把未完成代码加载进稳定 DSH Host 的前提下，检查真实界面、编辑源码、执行构建并验证 Patch。
+    实时预览你的插件对 dsh webui 的修改效果，在可视化的集成开发工具中交互式地与 agent 协作构建插件客户端。
     <br />
     Powered by <a href="https://github.com/CH4ACKO3/dsh-harmony"><strong>dsh-harmony</strong></a>.
   </p>
