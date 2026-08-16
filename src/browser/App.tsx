@@ -1548,20 +1548,24 @@ export function App(): JSX.Element {
           </div>
 
         {!rightSidebarCollapsed && <section className="preview-controls" aria-label="实时预览控制">
-          <div className="preview-control-line">
-            <FormField id="preview-aspect-ratio" label="画板比例">
-              <Select value={previewAspectRatio}
-                onChange={event => changePreviewAspectRatio(event.target.value as PreviewAspectRatio)}>
-                {previewAspectRatios.map(ratio => <option key={ratio} value={ratio}>{ratio}</option>)}
-                {previewAspectRatio === 'custom' && <option value="custom">自定义</option>}
-              </Select>
-            </FormField>
-            <SegmentedControl className="preview-mode-control" label="Preview interaction mode" value={previewMode}
+          <div className="preview-mode-field" data-mode={previewMode} data-disabled={previewUrl === undefined || undefined}>
+            <div className="preview-mode-heading">
+              <strong>交互模式</strong>
+              <span>{previewMode === 'browse' ? '正常操作 WebUI' : '选择并追踪元素'}</span>
+            </div>
+            <SegmentedControl className="preview-mode-control" label="预览交互模式" value={previewMode}
               options={[
-                { value: 'browse', label: 'Browse', disabled: previewUrl === undefined },
-                { value: 'inspect', label: 'Inspect', disabled: previewUrl === undefined },
+                { value: 'browse', label: '浏览', disabled: previewUrl === undefined },
+                { value: 'inspect', label: '检查', disabled: previewUrl === undefined },
               ]} onChange={changePreviewMode} />
           </div>
+          <FormField id="preview-aspect-ratio" className="preview-aspect-field" label="画板比例">
+            <Select value={previewAspectRatio}
+              onChange={event => changePreviewAspectRatio(event.target.value as PreviewAspectRatio)}>
+              {previewAspectRatios.map(ratio => <option key={ratio} value={ratio}>{ratio}</option>)}
+              {previewAspectRatio === 'custom' && <option value="custom">自定义</option>}
+            </Select>
+          </FormField>
           <div className="preview-resolution-line">
             <span>WebUI 尺寸</span>
             <label><span>W</span><Input type="number" min={1} value={previewViewport.width}
@@ -1664,7 +1668,7 @@ export function App(): JSX.Element {
           </div>
           {selection === undefined
             ? <EmptyState title="在 Preview 中选择一个元素"
-                description="切换到 Inspect 后单击页面元素。双击可固定描边，点击其他位置解除；Escape 返回 Browse。" />
+                description="切换到“检查”后单击页面元素。双击可固定描边，点击其他位置解除；Escape 返回“浏览”。" />
             : <section className="selection-result" aria-label="已选元素">
                 <div className="selection-title">
                   <code>{selection.tag}{selection.id === undefined ? '' : `#${selection.id}`}
