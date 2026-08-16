@@ -1,0 +1,111 @@
+{
+  "name": "dsh-webui-studio",
+  "version": "0.1.0",
+  "description": "Harmony WebUI Studio with a live DSH preview and an in-host assistant session",
+  "keywords": [
+    "deepseek",
+    "deepseek-harness",
+    "dsh",
+    "harmony",
+    "studio",
+    "webui"
+  ],
+  "homepage": "https://github.com/CH4ACKO3/dsh-webui-studio#readme",
+  "bugs": {
+    "url": "https://github.com/CH4ACKO3/dsh-webui-studio/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CH4ACKO3/dsh-webui-studio.git"
+  },
+  "license": "MIT",
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "lib",
+    "docs",
+    "LICENSE",
+    "PRODUCT.md",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "npm run build:host && npm run build:browser",
+    "build:host": "tsc -p tsconfig.host.json",
+    "build:browser": "vite build && vite build -c vite.bridge.config.ts",
+    "typecheck": "tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.browser.json --noEmit && tsc -p tsconfig.bridge.json --noEmit",
+    "test": "vitest run",
+    "test:integration": "npm run build && node test/studio-extension.e2e.mjs",
+    "check": "npm run typecheck && npm test && npm run build",
+    "prepare": "npm run build"
+  },
+  "engines": {
+    "node": "^22.22.3 || >=24.11.1"
+  },
+  "dsh": {
+    "plugin": {
+      "schemaVersion": 1,
+      "displayName": {
+        "zh-CN": "WebUI Studio",
+        "en": "WebUI Studio"
+      },
+      "summary": {
+        "zh-CN": "在真实 DSH WebUI 预览上构建和测试 Harmony Patch。",
+        "en": "Build and test Harmony patches against a live DSH WebUI preview."
+      },
+      "category": "plugin-development"
+    },
+    "harmony": {
+      "extension": "./lib/index.js"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-agent": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-host-apiproxy": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-host-webserver": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-session": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-subprocess": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-system-prompt": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-tools": "0.1.0-rc.6"
+  },
+  "dependencies": {
+    "dsh-harmony": "^0.1.2",
+    "dsh-harmony-react": "file:vendor/dsh-harmony-react-0.1.0.tgz",
+    "pnpm": "^10.34.5"
+  },
+  "bundleDependencies": [
+    "dsh-harmony-react"
+  ],
+  "devDependencies": {
+    "@codemirror/lang-javascript": "^6.2.4",
+    "@codemirror/state": "^6.5.2",
+    "@codemirror/view": "^6.38.6",
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-agent": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-host-apiproxy": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-host-webserver": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-session": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-subprocess": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-system-prompt": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-tools": "0.1.0-rc.6",
+    "@types/node": "^24.10.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "codemirror": "^6.0.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-grab": "^0.1.50",
+    "typescript": "^6.0.3",
+    "vite": "^8.2.1",
+    "vitest": "^4.1.10"
+  }
+}

@@ -1,0 +1,60 @@
+import { execFile } from 'node:child_process'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { promisify } from 'node:util'
+import { afterEach, expect, it, vi } from 'vitest'
+import type { StudioDraftRecord } from '../contracts.js'
+import { bundledPnpmCommand, materializeDraftProfile } from './runtime-profile.js'
+
+const roots: string[] = []
+const exec = promisify(execFile)
+
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
+})
+
+it('snapshots main profile declarations and links the Draft worktree', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-studio-profile-'))
+  roots.push(root)
+  const mainProfile = join(root, 'main', 'profiles', 'web')
+  const draftRoot = join(root, 'worktree')
+  const studioRoot = join(root, 'studio-package')
+  await Promise.all([mkdir(mainProfile, { recursive: true }), mkdir(draftRoot), mkdir(studioRoot)])
+  await writeFile(join(mainProfile, 'package.json'), JSON.stringify({
+    name: 'dsh-profile-web',
+    dependencies: { existing: 'link:../../../plugin', 'dsh-webui-studio': '1.0.0' },
+    dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'] } },
+  }))
+  await writeFile(join(mainProfile, 'cordis.patch.yml'), '[]\n')
+  const workspacePolicy = `packages:\n  - .\nallowBuilds:\n  example@git-ref: true\n`
+  await writeFile(join(mainProfile, 'pnpm-workspace.yaml'), workspacePolicy)
+  const draft: StudioDraftRecord = {
+    id: 'id', name: 'draft-plugin', source: { kind: 'new', packageName: 'draft-plugin' },
+    repositoryDir: root, worktreeDir: draftRoot, packagePath: '', root: draftRoot,
+    runtimeHome: join(root, 'runtime-home'), profileMode: 'main-home', createdAt: 'now',
+  }
+  const run = vi.fn(async () => {})
+
+  const profile = await materializeDraftProfile(draft, mainProfile, studioRoot, { run })
+  const manifest = JSON.parse(await readFile(join(profile, 'package.json'), 'utf8'))
+
+  expect(manifest.dependencies).toEqual({
+    existing: `link:${join(root, 'plugin')}`,
+    'dsh-webui-studio': `link:${studioRoot}`,
+    'draft-plugin': `link:${draftRoot}`,
+  })
+  expect(manifest.dsh.profile.bundles).toEqual(['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'])
+  expect(await readFile(join(profile, 'pnpm-workspace.yaml'), 'utf8')).toBe(workspacePolicy)
+  const [command, args] = bundledPnpmCommand(['install', '--prefer-offline'])
+  expect(run).toHaveBeenCalledWith(command, args, profile, undefined)
+  await materializeDraftProfile(draft, mainProfile, studioRoot, { run })
+  expect(run).toHaveBeenCalledOnce()
+})
+
+it('runs the bundled pnpm without relying on the Host PATH', async () => {
+  const [command, args] = bundledPnpmCommand(['--version'])
+  const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => name.toUpperCase() !== 'PATH'))
+  const result = await exec(command, args, { env: { ...env, PATH: '' } })
+  expect(result.stdout.trim()).toMatch(/^10\./)
+})

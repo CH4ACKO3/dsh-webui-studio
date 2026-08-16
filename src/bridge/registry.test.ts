@@ -1,0 +1,83 @@
+import { describe, expect, it, vi } from 'vitest'
+import { StudioPreviewRegistry } from './registry.js'
+
+describe('StudioPreviewRegistry', () => {
+  it('keeps registrations before a parent connects and releases subscriptions on dispose', () => {
+    let accent = '#235be6'
+    let listener: (() => void) | undefined
+    const stop = vi.fn()
+    const changed = vi.fn()
+    const registry = new StudioPreviewRegistry(changed)
+    const unregister = registry.registerElement({
+      owner: 'draft',
+      element: {
+        id: 'toolbar', label: 'Toolbar',
+        boundary: { surfaceId: 'draft.surface', path: ['root', 'toolbar/one'] },
+        source: { file: 'src/Toolbar.tsx' },
+        variables: [{ id: 'accent', label: 'Accent', control: 'color' }],
+      },
+      bindings: { accent: { get: () => accent, set: value => { accent = String(value) }, subscribe: next => { listener = next; return stop } } },
+    })
+
+    expect(registry.snapshot().elements[0]).toMatchObject({ owner: 'draft', values: { accent: '#235be6' } })
+    listener?.()
+    expect(changed).toHaveBeenCalledTimes(2)
+    unregister()
+    expect(stop).toHaveBeenCalledOnce()
+    expect(registry.snapshot().elements).toEqual([])
+  })
+
+  it('rejects duplicate definitions, missing bindings and invalid values', async () => {
+    let density = 1
+    const registry = new StudioPreviewRegistry(() => {})
+    const registration = {
+      owner: 'draft',
+      element: {
+        id: 'toolbar', label: 'Toolbar', boundary: { surfaceId: 'draft.surface', path: ['toolbar'] },
+        source: { file: 'src/Toolbar.tsx' }, variables: [{ id: 'density', label: 'Density', control: 'number' as const, constraints: { min: 0, max: 2 } }],
+      },
+      bindings: { density: { get: () => density, set: (value: string | number | boolean) => { density = Number(value) } } },
+    }
+    registry.registerElement(registration)
+    expect(() => registry.registerElement(registration)).toThrow('already registered')
+    expect(() => registry.registerElement({
+      ...registration,
+      element: { ...registration.element, id: 'other' },
+    })).toThrow('boundary already registered')
+    expect(() => registry.registerVariables({ owner: 'draft', variables: [{ id: 'accent', label: 'Accent', control: 'color' }], bindings: {} }))
+      .toThrow('has no binding')
+    await expect(registry.set({ scope: 'element', owner: 'draft', elementId: 'toolbar', variableId: 'density', value: 3 }))
+      .rejects.toThrow('above its maximum')
+    await registry.set({ scope: 'element', owner: 'draft', elementId: 'toolbar', variableId: 'density', value: 2 })
+    expect(density).toBe(2)
+  })
+
+  it('serializes writes and never applies an old queued write to a replacement registration', async () => {
+    let release: (() => void) | undefined
+    let value = 0
+    const registry = new StudioPreviewRegistry(() => {})
+    const registration = (set: (next: number) => void | Promise<void>) => ({
+      owner: 'draft',
+      element: {
+        id: 'toolbar', label: 'Toolbar', boundary: { surfaceId: 'draft.surface', path: ['toolbar'] },
+        source: { file: 'src/Toolbar.tsx' }, variables: [{ id: 'density', label: 'Density', control: 'number' as const }],
+      },
+      bindings: { density: { get: () => value, set: (next: string | number | boolean) => set(Number(next)) } },
+    })
+    const unregister = registry.registerElement(registration(async next => {
+      await new Promise<void>(resolve => { release = resolve })
+      value = next
+    }))
+    const first = registry.set({ scope: 'element', owner: 'draft', elementId: 'toolbar', variableId: 'density', value: 1 })
+    const queued = registry.set({ scope: 'element', owner: 'draft', elementId: 'toolbar', variableId: 'density', value: 2 })
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+    unregister()
+    value = 10
+    registry.registerElement(registration(next => { value = next }))
+    release?.()
+
+    await first
+    await expect(queued).rejects.toThrow('no longer active')
+    expect(value).toBe(1)
+  })
+})

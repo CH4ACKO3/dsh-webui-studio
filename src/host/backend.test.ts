@@ -1,0 +1,160 @@
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import type { AgentRegistry } from '@deepseek-ai/dsh-agent'
+import type { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { StudioClientRequest, StudioDraftRecord, StudioHarmonyService } from '../contracts.js'
+import { StudioBackend } from './backend.js'
+import type { StudioCommandRunner, StudioDraftRegistry } from './drafts.js'
+
+const previewState = vi.hoisted(() => ({
+  project: { name: 'draft-plugin', root: '', state: 'staged' as const, graphRev: 'graph-1' },
+}))
+
+vi.mock('./preview.js', () => ({
+  StudioPreviewSupervisor: class {
+    runtime = { state: 'stopped', log: '' } as Record<string, string>
+    snapshot() { return this.runtime }
+    async start() {
+      this.runtime = { state: 'running', previewUrl: 'http://127.0.0.1:4000/', bridgeCapability: 'cap', log: '' }
+      return this.runtime
+    }
+    async stop() { this.runtime = { state: 'stopped', log: '' }; return this.runtime }
+    async state() { return previewState.project }
+    async activate(graphRev: string) { return { ...previewState.project, state: 'active', graphRev } }
+    async applyBuild() { return { ...previewState.project, state: 'preview-pending', graphRev: 'graph-2' } }
+    async inspect() { return { harmony: { patches: [], targets: [] }, dependencies: [] } }
+    async dispose() {}
+  },
+}))
+
+const temporaryDirectories: string[] = []
+
+afterEach(async () => {
+  await Promise.all(temporaryDirectories.splice(0).map(directory => rm(directory, { recursive: true, force: true })))
+})
+
+function request(method: string, payload: unknown): StudioClientRequest {
+  return { type: 'client-request', rpcId: 'rpc-1', method, payload }
+}
+
+function record(root: string): StudioDraftRecord {
+  return {
+    id: '4f5e9f53-5d56-4cb5-837e-a4c084ab6e9c',
+    name: 'draft-plugin',
+    source: { kind: 'new', packageName: 'draft-plugin' },
+    repositoryDir: root,
+    worktreeDir: root,
+    packagePath: '',
+    root,
+    runtimeHome: join(root, 'runtime'),
+    profileMode: 'main-home',
+    createdAt: '2026-08-16T00:00:00.000Z',
+  }
+}
+
+function backend(draft: StudioDraftRecord): StudioBackend {
+  previewState.project = { name: draft.name, root: draft.root, state: 'staged', graphRev: 'graph-1' }
+  const harmony = { profileDir: '/home/profiles/web' } as StudioHarmonyService
+  const agents = { create: vi.fn(async () => ({ dispose: vi.fn(async () => {}) })) } as unknown as AgentRegistry
+  const subprocess = {} as SubprocessRuntime
+  const registry = {
+    list: vi.fn(async () => [draft]),
+    get: vi.fn(async () => draft),
+    create: vi.fn(async () => draft),
+  } as unknown as StudioDraftRegistry
+  const commands = { run: vi.fn() } as unknown as StudioCommandRunner
+  return new StudioBackend(harmony, agents, subprocess, registry, commands, 'http://127.0.0.1:3081')
+}
+
+describe('StudioBackend', () => {
+  it('lists persistent Drafts and starts one isolated Preview runtime', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-studio-backend-'))
+    temporaryDirectories.push(root)
+    const studio = backend(record(root))
+
+    const listed = await studio.call(request('studio.drafts.list', {}))
+    const started = await studio.call(request('studio.drafts.start', { draftId: record(root).id }))
+
+    expect(listed.result).toMatchObject({ ok: true, value: [{ runtime: { state: 'stopped' } }] })
+    expect(started.result).toMatchObject({ ok: true, value: {
+      runtime: { state: 'running', previewUrl: 'http://127.0.0.1:4000/' },
+      project: { state: 'staged', graphRev: 'graph-1' },
+    } })
+  })
+
+  it('routes activation and Preview selection by Draft id', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-studio-backend-'))
+    temporaryDirectories.push(root)
+    const draft = record(root)
+    const studio = backend(draft)
+    await studio.call(request('studio.drafts.start', { draftId: draft.id }))
+    const selection = {
+      tag: 'button', classes: ['save'], attributes: {}, text: 'Save', outerHTML: '<button>Save</button>',
+      rect: { x: 0, y: 0, width: 40, height: 20 }, style: {}, boundaries: [], confidence: 'dom-only',
+    }
+    const registry = {
+      elements: [{
+        owner: 'draft-plugin',
+        element: {
+          id: 'theme', label: 'Theme', boundary: { surfaceId: 'settings', path: ['appearance'] },
+          source: { file: 'src/theme.tsx' }, variables: [],
+        },
+        values: {},
+      }],
+      variables: [],
+    }
+
+    const active = await studio.call(request('studio.project.activate', { draftId: draft.id, graphRev: 'graph-1' }))
+    await studio.call(request('studio.preview.update', {
+      draftId: draft.id, connected: true, mode: 'inspect', selection, registry,
+    }))
+    const connected = await studio.call(request('studio.preview.status', { draftId: draft.id }))
+    await studio.call(request('studio.preview.update', {
+      draftId: draft.id, connected: false, mode: 'browse', selection: null, registry: null,
+    }))
+    const disconnected = await studio.call(request('studio.preview.status', { draftId: draft.id }))
+
+    expect(active.result).toMatchObject({ ok: true, value: { state: 'active' } })
+    expect(connected.result).toMatchObject({ ok: true, value: { selection, registry } })
+    expect(disconnected.result).toEqual({ ok: true, value: { connected: false, mode: 'browse' } })
+  })
+
+  it('reads and writes files in the selected Draft worktree', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-studio-backend-'))
+    temporaryDirectories.push(root)
+    await mkdir(join(root, 'src'))
+    await writeFile(join(root, 'src/index.ts'), 'before\n')
+    const draft = record(root)
+    const studio = backend(draft)
+
+    const read = await studio.call(request('studio.project.readFile', { draftId: draft.id, path: 'src/index.ts' }))
+    const saved = await studio.call(request('studio.project.writeFile', { draftId: draft.id, path: 'src/index.ts', content: 'after\n' }))
+
+    expect(read.result).toMatchObject({ ok: true, value: { content: 'before\n' } })
+    expect(saved.result).toMatchObject({ ok: true, value: { saved: true } })
+  })
+
+  it('requires a Draft id for Draft-scoped methods', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-studio-backend-'))
+    temporaryDirectories.push(root)
+    const response = await backend(record(root)).call(request('studio.project.state', {}))
+    expect(response.result).toMatchObject({ ok: false, error: { message: 'draftId is required' } })
+  })
+
+  it('keeps the active Agent session attached to its Draft view', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-studio-backend-'))
+    temporaryDirectories.push(root)
+    const draft = record(root)
+    const studio = backend(draft)
+    await studio.call(request('studio.drafts.start', { draftId: draft.id }))
+    await studio.call(request('studio.project.activate', { draftId: draft.id, graphRev: 'graph-1' }))
+
+    const created = await studio.call(request('studio.agent.create', { draftId: draft.id }))
+    const listed = await studio.call(request('studio.drafts.list', {}))
+
+    expect(created.result).toMatchObject({ ok: true, value: { sessionId: expect.any(String) } })
+    expect(listed.result).toMatchObject({ ok: true, value: [{ agent: created.result.ok ? created.result.value : undefined }] })
+  })
+})
