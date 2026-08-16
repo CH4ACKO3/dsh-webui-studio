@@ -137,6 +137,32 @@ in the compatibility note above.
 - Source writes stay inside the selected Draft package and never follow symbolic links outside it.
 - Registered element boundaries and Patch traces are candidate evidence, not claims of exact DOM ownership.
 
+## Frequently asked questions
+
+### How is Studio different from other WYSIWYG tools?
+
+DSH WebUI changes are delivered through plugins rather than direct edits to
+the upstream source. Its interface elements also participate in Cordis plugin
+lifecycle and control logic, so the problem extends beyond manipulating static
+DOM and CSS. Those constraints call for a dedicated toolkit that understands
+the DSH plugin system from preview through distribution.
+
+### Why not simply ask an Agent to edit the source?
+
+Studio still connects to the real Agent inside DSH. It gives that Agent richer
+project context, integrated previews, purpose-built tools and skills, and a
+tighter edit-build-inspect-validate loop. Studio does not replace the Agent; it
+turns source editing into a more capable interactive workflow for both the
+Agent and the developer.
+
+### What is Harmony, and why use it?
+
+The DSH WebUI exposes many useful slots, but Studio aims for deeper and more
+flexible changes—including UI and behavior introduced by other plugins—while
+keeping independently authored modifications as compatible as possible.
+[`dsh-harmony`](https://github.com/CH4ACKO3/dsh-harmony) provides the runtime
+patching and extension model that makes this possible.
+
 ## Related projects
 
 - [`dsh-harmony`](https://github.com/CH4ACKO3/dsh-harmony) - runtime patching, Host extension mounting, Draft lifecycle, and Patch inspection

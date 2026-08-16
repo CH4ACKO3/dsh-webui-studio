@@ -131,6 +131,27 @@ Draft package 必须：
 - 源码写入始终限制在所选 Draft package 内，且不会沿符号链接写到外部。
 - 已注册 element boundary 与 Patch trace 只是候选证据，不代表对 DOM 的精确所有权声明。
 
+## 常见问题
+
+### Studio 与其他 WYSIWYG 工具有何不同？
+
+DSH WebUI 的修改不能直接改动上游源码，而要以插件形式交付。界面元素还会参与
+Cordis 的插件生命周期与控制逻辑，因此问题不只是操作静态 DOM 和 CSS。预览、修改、
+验证与分发都需要理解 DSH 插件体系，这足以构成一套独立的专用工具。
+
+### 为什么不直接让 Agent 对着源码修改？
+
+Studio 仍然连接 DSH 内部真实的 Agent，同时为它提供更完整的项目上下文、集成预览、
+专用 Agent 工具与 Skill，以及更紧密的编辑、构建、检查和验证闭环。Studio 不是取代
+Agent，而是为 Agent 和开发者提供更好的交互式修改体验。
+
+### Harmony 是什么，为什么选择 Harmony？
+
+DSH WebUI 已经提供了许多 Slot 点位，但 Studio 不满足于此。我们希望实现更深层、
+更高自由度的修改，包括修改其他插件加入的 UI 和逻辑，同时让不同修改插件之间尽可能
+兼容。[`dsh-harmony`](https://github.com/CH4ACKO3/dsh-harmony) 提供的运行时 Patch 与
+扩展模型，让这种能力成为可能。
+
 ## 相关项目
 
 - [`dsh-harmony`](https://github.com/CH4ACKO3/dsh-harmony) - runtime patch、Host extension 挂载、Draft 生命周期与 Patch 检查
