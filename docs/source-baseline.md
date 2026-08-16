@@ -29,3 +29,10 @@ theme-aware terminal, full docked-header toggle, live Draft log refresh, real
 command/cwd/`DSH_HOME` prompts, and integration log assertions. The selected
 Studio source/config inputs had SHA-256
 `0fcda46f44789eb5070b3ed729fabe836d7fc7f967b46747d1def6fee2b46ff0`.
+
+The UI and Preview bridge were synchronized again at
+`2026-08-16T09:03:51Z`. This checkpoint removes the stopped terminal label and
+obsolete plugin-detail controls, anchors resize highlights, and makes middle
+mouse Preview panning use viewport-pixel deltas without native auto-scroll.
+The selected Studio source/config inputs had SHA-256
+`c06fe6ffe080f9ee17ffee7e2e577ac6646166917104eaf4a1a1b8993e84eb4f`.

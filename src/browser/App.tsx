@@ -72,8 +72,6 @@ const panels = ['elements', 'selection', 'source', 'readiness', 'agent'] as cons
 type Panel = typeof panels[number]
 const leftPanels = ['instance', 'plugins'] as const
 type LeftPanel = typeof leftPanels[number]
-const instancePanels = ['layers', 'details'] as const
-type InstancePanel = typeof instancePanels[number]
 
 const previewAspectRatios = ['16:9', '16:10', '4:3', '1:1', '9:16'] as const
 type PreviewAspectRatio = typeof previewAspectRatios[number] | 'custom'
@@ -330,7 +328,6 @@ export function App(): JSX.Element {
   const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(false)
   const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(false)
   const [leftPanel, setLeftPanel] = useState<LeftPanel>('instance')
-  const [instancePanel, setInstancePanel] = useState<InstancePanel>('layers')
   const [draftLabels, setDraftLabels] = useState<Record<string, string>>(storedDraftLabels)
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(260)
   const [rightSidebarWidth, setRightSidebarWidth] = useState(400)
@@ -368,7 +365,6 @@ export function App(): JSX.Element {
   const previewPort = useRef<MessagePort>()
   const previewNonce = useRef(crypto.randomUUID())
   const previewModeRef = useRef(previewMode)
-  const previewScaleRef = useRef(previewScale)
   const previewUpdateQueue = useRef<Promise<void>>(Promise.resolve())
   const selectionResolve = useRef(0)
   const activeDragCleanupRef = useRef<() => void>()
@@ -376,6 +372,10 @@ export function App(): JSX.Element {
   const draftLabel = (draft: StudioDraftView): string => draftLabels[draft.id] ?? pathName(draft.worktreeDir)
   const terminalOutput = selectedDraft?.runtime.log ?? ''
   const terminalLatestLine = terminalOutput.trimEnd().split(/\r?\n/).at(-1) ?? '[studio] 实例尚未启动。'
+  const terminalRuntimeState = starting ? 'starting' : selectedDraft?.runtime.state
+  const terminalRuntimeLabel = terminalRuntimeState === 'starting' ? '执行中'
+    : terminalRuntimeState === 'running' ? '运行中'
+      : terminalRuntimeState === 'failed' ? '失败' : undefined
   const hasLiveDraft = drafts.some(draft => draft.runtime.state === 'starting' || draft.runtime.state === 'running')
   const previewSession = selectedDraft?.runtime.bridgeCapability
   const previewUrl = selectedDraft?.runtime.previewUrl
@@ -486,10 +486,6 @@ export function App(): JSX.Element {
   useEffect(() => {
     previewModeRef.current = previewMode
   }, [previewMode])
-
-  useEffect(() => {
-    previewScaleRef.current = previewScale
-  }, [previewScale])
 
   useEffect(() => {
     const changed = (): void => setPreviewFullscreen(document.fullscreenElement === previewSectionRef.current)
@@ -784,11 +780,10 @@ export function App(): JSX.Element {
         })
       }
       if (message.type === 'preview-pan' && typeof message.dx === 'number' && typeof message.dy === 'number') {
-        const scale = previewScaleRef.current
         setPreviewFit(false)
         setPreviewOrigin(current => ({
-          x: current.x + (message.dx as number) * scale,
-          y: current.y + (message.dy as number) * scale,
+          x: current.x + (message.dx as number),
+          y: current.y + (message.dy as number),
         }))
       }
       if (message.type === 'registry' && typeof message.registry === 'object' && message.registry !== null) {
@@ -1129,11 +1124,10 @@ export function App(): JSX.Element {
         aria-expanded={!terminalMinimized} aria-controls="draft-terminal-output" onClick={toggleTerminalMinimized}>
         <DisclosureIcon expanded={!terminalMinimized} /><strong>终端</strong>
         {terminalMinimized && <code className="terminal-latest-line" title={terminalLatestLine}>{terminalLatestLine}</code>}
-        {!terminalMinimized && <span className="terminal-runtime-state" aria-live="polite"
-          data-state={starting ? 'starting' : selectedDraft.runtime.state}>
-          {starting || selectedDraft.runtime.state === 'starting' ? '执行中' : selectedDraft.runtime.state === 'running' ? '运行中'
-            : selectedDraft.runtime.state === 'failed' ? '失败' : '待命'}
-        </span>}
+        {!terminalMinimized && terminalRuntimeLabel !== undefined
+          && <span className="terminal-runtime-state" aria-live="polite" data-state={terminalRuntimeState}>
+            {terminalRuntimeLabel}
+          </span>}
       </button>
       <div className="host-terminal-actions">
         <IconButton ref={terminalToggleRef} className="terminal-layout-button" size="small" variant="ghost"
@@ -1273,29 +1267,8 @@ export function App(): JSX.Element {
               </section>}
 
               {leftPanel === 'plugins' && <section id="left-sidebar-panel-plugins" role="tabpanel"
-                aria-labelledby="left-sidebar-tab-plugins" className="left-sidebar-page instance-pages">
-                  <Tabs id="instance" label="插件管理标签页" value={instancePanel}
-                    onChange={(value: InstancePanel) => setInstancePanel(value)}
-                    options={[{ value: 'layers', label: '图层' }, { value: 'details', label: '详情' }]} />
-                  {instancePanel === 'layers' && <div id="instance-panel-layers" role="tabpanel"
-                    aria-labelledby="instance-tab-layers" className="instance-page-content">
-                    <div className="layer-stack" aria-label="图层顺序">
-                      <div><span className="layer-dot base" />主 DSH_HOME 配置快照</div>
-                      <div><span className="layer-dot draft" />{project === undefined
-                        ? '草稿预览未运行'
-                        : project.state === 'staged' ? '草稿已暂存，等待首次预览确认'
-                          : project.state === 'preview-pending' || confirming ? '修改已应用，等待预览确认'
-                            : '草稿图层已启用'}</div>
-                    </div>
-                    <p className="project-note">停止实例会保留工作树和隔离配置；不同草稿可以同时运行。</p>
-                  </div>}
-                  {instancePanel === 'details' && <dl id="instance-panel-details" role="tabpanel"
-                    aria-labelledby="instance-tab-details" className="instance-details">
-                    <div><dt>插件包</dt><dd><code>{selectedDraft.name}</code></dd></div>
-                    <div><dt>草稿标识</dt><dd><code>{selectedDraft.id}</code></dd></div>
-                    <div><dt>运行目录</dt><dd><code>{selectedDraft.runtimeHome}</code></dd></div>
-                    <div><dt>图谱版本</dt><dd><code>{project?.graphRev ?? '尚未生成'}</code></dd></div>
-                  </dl>}
+                aria-labelledby="left-sidebar-tab-plugins" className="left-sidebar-page plugin-management-placeholder">
+                <p>插件列表与排序控制将在这里显示。</p>
               </section>}
             </>}
         </div>

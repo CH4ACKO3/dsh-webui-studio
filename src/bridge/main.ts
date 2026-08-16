@@ -190,8 +190,8 @@ let shield: HTMLDivElement | undefined
 let locked = false
 let selectionRequest = 0
 let panPointer: number | undefined
-let panX = 0
-let panY = 0
+let panScreenX = 0
+let panScreenY = 0
 
 function showOverlay(element?: Element): void {
   candidate = element
@@ -265,8 +265,8 @@ function beginPan(event: PointerEvent): void {
   event.preventDefault()
   event.stopImmediatePropagation()
   panPointer = event.pointerId
-  panX = event.clientX
-  panY = event.clientY
+  panScreenX = event.screenX
+  panScreenY = event.screenY
   if (event.target instanceof Element) event.target.setPointerCapture(event.pointerId)
 }
 
@@ -274,10 +274,10 @@ function movePan(event: PointerEvent): void {
   if (event.pointerId !== panPointer) return
   event.preventDefault()
   event.stopImmediatePropagation()
-  const dx = event.clientX - panX
-  const dy = event.clientY - panY
-  panX = event.clientX
-  panY = event.clientY
+  const dx = event.screenX - panScreenX
+  const dy = event.screenY - panScreenY
+  panScreenX = event.screenX
+  panScreenY = event.screenY
   if (dx !== 0 || dy !== 0) post({ type: 'preview-pan', dx, dy })
 }
 
@@ -286,6 +286,12 @@ function endPan(event: PointerEvent): void {
   event.preventDefault()
   event.stopImmediatePropagation()
   panPointer = undefined
+}
+
+function suppressMiddleMouse(event: MouseEvent): void {
+  if (event.button !== 1) return
+  event.preventDefault()
+  event.stopImmediatePropagation()
 }
 
 function keydown(event: KeyboardEvent): void {
@@ -364,6 +370,8 @@ if (previewEnabled) {
   window.addEventListener('pointermove', movePan, true)
   window.addEventListener('pointerup', endPan, true)
   window.addEventListener('pointercancel', endPan, true)
+  window.addEventListener('mousedown', suppressMiddleMouse, true)
+  window.addEventListener('auxclick', suppressMiddleMouse, true)
 }
 
 window.addEventListener('beforeunload', () => {
@@ -372,6 +380,8 @@ window.addEventListener('beforeunload', () => {
   window.removeEventListener('pointermove', movePan, true)
   window.removeEventListener('pointerup', endPan, true)
   window.removeEventListener('pointercancel', endPan, true)
+  window.removeEventListener('mousedown', suppressMiddleMouse, true)
+  window.removeEventListener('auxclick', suppressMiddleMouse, true)
   port?.close()
   registry.dispose()
   if (studioGlobal[STUDIO_RUNTIME_KEY] === registry) delete studioGlobal[STUDIO_RUNTIME_KEY]
