@@ -336,7 +336,6 @@ button, input, textarea, select, iframe { border: 0; }
   padding: 0;
   color: var(--studio-terminal-secondary);
 }
-.host-terminal .terminal-layout-button > span { display: grid; place-items: center; line-height: 0; }
 .host-terminal .terminal-layout-button:not(:disabled):hover { background: color-mix(in srgb, var(--studio-terminal-text) 9%, transparent); }
 .host-terminal .terminal-layout-button svg { width: 14px; height: 14px; }
 .host-terminal pre {
