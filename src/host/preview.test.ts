@@ -1,3 +1,5 @@
+import { spawn, type ChildProcess } from 'node:child_process'
+import { once } from 'node:events'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,8 +9,12 @@ import type { StudioCommandRunner } from './drafts.js'
 import { StudioPreviewSupervisor } from './preview.js'
 
 const roots: string[] = []
+const children: ChildProcess[] = []
 
 afterEach(async () => {
+  for (const child of children.splice(0)) {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+  }
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 })
 
@@ -19,6 +25,7 @@ it('publishes profile installation progress and a failed runtime snapshot', asyn
   const draftRoot = join(root, 'draft')
   await Promise.all([mkdir(mainProfile, { recursive: true }), mkdir(draftRoot)])
   await writeFile(join(mainProfile, 'package.json'), JSON.stringify({ name: 'dsh-profile-web', private: true }))
+  await writeFile(join(draftRoot, 'package.json'), JSON.stringify({ name: 'draft-plugin', packageManager: 'npm@11' }))
   await writeFile(join(mainProfile, 'pnpm-workspace.yaml'), 'packages:\n  - .\n')
   const draft: StudioDraftRecord = {
     id: 'id', name: 'draft-plugin', label: 'Draft plugin', source: { kind: 'new', packageName: 'draft-plugin' },
@@ -51,4 +58,35 @@ it('publishes profile installation progress and a failed runtime snapshot', asyn
     error: 'Profile dependency installation failed. Check the startup terminal for details.',
     log: expect.stringContaining('Command exited with code 1'),
   })
+})
+
+it('forcefully reaps a Preview Host that ignores SIGTERM', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-studio-preview-stop-'))
+  roots.push(root)
+  const child = spawn(process.execPath, ['-e', `
+    process.on('SIGTERM', () => {})
+    process.stdout.write('ready\\n')
+    setInterval(() => {}, 1_000)
+  `], { stdio: ['ignore', 'pipe', 'ignore'] })
+  children.push(child)
+  await once(child.stdout!, 'data')
+  const draft: StudioDraftRecord = {
+    id: 'id', name: 'draft-plugin', label: 'Draft plugin', source: { kind: 'new', packageName: 'draft-plugin' },
+    repositoryDir: root, worktreeDir: root, root,
+    runtimeHome: join(root, 'runtime-home'), profileMode: 'main-home', createdAt: 'now',
+  }
+  const preview = new StudioPreviewSupervisor(
+    draft,
+    root,
+    'http://127.0.0.1:3081',
+    { async run() {} },
+    '/unused/dsh.js',
+    20,
+  )
+  const mutablePreview = preview as unknown as { child: ChildProcess }
+  mutablePreview.child = child
+
+  await expect(preview.stop()).resolves.toMatchObject({ state: 'stopped' })
+  expect(child.exitCode !== null || child.signalCode !== null).toBe(true)
+  if (process.platform !== 'win32') expect(child.signalCode).toBe('SIGKILL')
 })

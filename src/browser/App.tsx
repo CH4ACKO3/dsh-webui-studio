@@ -379,6 +379,7 @@ export function App(): JSX.Element {
   const previewModeRef = useRef(previewMode)
   const previewUpdateQueue = useRef<Promise<void>>(Promise.resolve())
   const selectionResolve = useRef(0)
+  const fileRequest = useRef(0)
   const activeDragCleanupRef = useRef<() => void>()
   const openDrafts = openDraftIds.flatMap(id => {
     const draft = drafts.find(candidate => candidate.id === id)
@@ -412,6 +413,20 @@ export function App(): JSX.Element {
     width: previewViewport.width * previewScale,
     height: previewViewport.height * previewScale,
   }
+
+  const activateDraft = (draftId: string | undefined): void => {
+    draftIdRef.current = draftId
+    fileRequest.current += 1
+    setFileBusy(false)
+    setFiles([])
+    setFilePath('')
+    setSource('')
+    setSavedSource('')
+    setInspection({ patches: [], targets: [] })
+    setReadiness({ findings: [] })
+    setSelectedDraftId(draftId)
+  }
+
   useEffect(() => {
     sessionRef.current = sessionId
   }, [sessionId])
@@ -481,10 +496,6 @@ export function App(): JSX.Element {
   }, [sessionId])
 
   useEffect(() => {
-    draftIdRef.current = selectedDraftId
-  }, [selectedDraftId])
-
-  useEffect(() => {
     projectRef.current = project
   }, [project])
 
@@ -549,7 +560,7 @@ export function App(): JSX.Element {
       const available = new Set(next.map(draft => draft.id))
       const open = (initialOpenDraftIds ?? next.map(draft => draft.id)).filter(id => available.has(id))
       setOpenDraftIds(open)
-      setSelectedDraftId(current => current !== undefined && open.includes(current) ? current : open[0])
+      activateDraft(selectedDraftId !== undefined && open.includes(selectedDraftId) ? selectedDraftId : open[0])
     }).catch(cause => setError(cause instanceof Error ? cause.message : String(cause)))
       .finally(() => setLoadingDrafts(false))
   }, [])
@@ -649,6 +660,11 @@ export function App(): JSX.Element {
   }
 
   const createDraft = async (): Promise<void> => {
+    if (hasUnsavedSource) {
+      setPanel('source')
+      setError('当前文件尚未保存。请先保存，再创建新的草稿。')
+      return
+    }
     setCreating(true)
     setError(undefined)
     try {
@@ -658,7 +674,7 @@ export function App(): JSX.Element {
       const next = await callStudio<StudioDraftView>('studio.drafts.create', { source, profileMode })
       updateDraft(next)
       setOpenDraftIds(current => current.includes(next.id) ? current : [...current, next.id])
-      setSelectedDraftId(next.id)
+      activateDraft(next.id)
       setProject(next.project)
       setShowCreate(false)
     } catch (cause) {
@@ -862,17 +878,28 @@ export function App(): JSX.Element {
 
   const openFile = async (path: string): Promise<void> => {
     if (path === '' || selectedDraftId === undefined) return
+    if (path === filePath) return
+    if (hasUnsavedSource) {
+      setPanel('source')
+      setError('当前文件尚未保存。请先保存，再打开其他文件。')
+      return
+    }
+    const draftId = selectedDraftId
+    const request = ++fileRequest.current
     setFileBusy(true)
     setError(undefined)
     try {
-      const file = await callStudio<{ path: string; content: string }>('studio.project.readFile', { draftId: selectedDraftId, path })
+      const file = await callStudio<{ path: string; content: string }>('studio.project.readFile', { draftId, path })
+      if (fileRequest.current !== request || draftIdRef.current !== draftId) return
       setFilePath(file.path)
       setSource(file.content)
       setSavedSource(file.content)
     } catch (cause) {
-      setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+      if (fileRequest.current === request && draftIdRef.current === draftId) {
+        setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+      }
     } finally {
-      setFileBusy(false)
+      if (fileRequest.current === request && draftIdRef.current === draftId) setFileBusy(false)
     }
   }
 
@@ -1012,7 +1039,7 @@ export function App(): JSX.Element {
       setError('当前文件尚未保存。请先按 Ctrl+S 或 Command+S 保存，再切换草稿。')
       return false
     }
-    setSelectedDraftId(draftId)
+    activateDraft(draftId)
     setSelection(undefined)
     setRegistry(EMPTY_REGISTRY)
     setFocusedElementId(undefined)
@@ -1035,7 +1062,7 @@ export function App(): JSX.Element {
     setOpenDraftIds(nextOpenDraftIds)
     if (draftId !== selectedDraftId) return
     const nextDraftId = nextOpenDraftIds[Math.min(index, nextOpenDraftIds.length - 1)]
-    setSelectedDraftId(nextDraftId)
+    activateDraft(nextDraftId)
     setSelection(undefined)
     setRegistry(EMPTY_REGISTRY)
     setFocusedElementId(undefined)

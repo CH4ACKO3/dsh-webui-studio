@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { StudioDraftRecord } from '../contracts.js'
-import { bundledPnpmCommand, materializeDraftProfile } from './runtime-profile.js'
+import { bundledPnpmCommand, installDraftDependencies, materializeDraftProfile } from './runtime-profile.js'
 
 const roots: string[] = []
 const exec = promisify(execFile)
@@ -57,4 +57,43 @@ it('runs the bundled pnpm without relying on the Host PATH', async () => {
   const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => name.toUpperCase() !== 'PATH'))
   const result = await exec(command, args, { env: { ...env, PATH: '' } })
   expect(result.stdout.trim()).toMatch(/^10\./)
+})
+
+it('installs Draft dependencies in the worktree with its declared package manager', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-studio-draft-dependencies-'))
+  roots.push(root)
+  await writeFile(join(root, 'package.json'), JSON.stringify({
+    name: 'draft-plugin',
+    packageManager: 'pnpm@10.34.5',
+    dependencies: { react: '^18.3.1' },
+  }))
+  const draft: StudioDraftRecord = {
+    id: 'id', name: 'draft-plugin', label: 'Draft plugin', source: { kind: 'new', packageName: 'draft-plugin' },
+    repositoryDir: root, worktreeDir: root, root,
+    runtimeHome: join(root, 'runtime-home'), profileMode: 'main-home', createdAt: 'now',
+  }
+  const run = vi.fn(async () => {})
+  const output = vi.fn()
+
+  await installDraftDependencies(draft, { run }, output)
+
+  const [command, args] = bundledPnpmCommand(['install'])
+  expect(run).toHaveBeenCalledWith(command, args, root, output)
+  expect(output).toHaveBeenCalledWith(expect.stringContaining(`${root}\n$ `))
+})
+
+it('skips a Draft install when its manifest has no dependencies', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-studio-draft-dependencies-'))
+  roots.push(root)
+  await writeFile(join(root, 'package.json'), JSON.stringify({ name: 'draft-plugin', packageManager: 'npm@11' }))
+  const draft: StudioDraftRecord = {
+    id: 'id', name: 'draft-plugin', label: 'Draft plugin', source: { kind: 'new', packageName: 'draft-plugin' },
+    repositoryDir: root, worktreeDir: root, root,
+    runtimeHome: join(root, 'runtime-home'), profileMode: 'main-home', createdAt: 'now',
+  }
+  const run = vi.fn(async () => {})
+
+  await installDraftDependencies(draft, { run })
+
+  expect(run).not.toHaveBeenCalled()
 })

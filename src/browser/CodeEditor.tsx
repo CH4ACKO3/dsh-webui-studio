@@ -12,6 +12,9 @@ interface CodeEditorProps {
 
 export function CodeEditor({ path, value, onChange }: CodeEditorProps): JSX.Element {
   const parent = useRef<HTMLDivElement>(null)
+  const editor = useRef<EditorView>()
+  const onChangeRef = useRef(onChange)
+  onChangeRef.current = onChange
 
   useEffect(() => {
     if (parent.current === null) return
@@ -25,7 +28,7 @@ export function CodeEditor({ path, value, onChange }: CodeEditorProps): JSX.Elem
           ...(code ? [javascript({ jsx: /x$/.test(path), typescript: /tsx?$/.test(path) })] : []),
           EditorView.lineWrapping,
           EditorView.updateListener.of(update => {
-            if (update.docChanged) onChange(update.state.doc.toString())
+            if (update.docChanged) onChangeRef.current(update.state.doc.toString())
           }),
           EditorView.theme({
             '&': { height: '100%', backgroundColor: 'transparent' },
@@ -35,8 +38,18 @@ export function CodeEditor({ path, value, onChange }: CodeEditorProps): JSX.Elem
         ],
       }),
     })
-    return () => view.destroy()
+    editor.current = view
+    return () => {
+      if (editor.current === view) editor.current = undefined
+      view.destroy()
+    }
   }, [path])
+
+  useEffect(() => {
+    const view = editor.current
+    if (view === undefined || view.state.doc.toString() === value) return
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value } })
+  }, [value])
 
   return <div className="code-editor" ref={parent} />
 }

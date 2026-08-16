@@ -10,7 +10,7 @@ import type {
 } from '../contracts.js'
 import { STUDIO_PREVIEW_API_PATH } from '../contracts.js'
 import type { StudioCommandRunner } from './drafts.js'
-import { materializeDraftProfile, terminalCommandLine } from './runtime-profile.js'
+import { installDraftDependencies, materializeDraftProfile, terminalCommandLine } from './runtime-profile.js'
 
 const START_TIMEOUT_MS = 30_000
 const LOG_LIMIT = 64_000
@@ -35,6 +35,21 @@ function studioPackageRoot(): string {
   return fileURLToPath(new URL('../../', import.meta.url))
 }
 
+function waitForExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true)
+  return new Promise(resolve => {
+    const exited = (): void => {
+      clearTimeout(timeout)
+      resolve(true)
+    }
+    const timeout = setTimeout(() => {
+      child.removeListener('exit', exited)
+      resolve(false)
+    }, timeoutMs)
+    child.once('exit', exited)
+  })
+}
+
 export class StudioPreviewSupervisor {
   private child?: ChildProcess
   private controlToken?: string
@@ -46,6 +61,7 @@ export class StudioPreviewSupervisor {
     private readonly parentOrigin: string,
     private readonly commands: StudioCommandRunner,
     private readonly harmonyBinEntry: string,
+    private readonly stopTimeoutMs = 5_000,
   ) {}
 
   snapshot(): StudioPreviewRuntime {
@@ -54,8 +70,13 @@ export class StudioPreviewSupervisor {
 
   async start(): Promise<StudioPreviewRuntime> {
     if (this.runtime.state === 'running' || this.runtime.state === 'starting') return this.snapshot()
-    this.runtime = { state: 'starting', log: '[studio] Preparing isolated profile\n' }
+    this.runtime = { state: 'starting', log: '[studio] Preparing Draft dependencies and isolated profile\n' }
     try {
+      await installDraftDependencies(
+        this.draft,
+        this.commands,
+        chunk => { this.runtime.log = appendLog(this.runtime.log, chunk) },
+      )
       await materializeDraftProfile(
         this.draft,
         this.mainProfileDir,
@@ -118,16 +139,20 @@ export class StudioPreviewSupervisor {
 
   async stop(): Promise<StudioPreviewRuntime> {
     const child = this.child
-    this.child = undefined
     this.controlToken = undefined
+    this.runtime = { state: 'stopped', log: this.runtime.log }
     if (child !== undefined && child.exitCode === null) {
       child.kill('SIGTERM')
-      await new Promise<void>(resolve => {
-        const timeout = setTimeout(() => resolve(), 5_000)
-        child.once('exit', () => { clearTimeout(timeout); resolve() })
-      })
+      if (!await waitForExit(child, this.stopTimeoutMs)) {
+        child.kill('SIGKILL')
+        if (!await waitForExit(child, this.stopTimeoutMs)) {
+          const error = 'Preview Host did not exit after SIGTERM and SIGKILL'
+          this.runtime = { state: 'failed', error, log: this.runtime.log }
+          throw new Error(error)
+        }
+      }
     }
-    this.runtime = { state: 'stopped', log: this.runtime.log }
+    if (this.child === child) this.child = undefined
     return this.snapshot()
   }
 

@@ -5,7 +5,7 @@ import type { SubprocessHandle, SubprocessRuntime } from '@deepseek-ai/dsh-subpr
 const BUILD_TIMEOUT_MS = 120_000
 const OUTPUT_LIMIT_BYTES = 256 * 1024
 
-type PackageManager = 'npm' | 'pnpm' | 'yarn' | 'bun'
+export type PackageManager = 'npm' | 'pnpm' | 'yarn' | 'bun'
 
 export interface StudioBuildOutput {
   argv: string[]
@@ -32,7 +32,7 @@ interface ActiveBuild {
   handle?: SubprocessHandle
 }
 
-function packageManager(root: string, manifest: { packageManager?: unknown }): PackageManager {
+export function resolvePackageManager(root: string, manifest: { packageManager?: unknown }): PackageManager {
   if (manifest.packageManager !== undefined) {
     if (typeof manifest.packageManager !== 'string') {
       throw new StudioBuildError('studio-build-config', 'Draft packageManager must be a string')
@@ -66,7 +66,7 @@ export function resolveBuildArgv(root: string): string[] {
   if (typeof manifest.scripts?.build !== 'string' || manifest.scripts.build.trim() === '') {
     throw new StudioBuildError('studio-build-config', 'Draft must define a non-empty scripts.build')
   }
-  return [packageManager(root, manifest), 'run', 'build']
+  return [resolvePackageManager(root, manifest), 'run', 'build']
 }
 
 function outputOf(handle: SubprocessHandle, argv: string[]): StudioBuildOutput {

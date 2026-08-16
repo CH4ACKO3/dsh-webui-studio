@@ -2,6 +2,7 @@ import { createRequire } from 'node:module'
 import { access, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import type { StudioDraftRecord } from '../contracts.js'
+import { resolvePackageManager } from './build.js'
 import type { StudioCommandRunner } from './drafts.js'
 
 const PROFILE_FILES = ['cordis.patch.yml', 'cordis.yml', 'harmony.json', 'pnpm-workspace.yaml'] as const
@@ -15,6 +16,14 @@ interface ProfileManifest {
   [key: string]: unknown
 }
 
+interface DraftManifest {
+  packageManager?: unknown
+  dependencies?: Record<string, unknown>
+  devDependencies?: Record<string, unknown>
+  optionalDependencies?: Record<string, unknown>
+  peerDependencies?: Record<string, unknown>
+}
+
 export function bundledPnpmCommand(args: readonly string[]): [string, string[]] {
   return [process.execPath, [PNPM_ENTRY, ...args]]
 }
@@ -25,6 +34,30 @@ function terminalToken(value: string): string {
 
 export function terminalCommandLine(cwd: string, command: string, args: readonly string[]): string {
   return `${cwd}\n$ ${[command, ...args].map(terminalToken).join(' ')}\n`
+}
+
+function hasDependencies(manifest: DraftManifest): boolean {
+  return [manifest.dependencies, manifest.devDependencies, manifest.optionalDependencies, manifest.peerDependencies]
+    .some(dependencies => dependencies !== undefined && Object.keys(dependencies).length > 0)
+}
+
+export async function installDraftDependencies(
+  draft: StudioDraftRecord,
+  commands: StudioCommandRunner,
+  onOutput?: (chunk: string) => void,
+): Promise<void> {
+  const manifest = JSON.parse(await readFile(join(draft.root, 'package.json'), 'utf8')) as DraftManifest
+  if (!hasDependencies(manifest)) return
+  const manager = resolvePackageManager(draft.root, manifest)
+  const [command, args] = manager === 'pnpm' ? bundledPnpmCommand(['install']) : [manager, ['install']]
+  onOutput?.(terminalCommandLine(draft.root, command, args))
+  try {
+    await commands.run(command, args, draft.root, onOutput)
+  } catch (error) {
+    const message = (error instanceof Error ? error.message : String(error)).split('\n', 1)[0]
+    onOutput?.(`[studio] ${message}\n`)
+    throw new Error('Draft dependency installation failed. Check the startup terminal for details.')
+  }
 }
 
 function absoluteLink(spec: string, profileDir: string): string {

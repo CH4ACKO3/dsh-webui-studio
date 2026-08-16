@@ -20,7 +20,16 @@ const harmonyBin = process.env.DSH_HARMONY_BIN_ENTRY ?? fileURLToPath(import.met
 const root = mkdtempSync(join(tmpdir(), 'dsh-harmony-studio-'))
 const home = join(root, 'home')
 const draftRoot = join(root, 'draft-plugin')
+const draftDependencyRoot = join(root, 'draft-dependency')
 mkdirSync(draftRoot)
+mkdirSync(draftDependencyRoot)
+writeFileSync(join(draftDependencyRoot, 'package.json'), JSON.stringify({
+  name: 'studio-build-helper',
+  version: '0.0.0',
+  type: 'module',
+  exports: './index.js',
+}))
+writeFileSync(join(draftDependencyRoot, 'index.js'), 'export const marker = "installed Draft dependency"\n')
 writeFileSync(join(draftRoot, 'package.json'), JSON.stringify({
   name: 'studio-draft',
   version: '0.0.0',
@@ -29,14 +38,18 @@ writeFileSync(join(draftRoot, 'package.json'), JSON.stringify({
   main: './index.js',
   exports: { '.': './index.js', './client': './client.js', './package.json': './package.json' },
   scripts: { build: 'node build.mjs' },
+  dependencies: { 'studio-build-helper': `file:${draftDependencyRoot}` },
   dsh: { client: { platform: 'web', immediately: true } },
 }))
-writeFileSync(join(draftRoot, 'index.js'), 'export function apply() {}\n')
+const draftIndexSource = 'import { marker } from "studio-build-helper"\nexport function apply() { return marker }\n'
+writeFileSync(join(draftRoot, 'index.js'), draftIndexSource)
 writeFileSync(join(draftRoot, 'client.js'), `
 window.__ModuleLoader__.load({ id: 'studio-draft', factory: () => ({}) })
 `)
 writeFileSync(join(draftRoot, 'build.mjs'), `
 import { writeFileSync } from 'node:fs'
+import { marker } from 'studio-build-helper'
+if (marker !== 'installed Draft dependency') throw new Error('Draft dependency was not installed')
 writeFileSync(new URL('./client.js', import.meta.url), \`
 window.__ModuleLoader__.load({ id: 'studio-draft', factory: () => ({ build: 1 }) })
 \`)
@@ -175,11 +188,11 @@ try {
   const files = await call<StudioProjectFile[]>('studio.project.files', scoped)
   assert.ok(files.some(file => file.path === 'index.js'))
   const source = await call<{ content: string }>('studio.project.readFile', { ...scoped, path: 'index.js' })
-  assert.equal(source.content, 'export function apply() {}\n')
+  assert.equal(source.content, draftIndexSource)
   await call('studio.project.writeFile', { ...scoped, path: 'index.js', content: 'export function apply() { return "studio" }\n' })
   const saved = await call<{ content: string }>('studio.project.readFile', { ...scoped, path: 'index.js' })
   assert.equal(saved.content, 'export function apply() { return "studio" }\n')
-  assert.equal(readFileSync(join(draftRoot, 'index.js'), 'utf8'), 'export function apply() {}\n')
+  assert.equal(readFileSync(join(draftRoot, 'index.js'), 'utf8'), draftIndexSource)
 
   const active = await call<StudioProjectState>('studio.project.activate', { ...scoped, graphRev: previewGraphRev })
   assert.equal(active.state, 'active')
