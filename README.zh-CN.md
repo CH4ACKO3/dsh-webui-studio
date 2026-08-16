@@ -42,7 +42,7 @@ Patch engine 与 Draft API，并使用
 
 ## 你可以做什么
 
-- [x] 创建最小 DSH Web Client 插件，或打开现有 Git 仓库
+- [x] 创建最小 DSH Web Client 插件，或导入已有的本地插件文件夹
 - [x] 为每个 Draft 分配独立 Git worktree、`DSH_HOME`、profile、依赖树和 child Host
 - [x] 预览官方 WebUI，同时不把 Draft 代码加载进稳定 Host
 - [x] 正常浏览，或检查 DOM、React owner、源码候选和 Patch trace
@@ -85,6 +85,16 @@ studio/
 ├── worktrees/<draft-id>/
 └── runtimes/<draft-id>/dsh-home/profiles/web/
 ```
+
+创建新插件时，Studio 会初始化并提交一个最小 DSH Web Client package。导入已有插件时，
+Studio 只接受本机绝对文件夹路径；验证 Web Client manifest 后，它会跳过 `.git` 与
+`node_modules`，将快照复制到 Studio 自有 Git repository。符号链接会被拒绝，原插件
+文件夹始终保持只读且不会被修改。
+
+Draft 显示名与 npm package identity 相互独立，可在实例面板中重命名。打开的 Draft
+标签会保存在本地；关闭标签只会将其移出当前工作区，不会停止或删除 Draft。所有持久化
+Draft 都可以从插件管理页重新打开。Source 存在未保存修改时，必须先按 `Ctrl+S` 或
+`Command+S` 保存，才能切换或关闭标签。
 
 ## 快速开始
 

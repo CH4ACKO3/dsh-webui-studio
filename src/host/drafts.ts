@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises'
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { chmod, copyFile, lstat, mkdir, readFile, readdir, realpath, rename, writeFile } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join } from 'node:path'
 import type { StudioCreateDraftInput, StudioDraftRecord } from '../contracts.js'
 
 const PACKAGE_NAME = /^(?:@[a-z0-9._~-]+\/)?[a-z0-9._~-]+$/
@@ -32,11 +32,6 @@ export const studioCommands: StudioCommandRunner = {
   },
 }
 
-function inside(root: string, path: string): boolean {
-  const child = relative(root, path)
-  return child === '' || (!child.startsWith(`..${sep}`) && child !== '..' && !isAbsolute(child))
-}
-
 function templateManifest(name: string): string {
   return `${JSON.stringify({
     name,
@@ -60,6 +55,53 @@ function templateClient(name: string): string {
 `
 }
 
+interface PluginManifest {
+  name?: unknown
+  exports?: unknown
+  scripts?: { build?: unknown }
+  dsh?: { client?: { platform?: unknown } }
+}
+
+async function pluginManifest(root: string): Promise<PluginManifest & { name: string }> {
+  let manifest: PluginManifest
+  try {
+    manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8')) as PluginManifest
+  } catch (error) {
+    throw new Error(`Plugin folder must contain a readable package.json: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  if (typeof manifest.name !== 'string' || !PACKAGE_NAME.test(manifest.name)) {
+    throw new Error('Plugin package.json must declare a valid npm package name')
+  }
+  if (manifest.dsh?.client?.platform !== 'web') {
+    throw new Error('Plugin package.json must declare dsh.client.platform as "web"')
+  }
+  if (typeof manifest.exports !== 'object' || manifest.exports === null
+    || !Object.hasOwn(manifest.exports, '.') || !Object.hasOwn(manifest.exports, './client')) {
+    throw new Error('Plugin package.json exports must include "." and "./client"')
+  }
+  if (typeof manifest.scripts?.build !== 'string' || manifest.scripts.build.trim() === '') {
+    throw new Error('Plugin package.json must declare a non-empty scripts.build')
+  }
+  return manifest as PluginManifest & { name: string }
+}
+
+async function copyPluginDirectory(source: string, target: string): Promise<void> {
+  const info = await lstat(source)
+  if (info.isSymbolicLink()) throw new Error(`Plugin snapshot does not include symbolic links: ${source}`)
+  if (info.isDirectory()) {
+    await mkdir(target, { mode: info.mode, recursive: true })
+    const entries = await readdir(source, { withFileTypes: true })
+    for (const entry of entries) {
+      if (entry.name === '.git' || entry.name === 'node_modules') continue
+      await copyPluginDirectory(join(source, entry.name), join(target, entry.name))
+    }
+    return
+  }
+  if (!info.isFile()) throw new Error(`Plugin snapshot only supports regular files and directories: ${source}`)
+  await copyFile(source, target)
+  await chmod(target, info.mode)
+}
+
 async function initializeRepository(root: string, name: string, commands: StudioCommandRunner): Promise<void> {
   await mkdir(join(root, 'lib'), { recursive: true })
   await writeFile(join(root, 'package.json'), templateManifest(name))
@@ -71,10 +113,12 @@ async function initializeRepository(root: string, name: string, commands: Studio
   await commands.run('git', ['-c', 'user.name=dsh-webui-studio', '-c', 'user.email=studio@localhost', 'commit', '-m', 'Initial Draft'], root)
 }
 
-async function packageName(root: string): Promise<string> {
-  const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8')) as { name?: unknown }
-  if (typeof manifest.name !== 'string' || manifest.name === '') throw new Error('Draft package.json must declare a name')
-  return manifest.name
+function nextNewPluginLabel(records: readonly StudioDraftRecord[]): string {
+  const labels = new Set(records.map(record => record.label))
+  for (let index = records.filter(record => record.source.kind === 'new').length + 1; ; index += 1) {
+    const label = `新插件_${index}`
+    if (!labels.has(label)) return label
+  }
 }
 
 export class StudioDraftRegistry {
@@ -119,32 +163,50 @@ export class StudioDraftRegistry {
       mkdir(dirname(runtimeHome), { recursive: true }),
     ])
 
-    let packagePath = ''
+    let name: string
+    let label: string
+    let source: StudioCreateDraftInput['source']
     if (input.source.kind === 'new') {
-      if (!PACKAGE_NAME.test(input.source.packageName)) throw new Error('New Draft package name is invalid')
+      const packageName = input.source.packageName
+      if (typeof packageName !== 'string' || !PACKAGE_NAME.test(packageName)) throw new Error('New Draft package name is invalid')
+      name = packageName
+      label = nextNewPluginLabel(await this.list())
+      source = { kind: 'new', packageName }
       await mkdir(repositoryDir)
-      await initializeRepository(repositoryDir, input.source.packageName, this.commands)
+      await initializeRepository(repositoryDir, packageName, this.commands)
       await this.commands.run('git', ['worktree', 'add', '-b', `dsh-studio/${id}`, worktreeDir, 'HEAD'], repositoryDir)
     } else {
-      if (input.source.repository.trim() === '') throw new Error('Existing Draft repository is required')
-      await this.commands.run('git', ['clone', '--no-checkout', '--', input.source.repository, repositoryDir])
+      if (typeof input.source.directory !== 'string' || input.source.directory.trim() === '') {
+        throw new Error('Existing plugin folder is required')
+      }
+      const directory = input.source.directory.trim()
+      if (!isAbsolute(directory)) throw new Error('Existing plugin folder must be an absolute path')
+      const canonicalSource = await realpath(directory)
+      if (!(await lstat(canonicalSource)).isDirectory()) throw new Error('Existing plugin path must be a directory')
+      const manifest = await pluginManifest(canonicalSource)
+      name = manifest.name
+      label = basename(canonicalSource)
+      source = { kind: 'existing', directory: canonicalSource }
+      await mkdir(repositoryDir)
+      await copyPluginDirectory(canonicalSource, repositoryDir)
+      await this.commands.run('git', ['init', '--initial-branch=main'], repositoryDir)
+      await this.commands.run('git', ['add', '.'], repositoryDir)
       await this.commands.run('git', [
-        'worktree', 'add', '-b', `dsh-studio/${id}`, worktreeDir, input.source.ref?.trim() || 'HEAD',
+        '-c', 'user.name=dsh-webui-studio', '-c', 'user.email=studio@localhost',
+        'commit', '-m', 'Import plugin snapshot',
       ], repositoryDir)
-      packagePath = input.source.packagePath?.trim() ?? ''
+      await this.commands.run('git', ['worktree', 'add', '-b', `dsh-studio/${id}`, worktreeDir, 'HEAD'], repositoryDir)
     }
 
     const canonicalWorktree = await realpath(worktreeDir)
-    const root = await realpath(resolve(canonicalWorktree, packagePath))
-    if (!inside(canonicalWorktree, root)) throw new Error('Draft package path escapes its worktree')
-    const name = await packageName(root)
+    const root = canonicalWorktree
     const record: StudioDraftRecord = {
       id,
       name,
-      source: input.source,
+      label,
+      source,
       repositoryDir: await realpath(repositoryDir),
       worktreeDir: canonicalWorktree,
-      packagePath,
       root,
       runtimeHome,
       profileMode: input.profileMode,
@@ -152,6 +214,18 @@ export class StudioDraftRegistry {
     }
     await writeFile(join(this.recordsDir, `${id}.json`), `${JSON.stringify(record, null, 2)}\n`, { flag: 'wx' })
     return record
+  }
+
+  async rename(id: string, label: string): Promise<StudioDraftRecord> {
+    const nextLabel = label.trim()
+    if (nextLabel === '' || nextLabel.length > 120) throw new Error('Draft name must contain 1 to 120 characters')
+    const record = await this.get(id)
+    const next = { ...record, label: nextLabel }
+    const file = join(this.recordsDir, `${id}.json`)
+    const temporary = join(this.recordsDir, `.${id}.${randomUUID()}.tmp`)
+    await writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, { flag: 'wx' })
+    await rename(temporary, file)
+    return next
   }
 }
 

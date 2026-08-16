@@ -45,7 +45,7 @@ not depend on Studio.
 
 ## What you can do
 
-- [x] Create a minimal DSH Web Client plugin or open an existing Git repository
+- [x] Create a minimal DSH Web Client plugin or import an existing local plugin folder
 - [x] Give every Draft its own Git worktree, `DSH_HOME`, profile, dependencies, and child Host
 - [x] Preview the official WebUI without loading Draft code into the stable Host
 - [x] Browse normally or inspect DOM, React owners, source candidates, and Patch traces
@@ -89,6 +89,18 @@ studio/
 ├── worktrees/<draft-id>/
 └── runtimes/<draft-id>/dsh-home/profiles/web/
 ```
+
+Creating a new plugin initializes and commits a minimal DSH Web Client package.
+Importing an existing plugin accepts an absolute local folder after validating
+its Web Client manifest, then copies an isolated snapshot without `.git` or
+`node_modules` into a Studio-owned Git repository. Symbolic links are rejected,
+and the original folder is never modified.
+
+Draft display names are independent from npm package identities and can be
+renamed in the instance panel. Open Draft tabs persist locally; closing a tab
+only removes it from the current workspace and never stops or deletes the
+Draft. Plugin Management can reopen any persisted Draft. Unsaved Source changes
+must be saved with `Ctrl+S` or `Command+S` before switching or closing tabs.
 
 ## Getting started
 

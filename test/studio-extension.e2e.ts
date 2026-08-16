@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -42,15 +42,6 @@ window.__ModuleLoader__.load({ id: 'studio-draft', factory: () => ({ build: 1 })
 \`)
 console.log('studio draft built')
 `)
-for (const args of [
-  ['init', '--initial-branch=main'],
-  ['add', '.'],
-  ['-c', 'user.name=dsh-webui-studio', '-c', 'user.email=studio@localhost', 'commit', '-m', 'Initial fixture'],
-]) {
-  const result = spawnSync('git', args, { cwd: draftRoot, encoding: 'utf8' })
-  assert.equal(result.status, 0, result.stderr || result.stdout)
-}
-
 const env = { ...process.env, DSH_HOME: home }
 const add = (packageDir: string) => spawnSync(process.execPath, [
   harmonyBin, 'plugin', '--profile', 'web', 'add', `link:${packageDir}`,
@@ -134,11 +125,15 @@ try {
   }
 
   const created = await call<StudioDraftView>('studio.drafts.create', {
-    source: { kind: 'existing', repository: draftRoot },
+    source: { kind: 'existing', directory: draftRoot },
     profileMode: 'main-home',
   })
   assert.notEqual(created.root, draftRoot)
+  assert.equal(created.label, 'draft-plugin')
   assert.match(created.worktreeDir, /studio\/worktrees/)
+  const renamed = await call<StudioDraftView>('studio.drafts.rename', { draftId: created.id, label: 'Toolbar experiment' })
+  assert.equal(renamed.label, 'Toolbar experiment')
+  assert.equal(renamed.name, 'studio-draft')
   const started = await call<StudioDraftView>('studio.drafts.start', { draftId: created.id })
   const opened = started.project
   assert.ok(opened)
@@ -154,7 +149,7 @@ try {
   const previewOrigin = new URL(previewUrl).origin
   assert.notEqual(previewOrigin, origin)
   const secondCreated = await call<StudioDraftView>('studio.drafts.create', {
-    source: { kind: 'existing', repository: draftRoot },
+    source: { kind: 'existing', directory: draftRoot },
     profileMode: 'main-home',
   })
   const secondStarted = await call<StudioDraftView>('studio.drafts.start', { draftId: secondCreated.id })
@@ -184,6 +179,7 @@ try {
   await call('studio.project.writeFile', { ...scoped, path: 'index.js', content: 'export function apply() { return "studio" }\n' })
   const saved = await call<{ content: string }>('studio.project.readFile', { ...scoped, path: 'index.js' })
   assert.equal(saved.content, 'export function apply() { return "studio" }\n')
+  assert.equal(readFileSync(join(draftRoot, 'index.js'), 'utf8'), 'export function apply() {}\n')
 
   const active = await call<StudioProjectState>('studio.project.activate', { ...scoped, graphRev: previewGraphRev })
   assert.equal(active.state, 'active')

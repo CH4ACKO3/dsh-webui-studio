@@ -158,15 +158,15 @@ export type StudioDraftProfileMode = 'main-home' | 'custom'
 
 export type StudioDraftSource =
   | { kind: 'new'; packageName: string }
-  | { kind: 'existing'; repository: string; ref?: string; packagePath?: string }
+  | { kind: 'existing'; directory: string }
 
 export interface StudioDraftRecord {
   id: string
   name: string
+  label: string
   source: StudioDraftSource
   repositoryDir: string
   worktreeDir: string
-  packagePath: string
   root: string
   runtimeHome: string
   profileMode: StudioDraftProfileMode

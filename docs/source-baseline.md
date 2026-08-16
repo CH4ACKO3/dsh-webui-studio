@@ -44,3 +44,12 @@ exactly, and both 128x128 Harmony PNG assets were copied byte-for-byte. This
 checkpoint includes the DeepSeek WebUI Studio name, Plugin client workspace
 subtitle, theme-aware icon, packaged asset routes, document title, and plugin
 display name.
+
+The Draft lifecycle sync completed at `2026-08-16T09:46:07Z`, with the source
+still at `baf97bc9048dc9c9a10449274ffe28d286ecb32d` and its Studio `src` tree at
+SHA-256 `e5cd03aec006b9c7dc8398fd5359940ec96c8d6a5337330c2dc451ebf40f41d3`.
+All source files match that live tree except the independent repository's
+intentional public `STUDIO_PATH` of `/studio`. This checkpoint adds isolated
+local-folder snapshots, persistent Draft labels, rename RPC, closeable and
+restorable Draft tabs, unsaved-source guards, and Draft-scoped concurrent
+runtime operations. The Harmony source worktree remained read-only.

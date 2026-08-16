@@ -84,7 +84,7 @@ const RIGHT_SIDEBAR_MAX = 560
 const PREVIEW_GUTTER = 32
 const PREVIEW_MIN_SIZE = { width: 1, height: 1 }
 const TERMINAL_MIN_SIZE = { width: 280, height: 220 }
-const DRAFT_LABELS_KEY = 'dsh-webui-studio:draft-labels'
+const OPEN_DRAFTS_KEY = 'dsh-webui-studio:open-drafts'
 const resizeDirections: readonly ResizeDirection[] = ['n', 'e', 's', 'w', 'ne', 'se', 'sw', 'nw']
 
 const EMPTY_REGISTRY: StudioRegistrySnapshot = { elements: [], variables: [] }
@@ -123,6 +123,10 @@ function StopIcon(): JSX.Element {
   return <svg aria-hidden="true" viewBox="0 0 20 20"><rect x="6" y="6" width="8" height="8" rx="1" /></svg>
 }
 
+function CloseIcon(): JSX.Element {
+  return <svg aria-hidden="true" viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8" /></svg>
+}
+
 function ResizeHandles({
   kind,
   onPointerDown,
@@ -154,13 +158,20 @@ function previewBounds(width: number, height: number): LayoutRect {
   }
 }
 
-function pathName(path: string): string {
-  return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path
+function storedOpenDraftIds(): string[] | undefined {
+  const stored = localStorage.getItem(OPEN_DRAFTS_KEY)
+  if (stored === null) return undefined
+  try {
+    const value = JSON.parse(stored) as unknown
+    return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : undefined
+  } catch {
+    return undefined
+  }
 }
 
-function storedDraftLabels(): Record<string, string> {
-  const stored = localStorage.getItem(DRAFT_LABELS_KEY)
-  return stored === null ? {} : JSON.parse(stored) as Record<string, string>
+function runtimeLabel(state: StudioDraftView['runtime']['state']): string {
+  return state === 'running' ? '实例运行中' : state === 'starting' ? '实例启动中'
+    : state === 'failed' ? '实例启动失败' : '实例已停止'
 }
 
 function deviceViewport(): { width: number; height: number } {
@@ -298,15 +309,15 @@ function eventSessionId(envelope: StudioServerRequest<Record<string, unknown>>):
 
 export function App(): JSX.Element {
   const initialViewport = useMemo(deviceViewport, [])
+  const initialOpenDraftIds = useMemo(storedOpenDraftIds, [])
   const [drafts, setDrafts] = useState<StudioDraftView[]>([])
+  const [openDraftIds, setOpenDraftIds] = useState<string[]>(initialOpenDraftIds ?? [])
   const [loadingDrafts, setLoadingDrafts] = useState(true)
   const [selectedDraftId, setSelectedDraftId] = useState<string>()
   const [showCreate, setShowCreate] = useState(false)
   const [sourceKind, setSourceKind] = useState<StudioDraftSource['kind']>('new')
   const [packageName, setPackageName] = useState('dsh-webui-draft')
-  const [repository, setRepository] = useState('')
-  const [repositoryRef, setRepositoryRef] = useState('')
-  const [packagePath, setPackagePath] = useState('')
+  const [pluginDirectory, setPluginDirectory] = useState('')
   const [profileMode, setProfileMode] = useState<'main-home' | 'custom'>('main-home')
   const [project, setProject] = useState<StudioProjectState>()
   const [sessionId, setSessionId] = useState<string>()
@@ -316,7 +327,7 @@ export function App(): JSX.Element {
   const [running, setRunning] = useState(false)
   const [connected, setConnected] = useState(false)
   const [creating, setCreating] = useState(false)
-  const [starting, setStarting] = useState(false)
+  const [instanceOperations, setInstanceOperations] = useState<Record<string, 'start' | 'stop'>>({})
   const [confirming, setConfirming] = useState(false)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string>()
@@ -329,7 +340,7 @@ export function App(): JSX.Element {
   const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(false)
   const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(false)
   const [leftPanel, setLeftPanel] = useState<LeftPanel>('instance')
-  const [draftLabels, setDraftLabels] = useState<Record<string, string>>(storedDraftLabels)
+  const [draftLabelInput, setDraftLabelInput] = useState('')
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(260)
   const [rightSidebarWidth, setRightSidebarWidth] = useState(400)
   const [previewStageSize, setPreviewStageSize] = useState({ width: 0, height: 0 })
@@ -369,12 +380,17 @@ export function App(): JSX.Element {
   const previewUpdateQueue = useRef<Promise<void>>(Promise.resolve())
   const selectionResolve = useRef(0)
   const activeDragCleanupRef = useRef<() => void>()
+  const openDrafts = openDraftIds.flatMap(id => {
+    const draft = drafts.find(candidate => candidate.id === id)
+    return draft === undefined ? [] : [draft]
+  })
   const selectedDraft = drafts.find(draft => draft.id === selectedDraftId)
-  const draftLabel = (draft: StudioDraftView): string => draftLabels[draft.id] ?? pathName(draft.worktreeDir)
+  const hasUnsavedSource = filePath !== '' && source !== savedSource
+  const selectedInstanceOperation = selectedDraftId === undefined ? undefined : instanceOperations[selectedDraftId]
   const terminalOutput = selectedDraft?.runtime.log ?? ''
   const terminalLatestLine = terminalOutput.trimEnd().split(/\r?\n/).at(-1) ?? '[studio] 实例尚未启动。'
-  const terminalRuntimeState = starting ? 'starting' : selectedDraft?.runtime.state
-  const terminalRuntimeLabel = terminalRuntimeState === 'starting' ? '执行中'
+  const terminalRuntimeState = selectedInstanceOperation === 'start' ? 'starting' : selectedDraft?.runtime.state
+  const terminalRuntimeLabel = selectedInstanceOperation === 'stop' ? '终止中' : terminalRuntimeState === 'starting' ? '执行中'
     : terminalRuntimeState === 'running' ? '运行中'
       : terminalRuntimeState === 'failed' ? '失败' : undefined
   const hasLiveDraft = drafts.some(draft => draft.runtime.state === 'starting' || draft.runtime.state === 'running')
@@ -400,12 +416,11 @@ export function App(): JSX.Element {
     sessionRef.current = sessionId
   }, [sessionId])
 
-  useEffect(() => {
-    localStorage.setItem(DRAFT_LABELS_KEY, JSON.stringify(draftLabels))
-  }, [draftLabels])
+  useEffect(() => localStorage.setItem(OPEN_DRAFTS_KEY, JSON.stringify(openDraftIds)), [openDraftIds])
 
   useEffect(() => {
     setProject(selectedDraft?.project)
+    setDraftLabelInput(selectedDraft?.label ?? '')
     terminalPinnedRef.current = true
     setSessionId(selectedDraft?.agent?.sessionId)
     setEvents([])
@@ -531,7 +546,10 @@ export function App(): JSX.Element {
   useEffect(() => {
     void callStudio<StudioDraftView[]>('studio.drafts.list', {}).then(next => {
       setDrafts(next)
-      setSelectedDraftId(current => current ?? next[0]?.id)
+      const available = new Set(next.map(draft => draft.id))
+      const open = (initialOpenDraftIds ?? next.map(draft => draft.id)).filter(id => available.has(id))
+      setOpenDraftIds(open)
+      setSelectedDraftId(current => current !== undefined && open.includes(current) ? current : open[0])
     }).catch(cause => setError(cause instanceof Error ? cause.message : String(cause)))
       .finally(() => setLoadingDrafts(false))
   }, [])
@@ -627,8 +645,7 @@ export function App(): JSX.Element {
     setDrafts(current => current.some(draft => draft.id === next.id)
       ? current.map(draft => draft.id === next.id ? next : draft)
       : [...current, next])
-    setSelectedDraftId(next.id)
-    setProject(next.project)
+    if (draftIdRef.current === next.id) setProject(next.project)
   }
 
   const createDraft = async (): Promise<void> => {
@@ -637,13 +654,12 @@ export function App(): JSX.Element {
     try {
       const source: StudioDraftSource = sourceKind === 'new'
         ? { kind: 'new', packageName: packageName.trim() }
-        : {
-            kind: 'existing',
-            repository: repository.trim(),
-            ...(repositoryRef.trim() === '' ? {} : { ref: repositoryRef.trim() }),
-            ...(packagePath.trim() === '' ? {} : { packagePath: packagePath.trim() }),
-          }
-      updateDraft(await callStudio<StudioDraftView>('studio.drafts.create', { source, profileMode }))
+        : { kind: 'existing', directory: pluginDirectory.trim() }
+      const next = await callStudio<StudioDraftView>('studio.drafts.create', { source, profileMode })
+      updateDraft(next)
+      setOpenDraftIds(current => current.includes(next.id) ? current : [...current, next.id])
+      setSelectedDraftId(next.id)
+      setProject(next.project)
       setShowCreate(false)
     } catch (cause) {
       setError(cause instanceof StudioRpcError ? cause.message : String(cause))
@@ -652,10 +668,29 @@ export function App(): JSX.Element {
     }
   }
 
+  const renameDraft = async (): Promise<void> => {
+    if (selectedDraft === undefined) return
+    const label = draftLabelInput.trim()
+    if (label === selectedDraft.label) return
+    if (label === '') {
+      setDraftLabelInput(selectedDraft.label)
+      setError('草稿名称不能为空。')
+      return
+    }
+    setError(undefined)
+    try {
+      updateDraft(await callStudio<StudioDraftView>('studio.drafts.rename', { draftId: selectedDraft.id, label }))
+      setDraftLabelInput(label)
+    } catch (cause) {
+      setDraftLabelInput(selectedDraft.label)
+      setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+    }
+  }
+
   const startDraft = async (): Promise<void> => {
     if (selectedDraftId === undefined) return
     const id = selectedDraftId
-    setStarting(true)
+    setInstanceOperations(current => ({ ...current, [id]: 'start' }))
     setError(undefined)
     let polling = true
     const syncProgress = async (): Promise<void> => {
@@ -676,7 +711,7 @@ export function App(): JSX.Element {
       const next = await callStudio<StudioDraftView>('studio.drafts.start', { draftId: id })
       polling = false
       updateDraft(next)
-      setPreviewKey(value => value + 1)
+      if (draftIdRef.current === id) setPreviewKey(value => value + 1)
     } catch (cause) {
       polling = false
       try {
@@ -688,27 +723,38 @@ export function App(): JSX.Element {
     } finally {
       polling = false
       await progress
-      setStarting(false)
+      setInstanceOperations(current => {
+        const next = { ...current }
+        delete next[id]
+        return next
+      })
     }
   }
 
   const stopDraft = async (): Promise<void> => {
     if (selectedDraftId === undefined) return
-    setStarting(true)
+    const id = selectedDraftId
+    setInstanceOperations(current => ({ ...current, [id]: 'stop' }))
     setError(undefined)
     try {
-      updateDraft(await callStudio<StudioDraftView>('studio.drafts.stop', { draftId: selectedDraftId }))
-      setSessionId(undefined)
-      setEvents([])
-      setStreaming('')
-      setRunning(false)
-      setInteraction(undefined)
-      setSelection(undefined)
-      setReadiness({ findings: [] })
+      updateDraft(await callStudio<StudioDraftView>('studio.drafts.stop', { draftId: id }))
+      if (draftIdRef.current === id) {
+        setSessionId(undefined)
+        setEvents([])
+        setStreaming('')
+        setRunning(false)
+        setInteraction(undefined)
+        setSelection(undefined)
+        setReadiness({ findings: [] })
+      }
     } catch (cause) {
       setError(cause instanceof StudioRpcError ? cause.message : String(cause))
     } finally {
-      setStarting(false)
+      setInstanceOperations(current => {
+        const next = { ...current }
+        delete next[id]
+        return next
+      })
     }
   }
 
@@ -845,6 +891,23 @@ export function App(): JSX.Element {
     }
   }
 
+  useEffect(() => {
+    const save = (event: KeyboardEvent): void => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 's') return
+      event.preventDefault()
+      if (!fileBusy && filePath !== '' && source !== savedSource) void saveFile()
+    }
+    window.addEventListener('keydown', save, { capture: true })
+    return () => window.removeEventListener('keydown', save, { capture: true })
+  }, [fileBusy, filePath, savedSource, selectedDraftId, source])
+
+  useEffect(() => {
+    if (!hasUnsavedSource) return
+    const warn = (event: BeforeUnloadEvent): void => event.preventDefault()
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [hasUnsavedSource])
+
   const changePreviewMode = (mode: 'browse' | 'inspect'): void => {
     previewModeRef.current = mode
     setPreviewMode(mode)
@@ -943,11 +1006,51 @@ export function App(): JSX.Element {
     }
   }
 
-  const selectDraft = (draftId: string): void => {
+  const selectDraft = (draftId: string): boolean => {
+    if (draftId !== selectedDraftId && hasUnsavedSource) {
+      setPanel('source')
+      setError('当前文件尚未保存。请先按 Ctrl+S 或 Command+S 保存，再切换草稿。')
+      return false
+    }
     setSelectedDraftId(draftId)
     setSelection(undefined)
     setRegistry(EMPTY_REGISTRY)
     setFocusedElementId(undefined)
+    return true
+  }
+
+  const openDraft = (draftId: string): void => {
+    setOpenDraftIds(current => current.includes(draftId) ? current : [...current, draftId])
+    selectDraft(draftId)
+  }
+
+  const closeDraft = (draftId: string): void => {
+    if (draftId === selectedDraftId && hasUnsavedSource) {
+      setPanel('source')
+      setError('当前文件尚未保存。保存后才能关闭这个草稿标签。')
+      return
+    }
+    const index = openDraftIds.indexOf(draftId)
+    const nextOpenDraftIds = openDraftIds.filter(id => id !== draftId)
+    setOpenDraftIds(nextOpenDraftIds)
+    if (draftId !== selectedDraftId) return
+    const nextDraftId = nextOpenDraftIds[Math.min(index, nextOpenDraftIds.length - 1)]
+    setSelectedDraftId(nextDraftId)
+    setSelection(undefined)
+    setRegistry(EMPTY_REGISTRY)
+    setFocusedElementId(undefined)
+  }
+
+  const selectDraftByKeyboard = (event: React.KeyboardEvent<HTMLButtonElement>, index: number): void => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+    event.preventDefault()
+    const last = openDrafts.length - 1
+    const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? last
+      : event.key === 'ArrowLeft' ? (index + last) % openDrafts.length : (index + 1) % openDrafts.length
+    const draft = openDrafts[nextIndex]
+    if (draft === undefined || !selectDraft(draft.id)) return
+    event.currentTarget.closest('.draft-tab-list')
+      ?.querySelectorAll<HTMLButtonElement>('.draft-tab-select')[nextIndex]?.focus()
   }
 
   const beginPointerDrag = (
@@ -1161,16 +1264,30 @@ export function App(): JSX.Element {
       <nav className="draft-tabs" aria-label="Draft 工作区">
         {loadingDrafts
           ? <span className="draft-tabs-empty" aria-live="polite">正在载入草稿…</span>
-          : drafts.length === 0
-            ? <span className="draft-tabs-empty">还没有草稿</span>
-            : <Tabs id="draft" label="草稿标签页" value={selectedDraftId ?? ''} onChange={selectDraft}
-                options={drafts.map(draft => ({
-                  value: draft.id,
-                  label: <span className="draft-tab-label" data-state={draft.runtime.state}>
-                    <span className="draft-tab-dot" aria-hidden="true" />
-                    <span>{draftLabel(draft)}</span>
-                  </span>,
-                }))} />}
+          : openDrafts.length === 0
+            ? <span className="draft-tabs-empty">没有打开的草稿</span>
+            : <div className="draft-tab-list" role="tablist" aria-label="草稿标签页">
+                {openDrafts.map((draft, index) => {
+                  const state = instanceOperations[draft.id] === 'start' && draft.runtime.state !== 'running'
+                    ? 'starting' : draft.runtime.state
+                  const dirty = draft.id === selectedDraftId && hasUnsavedSource
+                  return <div key={draft.id} className="draft-tab" data-active={draft.id === selectedDraftId || undefined}>
+                    <button id={`draft-tab-${draft.id}`} className="draft-tab-select" type="button" role="tab"
+                      aria-selected={draft.id === selectedDraftId} aria-controls="draft-workspace"
+                      tabIndex={draft.id === selectedDraftId ? 0 : -1}
+                      aria-label={`${draft.label}，${runtimeLabel(state)}${dirty ? '，有未保存修改' : ''}`}
+                      onClick={() => selectDraft(draft.id)} onKeyDown={event => selectDraftByKeyboard(event, index)}>
+                      <span className="draft-tab-label" data-state={state}>
+                        <span className="draft-tab-dot" aria-hidden="true" />
+                        <span>{draft.label}</span>
+                        {dirty && <span className="draft-tab-dirty" aria-hidden="true" />}
+                      </span>
+                    </button>
+                    <IconButton className="draft-tab-close" size="small" variant="ghost"
+                      onClick={() => closeDraft(draft.id)} label={`关闭草稿 ${draft.label}`}><CloseIcon /></IconButton>
+                  </div>
+                })}
+              </div>}
         <IconButton size="small" variant="ghost" aria-pressed={showCreate}
           onClick={() => {
             setLeftSidebarCollapsed(false)
@@ -1185,7 +1302,9 @@ export function App(): JSX.Element {
       </div>
     </header>
 
-    <main className="studio-main" data-left-collapsed={leftSidebarCollapsed} data-right-collapsed={rightSidebarCollapsed}
+    <main id="draft-workspace" className="studio-main" role="tabpanel"
+      aria-labelledby={selectedDraftId === undefined ? undefined : `draft-tab-${selectedDraftId}`}
+      data-left-collapsed={leftSidebarCollapsed} data-right-collapsed={rightSidebarCollapsed}
       style={{
         '--studio-left-sidebar': `${leftSidebarCollapsed ? 48 : leftSidebarWidth}px`,
         '--studio-right-sidebar': `${rightSidebarCollapsed ? 56 : rightSidebarWidth}px`,
@@ -1205,7 +1324,7 @@ export function App(): JSX.Element {
           <FormField id="draft-source" label="来源">
             <Select value={sourceKind} onChange={event => setSourceKind(event.target.value as StudioDraftSource['kind'])}>
               <option value="new">新插件</option>
-              <option value="existing">已有 Git 仓库</option>
+              <option value="existing">已有本地插件</option>
             </Select>
           </FormField>
           {sourceKind === 'new'
@@ -1214,17 +1333,10 @@ export function App(): JSX.Element {
                   placeholder="dsh-webui-draft" maxLength={214} />
               </FormField>
             : <>
-                <FormField id="draft-repository" label="Git 仓库" required>
-                  <Input value={repository} onChange={event => setRepository(event.target.value)}
-                    placeholder="本地路径或 Git 地址" maxLength={2048} />
-                </FormField>
-                <FormField id="draft-repository-ref" label="Git 引用">
-                  <Input value={repositoryRef} onChange={event => setRepositoryRef(event.target.value)}
-                    placeholder="默认使用 HEAD" maxLength={256} />
-                </FormField>
-                <FormField id="draft-package-path" label="包路径" description="仅多包仓库需要。">
-                  <Input value={packagePath} onChange={event => setPackagePath(event.target.value)}
-                    placeholder="packages/my-plugin" maxLength={1024} />
+                <FormField id="draft-plugin-directory" label="插件文件夹" required
+                  description="输入本机绝对路径；Studio 会复制快照，不会修改原文件夹。">
+                  <Input value={pluginDirectory} onChange={event => setPluginDirectory(event.target.value)}
+                    placeholder="/Users/me/.dsh/profiles/web/node_modules/my-plugin" maxLength={4096} />
                 </FormField>
               </>}
           <FormField id="draft-profile" label="配置"
@@ -1238,41 +1350,59 @@ export function App(): JSX.Element {
           <Button variant="primary" type="submit" loading={creating} loadingLabel="正在创建…"
             disabled={profileMode === 'custom'}>创建草稿</Button>
         </form>}
-        {selectedDraft === undefined
-          ? !showCreate && <EmptyState title="选择或创建草稿" description="草稿标签位于顶部工作区栏。" />
+        {drafts.length === 0
+          ? !showCreate && <EmptyState title="创建第一个草稿" description="从一个新插件开始，或导入已有本地插件。" />
           : <>
               <Tabs id="left-sidebar" className="left-sidebar-tabs" label="DSH 控制页面" value={leftPanel}
                 onChange={(value: LeftPanel) => setLeftPanel(value)}
                 options={[{ value: 'instance', label: '实例状态' }, { value: 'plugins', label: '插件管理' }]} />
-              {leftPanel === 'instance' && <section id="left-sidebar-panel-instance" role="tabpanel"
+              {leftPanel === 'instance' && selectedDraft === undefined
+                ? <EmptyState title="没有激活的草稿" description="在插件管理中重新打开一个已保存草稿。"
+                    action={<Button size="small" onClick={() => setLeftPanel('plugins')}>打开插件管理</Button>} />
+                : leftPanel === 'instance' && selectedDraft !== undefined && <section id="left-sidebar-panel-instance" role="tabpanel"
                 aria-labelledby="left-sidebar-tab-instance" className="left-sidebar-page instance-control-panel">
-                <div className="instance-summary" data-state={starting ? 'starting' : selectedDraft.runtime.state}>
+                <div className="instance-summary" data-state={selectedInstanceOperation === 'start' ? 'starting' : selectedDraft.runtime.state}>
                   <span className="instance-status-dot" aria-hidden="true" />
-                  <strong>实例{starting ? '正在执行' : selectedDraft.runtime.state === 'running' ? '运行中'
+                  <strong>实例{selectedInstanceOperation === 'start' ? '正在启动' : selectedInstanceOperation === 'stop' ? '正在终止'
+                    : selectedDraft.runtime.state === 'running' ? '运行中'
                     : selectedDraft.runtime.state === 'failed' ? '启动失败' : '已停止'}</strong>
                 </div>
                 <div className="instance-fields">
-                  <label><span>草稿名称</span><Input value={draftLabel(selectedDraft)} maxLength={120}
-                    onChange={event => setDraftLabels(current => ({ ...current, [selectedDraft.id]: event.target.value }))} /></label>
+                  <label><span>草稿名称</span><Input value={draftLabelInput} maxLength={120}
+                    onChange={event => setDraftLabelInput(event.target.value)} onBlur={() => void renameDraft()}
+                    onKeyDown={event => {
+                      if (event.key === 'Enter') event.currentTarget.blur()
+                      if (event.key === 'Escape') {
+                        setDraftLabelInput(selectedDraft.label)
+                        event.currentTarget.blur()
+                      }
+                    }} /></label>
                   <label><span>工作树位置</span><code title={selectedDraft.worktreeDir}>{selectedDraft.worktreeDir}</code></label>
                 </div>
                 <div className="instance-actions">
                   <Button size="small" variant="primary" className="sidebar-action-button"
-                    onClick={() => void startDraft()} loading={starting && selectedDraft.runtime.state !== 'running'}
-                    loadingLabel="启动中" disabled={selectedDraft.runtime.state === 'running'}>
+                    onClick={() => void startDraft()} loading={selectedInstanceOperation === 'start'}
+                    loadingLabel="启动中" disabled={selectedDraft.runtime.state === 'running' || selectedInstanceOperation !== undefined}>
                     <StartIcon />启动</Button>
                   <Button size="small" className="sidebar-action-button" onClick={() => void stopDraft()}
-                    loading={starting && selectedDraft.runtime.state === 'running'} loadingLabel="终止中"
-                    disabled={selectedDraft.runtime.state !== 'running'}><StopIcon />终止</Button>
+                    loading={selectedInstanceOperation === 'stop'} loadingLabel="终止中"
+                    disabled={selectedDraft.runtime.state !== 'running' || selectedInstanceOperation !== undefined}><StopIcon />终止</Button>
                   <Button size="small" className="sidebar-action-button" onClick={() => setPreviewKey(value => value + 1)}
-                    disabled={previewUrl === undefined || starting}><RefreshIcon />刷新</Button>
+                    disabled={previewUrl === undefined || selectedInstanceOperation !== undefined}><RefreshIcon />刷新</Button>
                 </div>
                 {selectedDraft.runtime.error !== undefined && <Notice tone="danger">{selectedDraft.runtime.error}</Notice>}
               </section>}
 
               {leftPanel === 'plugins' && <section id="left-sidebar-panel-plugins" role="tabpanel"
-                aria-labelledby="left-sidebar-tab-plugins" className="left-sidebar-page plugin-management-placeholder">
-                <p>插件列表与排序控制将在这里显示。</p>
+                aria-labelledby="left-sidebar-tab-plugins" className="left-sidebar-page plugin-management-page">
+                <div className="persistent-draft-list" aria-label="Studio 持久化草稿">
+                  {drafts.map(draft => <article key={draft.id} data-open={openDraftIds.includes(draft.id) || undefined}>
+                    <div><strong>{draft.label}</strong><code>{draft.name}</code></div>
+                    <Button size="small" variant="ghost" disabled={openDraftIds.includes(draft.id)}
+                      onClick={() => openDraft(draft.id)}>{openDraftIds.includes(draft.id) ? '已打开' : '打开'}</Button>
+                  </article>)}
+                </div>
+                <p>草稿保存在 Studio 数据目录；关闭标签不会删除插件或停止实例。</p>
               </section>}
             </>}
         </div>

@@ -43,10 +43,10 @@ function record(root: string): StudioDraftRecord {
   return {
     id: '4f5e9f53-5d56-4cb5-837e-a4c084ab6e9c',
     name: 'draft-plugin',
+    label: 'Draft plugin',
     source: { kind: 'new', packageName: 'draft-plugin' },
     repositoryDir: root,
     worktreeDir: root,
-    packagePath: '',
     root,
     runtimeHome: join(root, 'runtime'),
     profileMode: 'main-home',
@@ -63,6 +63,7 @@ function backend(draft: StudioDraftRecord): StudioBackend {
     list: vi.fn(async () => [draft]),
     get: vi.fn(async () => draft),
     create: vi.fn(async () => draft),
+    rename: vi.fn(async (_id: string, label: string) => ({ ...draft, label: label.trim() })),
   } as unknown as StudioDraftRegistry
   const commands = { run: vi.fn() } as unknown as StudioCommandRunner
   return new StudioBackend(harmony, agents, subprocess, registry, commands, 'http://127.0.0.1:3081')
@@ -82,6 +83,22 @@ describe('StudioBackend', () => {
       runtime: { state: 'running', previewUrl: 'http://127.0.0.1:4000/' },
       project: { state: 'staged', graphRev: 'graph-1' },
     } })
+  })
+
+  it('renames the persistent Draft without replacing its package identity', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-studio-backend-'))
+    temporaryDirectories.push(root)
+    const draft = record(root)
+    const studio = backend(draft)
+
+    const renamed = await studio.call(request('studio.drafts.rename', {
+      draftId: draft.id,
+      label: 'Header experiment',
+    }))
+    const listed = await studio.call(request('studio.drafts.list', {}))
+
+    expect(renamed.result).toMatchObject({ ok: true, value: { name: 'draft-plugin', label: 'Header experiment' } })
+    expect(listed.result).toMatchObject({ ok: true, value: [{ name: 'draft-plugin', label: 'Header experiment' }] })
   })
 
   it('routes activation and Preview selection by Draft id', async () => {

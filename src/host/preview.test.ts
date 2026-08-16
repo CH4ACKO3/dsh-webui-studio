@@ -21,8 +21,8 @@ it('publishes profile installation progress and a failed runtime snapshot', asyn
   await writeFile(join(mainProfile, 'package.json'), JSON.stringify({ name: 'dsh-profile-web', private: true }))
   await writeFile(join(mainProfile, 'pnpm-workspace.yaml'), 'packages:\n  - .\n')
   const draft: StudioDraftRecord = {
-    id: 'id', name: 'draft-plugin', source: { kind: 'new', packageName: 'draft-plugin' },
-    repositoryDir: root, worktreeDir: draftRoot, packagePath: '', root: draftRoot,
+    id: 'id', name: 'draft-plugin', label: 'Draft plugin', source: { kind: 'new', packageName: 'draft-plugin' },
+    repositoryDir: root, worktreeDir: draftRoot, root: draftRoot,
     runtimeHome: join(root, 'runtime-home'), profileMode: 'main-home', createdAt: 'now',
   }
   let rejectInstall!: (reason: Error) => void

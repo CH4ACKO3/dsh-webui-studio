@@ -208,6 +208,13 @@ export class StudioBackend {
       if (method === 'studio.drafts.list') return success(rpcId, await this.list())
       if (method === 'studio.drafts.create') return success(rpcId, await this.create(payload))
       const controller = await this.controller(draftId(payload))
+      if (method === 'studio.drafts.rename') {
+        const label = objectPayload(payload).label
+        if (typeof label !== 'string') throw new Error('Draft name is required')
+        const record = await this.registry.rename(controller.record.id, label)
+        controller.record.label = record.label
+        return success(rpcId, controller.view())
+      }
       if (method === 'studio.drafts.start') return success(rpcId, await controller.start())
       if (method === 'studio.drafts.stop') return success(rpcId, await controller.stop())
       if (method === 'studio.project.state') return success(rpcId, await controller.refreshProject())

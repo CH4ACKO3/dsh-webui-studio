@@ -30,8 +30,8 @@ it('snapshots main profile declarations and links the Draft worktree', async () 
   const workspacePolicy = `packages:\n  - .\nallowBuilds:\n  example@git-ref: true\n`
   await writeFile(join(mainProfile, 'pnpm-workspace.yaml'), workspacePolicy)
   const draft: StudioDraftRecord = {
-    id: 'id', name: 'draft-plugin', source: { kind: 'new', packageName: 'draft-plugin' },
-    repositoryDir: root, worktreeDir: draftRoot, packagePath: '', root: draftRoot,
+    id: 'id', name: 'draft-plugin', label: 'Draft plugin', source: { kind: 'new', packageName: 'draft-plugin' },
+    repositoryDir: root, worktreeDir: draftRoot, root: draftRoot,
     runtimeHome: join(root, 'runtime-home'), profileMode: 'main-home', createdAt: 'now',
   }
   const run = vi.fn(async () => {})
