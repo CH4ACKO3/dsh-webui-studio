@@ -6,8 +6,13 @@
     "deepseek",
     "deepseek-harness",
     "dsh",
+    "developer-tools",
     "harmony",
+    "plugin-development",
+    "react",
     "studio",
+    "typescript",
+    "visual-editor",
     "webui"
   ],
   "homepage": "https://github.com/CH4ACKO3/dsh-webui-studio#readme",
@@ -30,12 +35,14 @@
     "./package.json": "./package.json"
   },
   "files": [
+    "assets",
     "dist",
     "lib",
     "docs",
     "LICENSE",
     "PRODUCT.md",
-    "README.md"
+    "README.md",
+    "README.zh-CN.md"
   ],
   "scripts": {
     "build": "npm run build:host && npm run build:browser",

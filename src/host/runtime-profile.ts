@@ -19,6 +19,14 @@ export function bundledPnpmCommand(args: readonly string[]): [string, string[]] 
   return [process.execPath, [PNPM_ENTRY, ...args]]
 }
 
+function terminalToken(value: string): string {
+  return /^[\w@%+=:,./-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`
+}
+
+export function terminalCommandLine(cwd: string, command: string, args: readonly string[]): string {
+  return `${cwd}\n$ ${[command, ...args].map(terminalToken).join(' ')}\n`
+}
+
 function absoluteLink(spec: string, profileDir: string): string {
   if (!spec.startsWith('link:')) return spec
   const target = spec.slice('link:'.length)
@@ -55,7 +63,7 @@ export async function materializeDraftProfile(
     }
   }
   const [command, args] = bundledPnpmCommand(['install', '--prefer-offline'])
-  onOutput?.('$ pnpm install --prefer-offline\n')
+  onOutput?.(terminalCommandLine(profileDir, command, args))
   try {
     await commands.run(command, args, profileDir, onOutput)
   } catch (error) {

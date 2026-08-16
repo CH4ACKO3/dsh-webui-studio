@@ -47,6 +47,11 @@
   --studio-code-number: #9a4c12;
   --studio-code-comment: #687386;
   --studio-code-type: #155bb0;
+  --studio-terminal-bg: #f7f9fc;
+  --studio-terminal-header: #eef2f7;
+  --studio-terminal-text: #243044;
+  --studio-terminal-secondary: #5f6d82;
+  --studio-terminal-border: #cbd4df;
   --studio-shadow-panel: 0 12px 32px rgb(39 53 72 / 14%);
   --studio-workspace: #d9e0e8;
   --studio-workspace-dot: #a9b4c2;
@@ -92,6 +97,11 @@
   --studio-code-number: #ffb982;
   --studio-code-comment: #919dad;
   --studio-code-type: #8dbbff;
+  --studio-terminal-bg: #090d12;
+  --studio-terminal-header: #111821;
+  --studio-terminal-text: #dce5f0;
+  --studio-terminal-secondary: #aeb9c8;
+  --studio-terminal-border: #303a46;
   --studio-shadow-panel: 0 16px 38px rgb(0 0 0 / 36%);
   --studio-workspace: #0c1117;
   --studio-workspace-dot: #3a4653;

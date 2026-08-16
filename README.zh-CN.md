@@ -1,0 +1,141 @@
+<div align="center">
+  <a href="https://github.com/CH4ACKO3/dsh-harmony">
+    <img width="132" alt="Harmony" src="assets/harmony-icon.png">
+  </a>
+
+  <h1>WebUI Studio</h1>
+
+  <p>
+    <strong>基于 Harmony 构建 DSH WebUI 插件的可视化优先开发环境。</strong>
+    <br />
+    在不把未完成代码加载进稳定 DSH Host 的前提下，检查真实界面、编辑源码、执行构建并验证 Patch。
+  </p>
+
+  <p>
+    <a href="#快速开始"><strong>快速开始</strong></a>
+    ·
+    <a href="https://github.com/CH4ACKO3/dsh-harmony"><strong>dsh-harmony</strong></a>
+    ·
+    <a href="https://github.com/CH4ACKO3/dsh-webui-studio/issues">报告问题</a>
+    ·
+    <a href="https://github.com/CH4ACKO3/dsh-webui-studio/issues">功能建议</a>
+  </p>
+
+  [![License: MIT](https://img.shields.io/badge/license-MIT-0b63f6.svg)](LICENSE)
+  [![Node.js](https://img.shields.io/badge/node-%5E22.22.3%20%7C%7C%20%3E%3D24.11.1-2f6f3e.svg)](package.json)
+  [![GitHub stars](https://img.shields.io/github/stars/CH4ACKO3/dsh-webui-studio?style=flat&color=0b63f6)](https://github.com/CH4ACKO3/dsh-webui-studio/stargazers)
+  [![Built on Harmony](https://img.shields.io/badge/built%20on-dsh--harmony-111827.svg)](https://github.com/CH4ACKO3/dsh-harmony)
+
+  [English](README.md)
+</div>
+
+## 面向真实 DSH WebUI 的可视化工作区
+
+WebUI Studio 不是模拟页面生成器。它运行在官方 DSH WebUI 和真实插件图谱之上，
+把可视化检查与源码修改转化为可分发、由插件自身拥有的产物。
+
+Studio 是 [`dsh-harmony`](https://github.com/CH4ACKO3/dsh-harmony)
+的独立下游应用。它通过公共 package exports 使用 Harmony 的 Host extension、runtime、
+Patch engine 与 Draft API，并使用
+[`dsh-harmony-react`](https://github.com/CH4ACKO3/dsh-harmony/tree/main/packages/react)
+提供的通用 React 注册 API。依赖始终保持单向：Studio 依赖 Harmony，Harmony 不依赖 Studio。
+
+## 你可以做什么
+
+- [x] 创建最小 DSH Web Client 插件，或打开现有 Git 仓库
+- [x] 为每个 Draft 分配独立 Git worktree、`DSH_HOME`、profile、依赖树和 child Host
+- [x] 预览官方 WebUI，同时不把 Draft 代码加载进稳定 Host
+- [x] 正常浏览，或检查 DOM、React owner、源码候选和 Patch trace
+- [x] 使用 CodeMirror 编辑 Draft 源码，并保持已安装依赖源码只读
+- [x] 构建、经 Harmony 应用、重载，并确认实时 Client graph revision
+- [x] 运行带显式 Studio tools 的 Draft 级 DSH Agent
+- [x] 检查 package exports、构建产物、Patch 状态、顺序、依赖和 pack 输出
+- [x] 同时运行多个相互隔离的 Draft Preview Host
+- [ ] 在 UI 中配置自定义 Draft profile
+
+## 工作原理
+
+```mermaid
+flowchart LR
+  A["稳定 DSH Host"] --> B["WebUI Studio"]
+  B --> C["Draft worktree"]
+  B --> D["Draft worktree"]
+  C --> E["独立 DSH Home + Preview Host"]
+  D --> F["独立 DSH Home + Preview Host"]
+  E --> G["Harmony runtime + 真实 WebUI"]
+  F --> G
+```
+
+稳定 Host 负责 Studio 界面、Draft registry 和 Agent session。每个 Draft 拥有隔离的
+worktree 与 child Preview Host。只有在 Preview 确认新的实时 Client graph revision 后，
+构建结果才会激活。停止 Draft 只终止 child Host，不会删除文件和状态。
+
+Studio 的本地地址为：
+
+```text
+http://127.0.0.1:<dsh-port>/dsh-harmony/studio
+```
+
+托管数据位于 `$DSH_HOME/studio/`：
+
+```text
+studio/
+├── drafts/<draft-id>.json
+├── repositories/<draft-id>/
+├── worktrees/<draft-id>/
+└── runtimes/<draft-id>/dsh-home/profiles/web/
+```
+
+## 快速开始
+
+> [!IMPORTANT]
+> Studio 依赖 [`docs/harmony-api-requirements.md`](docs/harmony-api-requirements.md)
+> 中列出的 Harmony 公共 extension 与 Draft API。当前已发布的
+> `dsh-harmony@0.1.2` 早于这些 API。
+
+```sh
+git clone https://github.com/CH4ACKO3/dsh-webui-studio.git
+cd dsh-webui-studio
+npm install
+npm run check
+
+dsh plugin --profile web add link:$(pwd)
+dsh web
+```
+
+打开本地 `dsh web` 进程输出的 Studio 地址，创建或导入 Draft，然后启动它的 Preview Host。
+
+Draft package 必须：
+
+- 声明 `dsh.client.platform: "web"`；
+- 导出 `.`, `./client` 和 `./package.json`；
+- 定义非空的 `scripts.build` 命令。
+
+## 开发命令
+
+| 命令 | 用途 |
+| --- | --- |
+| `npm run typecheck` | 检查 Host、浏览器应用和 Preview bridge |
+| `npm test` | 运行单元测试与组件测试 |
+| `npm run build` | 构建 Host、Studio UI 和 Preview bridge |
+| `npm run check` | 运行 typecheck、测试和完整构建 |
+| `npm run test:integration` | 端到端验证 Host、Draft、Preview、构建、激活与停止 |
+
+集成测试需要 Harmony build 已公开兼容性说明中列出的 API。
+
+## 设计边界
+
+- 官方 WebUI 保持自己的同源 `/api` 与 WebSocket；Studio 不代理它们。
+- Preview bridge 要求精确的 parent origin 和每次启动生成的 capability。
+- 来自 Preview 的 DOM、React、源码、Patch 与注释数据均被视为不可信证据。
+- 源码写入始终限制在所选 Draft package 内，且不会沿符号链接写到外部。
+- 已注册 element boundary 与 Patch trace 只是候选证据，不代表对 DOM 的精确所有权声明。
+
+## 相关项目
+
+- [`dsh-harmony`](https://github.com/CH4ACKO3/dsh-harmony) - runtime patch、Host extension 挂载、Draft 生命周期与 Patch 检查
+- [`dsh-harmony-react`](https://github.com/CH4ACKO3/dsh-harmony/tree/main/packages/react) - React-aware Patch 工厂与 Studio element/variable 注册
+
+## 许可证
+
+本项目采用 [MIT License](LICENSE)。

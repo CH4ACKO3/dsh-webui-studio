@@ -10,7 +10,7 @@ import type {
 } from '../contracts.js'
 import { STUDIO_PREVIEW_API_PATH } from '../contracts.js'
 import type { StudioCommandRunner } from './drafts.js'
-import { materializeDraftProfile } from './runtime-profile.js'
+import { materializeDraftProfile, terminalCommandLine } from './runtime-profile.js'
 
 const START_TIMEOUT_MS = 30_000
 const LOG_LIMIT = 64_000
@@ -63,11 +63,13 @@ export class StudioPreviewSupervisor {
         this.commands,
         chunk => { this.runtime.log = appendLog(this.runtime.log, chunk) },
       )
-      this.runtime.log = appendLog(this.runtime.log, '[studio] Profile dependencies ready\n[studio] Starting Preview Host\n')
+      const hostArgs = [this.harmonyBinEntry, 'web', '--port', '0']
+      this.runtime.log = appendLog(this.runtime.log,
+        `[studio] Profile dependencies ready\n[studio] Starting Preview Host\nDSH_HOME=${this.draft.runtimeHome}\n${terminalCommandLine(this.draft.worktreeDir, process.execPath, hostArgs)}`)
       const controlToken = randomBytes(32).toString('hex')
       const bridgeCapability = randomBytes(24).toString('base64url')
       this.controlToken = controlToken
-      const child = spawn(process.execPath, [this.harmonyBinEntry, 'web', '--port', '0'], {
+      const child = spawn(process.execPath, hostArgs, {
         cwd: this.draft.worktreeDir,
         env: {
           ...process.env,

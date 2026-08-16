@@ -40,7 +40,10 @@ it('publishes profile installation progress and a failed runtime snapshot', asyn
 
   const start = preview.start()
   await started
-  expect(preview.snapshot()).toMatchObject({ state: 'starting', log: expect.stringContaining('Resolving packages') })
+  const starting = preview.snapshot()
+  expect(starting.state).toBe('starting')
+  expect(starting.log).toContain(`${join(draft.runtimeHome, 'profiles', 'web')}\n$ `)
+  expect(starting.log).toContain(' install --prefer-offline\nResolving packages')
   rejectInstall(new Error('Command exited with code 1\ndependency build rejected'))
   await expect(start).rejects.toThrow('Check the startup terminal')
   expect(preview.snapshot()).toMatchObject({

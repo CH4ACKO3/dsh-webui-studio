@@ -23,3 +23,9 @@ developed left-sidebar Tabs and compact-type UI increment was synchronized from
 selected Studio source/config inputs had SHA-256
 `eb1feccfca28101fd4d7a328e131aac21f1517d7df3808d887bc71be28ed6e0e`, and this
 repository's complete `src` tree matched the source Studio `src` tree exactly.
+
+A final source sync completed at `2026-08-16T08:56:56Z`. It includes the
+theme-aware terminal, full docked-header toggle, live Draft log refresh, real
+command/cwd/`DSH_HOME` prompts, and integration log assertions. The selected
+Studio source/config inputs had SHA-256
+`0fcda46f44789eb5070b3ed729fabe836d7fc7f967b46747d1def6fee2b46ff0`.

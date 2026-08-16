@@ -127,6 +127,11 @@ try {
   const opened = started.project
   assert.equal(opened.state, 'staged')
   assert.equal(started.runtime.state, 'running')
+  assert.ok(started.runtime.log.includes(`${join(created.runtimeHome, 'profiles', 'web')}\n$ `), 'Install command prompt did not include its profile directory')
+  assert.ok(started.runtime.log.includes(' install --prefer-offline\n'), 'Install command prompt did not include the executed command')
+  assert.ok(started.runtime.log.includes(`${created.worktreeDir}\n$ `), 'Preview command prompt did not include its worktree')
+  assert.ok(started.runtime.log.includes(`DSH_HOME=${created.runtimeHome}`), 'Preview command prompt did not include its DSH_HOME')
+  assert.match(started.runtime.log, /dsh web:\s+http:\/\/127\.0\.0\.1:\d+/)
   const previewOrigin = new URL(started.runtime.previewUrl).origin
   assert.notEqual(previewOrigin, origin)
   const secondCreated = await call('studio.drafts.create', {

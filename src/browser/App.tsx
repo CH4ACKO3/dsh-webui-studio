@@ -376,6 +376,7 @@ export function App(): JSX.Element {
   const draftLabel = (draft: StudioDraftView): string => draftLabels[draft.id] ?? pathName(draft.worktreeDir)
   const terminalOutput = selectedDraft?.runtime.log ?? ''
   const terminalLatestLine = terminalOutput.trimEnd().split(/\r?\n/).at(-1) ?? '[studio] 实例尚未启动。'
+  const hasLiveDraft = drafts.some(draft => draft.runtime.state === 'starting' || draft.runtime.state === 'running')
   const previewSession = selectedDraft?.runtime.bridgeCapability
   const previewUrl = selectedDraft?.runtime.previewUrl
   const messages = useMemo(() => conversation(events), [events])
@@ -537,6 +538,27 @@ export function App(): JSX.Element {
     }).catch(cause => setError(cause instanceof Error ? cause.message : String(cause)))
       .finally(() => setLoadingDrafts(false))
   }, [])
+
+  useEffect(() => {
+    if (!hasLiveDraft) return
+    let active = true
+    let timer: number | undefined
+    const sync = async (): Promise<void> => {
+      try {
+        const next = await callStudio<StudioDraftView[]>('studio.drafts.list', {})
+        if (active) setDrafts(next)
+      } catch {
+        // The regular connection state reports transport failures.
+      } finally {
+        if (active) timer = window.setTimeout(() => void sync(), 250)
+      }
+    }
+    timer = window.setTimeout(() => void sync(), 250)
+    return () => {
+      active = false
+      if (timer !== undefined) window.clearTimeout(timer)
+    }
+  }, [hasLiveDraft])
 
   useEffect(() => subscribeStudioEvents(envelope => {
     const current = sessionRef.current
@@ -1106,13 +1128,14 @@ export function App(): JSX.Element {
       <button type="button" className="terminal-section-toggle"
         aria-expanded={!terminalMinimized} aria-controls="draft-terminal-output" onClick={toggleTerminalMinimized}>
         <DisclosureIcon expanded={!terminalMinimized} /><strong>终端</strong>
-      </button>
-      {terminalMinimized && <code className="terminal-latest-line" title={terminalLatestLine}>{terminalLatestLine}</code>}
-      <div className="host-terminal-actions">
-        <span aria-live="polite" data-state={starting ? 'starting' : selectedDraft.runtime.state}>
+        {terminalMinimized && <code className="terminal-latest-line" title={terminalLatestLine}>{terminalLatestLine}</code>}
+        {!terminalMinimized && <span className="terminal-runtime-state" aria-live="polite"
+          data-state={starting ? 'starting' : selectedDraft.runtime.state}>
           {starting || selectedDraft.runtime.state === 'starting' ? '执行中' : selectedDraft.runtime.state === 'running' ? '运行中'
             : selectedDraft.runtime.state === 'failed' ? '失败' : '待命'}
-        </span>
+        </span>}
+      </button>
+      <div className="host-terminal-actions">
         <IconButton ref={terminalToggleRef} className="terminal-layout-button" size="small" variant="ghost"
           aria-expanded={terminalExpanded} aria-controls="draft-terminal" onClick={toggleTerminal}
           label={terminalExpanded ? '将终端停靠回左侧栏' : '在底部展开终端'}>
@@ -1120,7 +1143,8 @@ export function App(): JSX.Element {
         </IconButton>
       </div>
     </div>
-    {!terminalMinimized && <pre id="draft-terminal-output" ref={terminalRef} aria-label="实例终端输出" tabIndex={0} onScroll={event => {
+    {!terminalMinimized && <pre id="draft-terminal-output" ref={terminalRef} role="log" aria-live="off"
+      aria-label="实例终端只读输出" tabIndex={0} onScroll={event => {
       const terminal = event.currentTarget
       terminalPinnedRef.current = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 24
     }}>{terminalOutput || '[studio] 实例尚未启动。'}</pre>}
