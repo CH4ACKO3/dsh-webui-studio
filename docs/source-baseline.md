@@ -36,3 +36,11 @@ obsolete plugin-detail controls, anchors resize highlights, and makes middle
 mouse Preview panning use viewport-pixel deltas without native auto-scroll.
 The selected Studio source/config inputs had SHA-256
 `c06fe6ffe080f9ee17ffee7e2e577ac6646166917104eaf4a1a1b8993e84eb4f`.
+
+The final brand and asset sync completed at `2026-08-16T09:14:37Z`, while the
+source remained at `baf97bc9048dc9c9a10449274ffe28d286ecb32d`. The independent
+repository's complete `src` tree again matched the source Studio `src` tree
+exactly, and both 128x128 Harmony PNG assets were copied byte-for-byte. This
+checkpoint includes the DeepSeek WebUI Studio name, Plugin client workspace
+subtitle, theme-aware icon, packaged asset routes, document title, and plugin
+display name.

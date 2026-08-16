@@ -30,16 +30,16 @@ button, input, textarea, select, iframe { border: 0; }
 .studio-brand, .studio-brand > div, .panel-heading > div { min-width: 0; }
 .studio-brand { display: flex; align-items: center; gap: 10px; }
 .studio-mark {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   display: grid;
+  flex: none;
   place-items: center;
-  border-radius: 8px;
-  background: var(--studio-accent);
-  color: var(--studio-accent-contrast);
-  font-size: 14px;
-  font-weight: 750;
 }
+.studio-mark img { width: 100%; height: 100%; grid-area: 1 / 1; object-fit: contain; }
+.studio-mark-mono { display: none; }
+:root[data-studio-theme="dark"] .studio-mark-color { display: none; }
+:root[data-studio-theme="dark"] .studio-mark-mono { display: block; filter: invert(1); }
 .studio-brand strong, .studio-brand span { display: block; }
 .studio-brand strong { font-size: 14px; line-height: 18px; letter-spacing: -.01em; }
 .studio-brand div > span { color: var(--studio-text-secondary); font-size: 10px; line-height: 14px; }

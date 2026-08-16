@@ -34,7 +34,10 @@ describe('Studio routes', () => {
   })) } as unknown as StudioBackend): WebRoute[] {
     return createStudioRoutes(
       backend,
-      { script: Buffer.from('studio-script'), style: Buffer.from('studio-style'), bridge: Buffer.from('studio-bridge') },
+      {
+        script: Buffer.from('studio-script'), style: Buffer.from('studio-style'), bridge: Buffer.from('studio-bridge'),
+        icon: Buffer.from('studio-icon'), iconMono: Buffer.from('studio-icon-mono'),
+      },
       security,
     )
   }
@@ -72,16 +75,22 @@ describe('Studio routes', () => {
   it('serves the bridge and includes the API capability only in the Studio document', async () => {
     const routes = createStudioRoutes(
       {} as StudioBackend,
-      { script: Buffer.alloc(0), style: Buffer.alloc(0), bridge: Buffer.from('studio-bridge') },
+      {
+        script: Buffer.alloc(0), style: Buffer.alloc(0), bridge: Buffer.from('studio-bridge'),
+        icon: Buffer.from('studio-icon'), iconMono: Buffer.from('studio-icon-mono'),
+      },
       security,
     )
     expect(routes.some(route => route.path.endsWith('/bridge.js'))).toBe(true)
+    expect(routes.some(route => route.path.endsWith('/harmony-icon.png'))).toBe(true)
+    expect(routes.some(route => route.path.endsWith('/harmony-icon-mono.png'))).toBe(true)
     expect(routes.some(route => route.path.endsWith('/events.mux'))).toBe(false)
 
     const page = await invoke(routes.find(route => route.path === STUDIO_PATH)!)
     const bridge = await invoke(routes.find(route => route.path.endsWith('/bridge.js'))!)
     expect(page.status).toBe(200)
     expect(page.body).toContain('window.__DSH_STUDIO__={token:"secret-token"}')
+    expect(page.body).toContain('<title>DeepSeek WebUI Studio</title>')
     expect(page.body).toContain('<meta name="referrer" content="no-referrer"')
     expect(bridge.body).toBe('studio-bridge')
     expect(bridge.body).not.toContain('secret-token')

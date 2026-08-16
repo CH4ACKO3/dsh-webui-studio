@@ -3,12 +3,14 @@
     <img width="132" alt="Harmony" src="assets/harmony-icon.png">
   </a>
 
-  <h1>WebUI Studio</h1>
+  <h1>DeepSeek WebUI Studio</h1>
 
   <p>
-    <strong>A visual-first studio for building DSH WebUI plugins on Harmony.</strong>
+    <strong>A visual-first studio for building DSH WebUI plugins.</strong>
     <br />
     Inspect the real interface, edit source, run builds, and validate patches without loading unfinished code into your stable DSH Host.
+    <br />
+    Powered by <a href="https://github.com/CH4ACKO3/dsh-harmony"><strong>dsh-harmony</strong></a>.
   </p>
 
   <p>
@@ -24,9 +26,9 @@
   [![License: MIT](https://img.shields.io/badge/license-MIT-0b63f6.svg)](LICENSE)
   [![Node.js](https://img.shields.io/badge/node-%5E22.22.3%20%7C%7C%20%3E%3D24.11.1-2f6f3e.svg)](package.json)
   [![GitHub stars](https://img.shields.io/github/stars/CH4ACKO3/dsh-webui-studio?style=flat&color=0b63f6)](https://github.com/CH4ACKO3/dsh-webui-studio/stargazers)
-  [![Built on Harmony](https://img.shields.io/badge/built%20on-dsh--harmony-111827.svg)](https://github.com/CH4ACKO3/dsh-harmony)
+  [![Powered by Harmony](https://img.shields.io/badge/powered%20by-dsh--harmony-111827.svg)](https://github.com/CH4ACKO3/dsh-harmony)
 
-  [简体中文](README.zh-CN.md)
+  [简体中文](README.zh-CN.md) / [English](README.md)
 </div>
 
 ## A visual workspace for the real DSH WebUI

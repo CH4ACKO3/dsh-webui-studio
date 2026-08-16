@@ -9,6 +9,8 @@ export interface StudioAssets {
   script: Buffer
   style: Buffer
   bridge: Buffer
+  icon: Buffer
+  iconMono: Buffer
 }
 
 export interface StudioRouteSecurity {
@@ -63,7 +65,7 @@ function documentHtml(token: string): string {
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
     <meta name="referrer" content="no-referrer" />
-    <title>Harmony WebUI Studio</title>
+    <title>DeepSeek WebUI Studio</title>
     <link rel="stylesheet" href="${STUDIO_PATH}/assets/studio.css" />
     <script>window.__DSH_STUDIO__={token:${JSON.stringify(token)}};</script>
   </head>
@@ -144,6 +146,24 @@ export function createStudioRoutes(backend: StudioBackend, assets: StudioAssets,
         if (rejectUntrusted(request, response)) return
         if (request.method !== 'GET' && request.method !== 'HEAD') return sendJson(response, 405, { error: 'method not allowed' })
         sendAsset(request, response, 'text/css; charset=utf-8', assets.style)
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${STUDIO_PATH}/assets/harmony-icon.png`,
+      handler(request, response) {
+        if (rejectUntrusted(request, response)) return
+        if (request.method !== 'GET' && request.method !== 'HEAD') return sendJson(response, 405, { error: 'method not allowed' })
+        sendAsset(request, response, 'image/png', assets.icon)
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${STUDIO_PATH}/assets/harmony-icon-mono.png`,
+      handler(request, response) {
+        if (rejectUntrusted(request, response)) return
+        if (request.method !== 'GET' && request.method !== 'HEAD') return sendJson(response, 405, { error: 'method not allowed' })
+        sendAsset(request, response, 'image/png', assets.iconMono)
       },
     },
     { kind: 'prefix', path: STUDIO_API_PATH, handler: apiHandler },

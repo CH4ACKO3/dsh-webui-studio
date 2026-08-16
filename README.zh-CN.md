@@ -3,12 +3,14 @@
     <img width="132" alt="Harmony" src="assets/harmony-icon.png">
   </a>
 
-  <h1>WebUI Studio</h1>
+  <h1>DeepSeek WebUI Studio</h1>
 
   <p>
-    <strong>基于 Harmony 构建 DSH WebUI 插件的可视化优先开发环境。</strong>
+    <strong>DSH WebUI 插件的可视化优先开发环境。</strong>
     <br />
     在不把未完成代码加载进稳定 DSH Host 的前提下，检查真实界面、编辑源码、执行构建并验证 Patch。
+    <br />
+    Powered by <a href="https://github.com/CH4ACKO3/dsh-harmony"><strong>dsh-harmony</strong></a>.
   </p>
 
   <p>
@@ -24,9 +26,9 @@
   [![License: MIT](https://img.shields.io/badge/license-MIT-0b63f6.svg)](LICENSE)
   [![Node.js](https://img.shields.io/badge/node-%5E22.22.3%20%7C%7C%20%3E%3D24.11.1-2f6f3e.svg)](package.json)
   [![GitHub stars](https://img.shields.io/github/stars/CH4ACKO3/dsh-webui-studio?style=flat&color=0b63f6)](https://github.com/CH4ACKO3/dsh-webui-studio/stargazers)
-  [![Built on Harmony](https://img.shields.io/badge/built%20on-dsh--harmony-111827.svg)](https://github.com/CH4ACKO3/dsh-harmony)
+  [![Powered by Harmony](https://img.shields.io/badge/powered%20by-dsh--harmony-111827.svg)](https://github.com/CH4ACKO3/dsh-harmony)
 
-  [English](README.md)
+  [简体中文](README.zh-CN.md) / [English](README.md)
 </div>
 
 ## 面向真实 DSH WebUI 的可视化工作区

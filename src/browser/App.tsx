@@ -20,6 +20,7 @@ import {
   type StudioReadinessReport,
   type StudioServerRequest,
   type StudioSourceCandidate,
+  STUDIO_PATH,
 } from '../contracts'
 import { apiValue, studioApi, subscribeStudioEvents } from './events'
 import { callStudio, StudioRpcError } from './rpc'
@@ -1151,8 +1152,11 @@ export function App(): JSX.Element {
   }}>
     <header className="studio-header">
       <div className="studio-brand">
-        <span className="studio-mark" aria-hidden="true">H</span>
-        <div><strong>WebUI Studio</strong><span>Harmony layer workspace</span></div>
+        <span className="studio-mark" aria-hidden="true">
+          <img className="studio-mark-color" src={`${STUDIO_PATH}/assets/harmony-icon.png`} alt="" />
+          <img className="studio-mark-mono" src={`${STUDIO_PATH}/assets/harmony-icon-mono.png`} alt="" />
+        </span>
+        <div><strong>DeepSeek WebUI Studio</strong><span>Plugin client workspace</span></div>
       </div>
       <nav className="draft-tabs" aria-label="Draft 工作区">
         {loadingDrafts

@@ -27,6 +27,8 @@ export function apply(ctx: Context): void {
       script: readFileSync(new URL('../dist/studio.js', import.meta.url)),
       style: readFileSync(new URL('../dist/studio.css', import.meta.url)),
       bridge: readFileSync(new URL('../dist/bridge.js', import.meta.url)),
+      icon: readFileSync(new URL('../assets/harmony-icon.png', import.meta.url)),
+      iconMono: readFileSync(new URL('../assets/harmony-icon-mono.png', import.meta.url)),
     }
     const previewRoot = process.env.DSH_STUDIO_PREVIEW_DRAFT_ROOT
     if (previewRoot !== undefined) {
