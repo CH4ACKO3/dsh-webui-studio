@@ -16,8 +16,6 @@
   <p>
     <a href="#快速开始"><strong>快速开始</strong></a>
     ·
-    <a href="https://github.com/CH4ACKO3/dsh-harmony"><strong>dsh-harmony</strong></a>
-    ·
     <a href="https://github.com/CH4ACKO3/dsh-webui-studio/issues">报告问题</a>
     ·
     <a href="https://github.com/CH4ACKO3/dsh-webui-studio/issues">功能建议</a>
@@ -75,7 +73,7 @@ worktree 与 child Preview Host。只有在 Preview 确认新的实时 Client gr
 Studio 的本地地址为：
 
 ```text
-http://127.0.0.1:<dsh-port>/dsh-harmony/studio
+http://127.0.0.1:<dsh-port>/studio
 ```
 
 托管数据位于 `$DSH_HOME/studio/`：

@@ -16,8 +16,6 @@
   <p>
     <a href="#getting-started"><strong>Get started</strong></a>
     ·
-    <a href="https://github.com/CH4ACKO3/dsh-harmony"><strong>dsh-harmony</strong></a>
-    ·
     <a href="https://github.com/CH4ACKO3/dsh-webui-studio/issues">Report a bug</a>
     ·
     <a href="https://github.com/CH4ACKO3/dsh-webui-studio/issues">Request a feature</a>
@@ -79,7 +77,7 @@ Stopping a Draft terminates its child Host but preserves its files and state.
 Studio is served locally at:
 
 ```text
-http://127.0.0.1:<dsh-port>/dsh-harmony/studio
+http://127.0.0.1:<dsh-port>/studio
 ```
 
 Its managed data lives under `$DSH_HOME/studio/`:

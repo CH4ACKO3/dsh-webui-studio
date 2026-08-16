@@ -14,6 +14,7 @@ import type {
 } from '../src/contracts.js'
 
 const packageRoot = fileURLToPath(new URL('..', import.meta.url))
+const studioPath = '/studio'
 const studioRoot = packageRoot
 const harmonyBin = process.env.DSH_HARMONY_BIN_ENTRY ?? fileURLToPath(import.meta.resolve('dsh-harmony/bin'))
 const root = mkdtempSync(join(tmpdir(), 'dsh-harmony-studio-'))
@@ -94,21 +95,21 @@ try {
     })
   })
 
-  const studioPage = await fetch(`${origin}/dsh-harmony/studio`)
+  const studioPage = await fetch(`${origin}${studioPath}`)
   assert.equal(studioPage.status, 200)
   const studioHtml = await studioPage.text()
   assert.match(studioHtml, /DeepSeek WebUI Studio/)
   const token = studioHtml.match(/window\.__DSH_STUDIO__=\{token:"([a-f0-9]+)"\}/)?.[1]
   assert.ok(token, 'Studio document did not contain its capability token')
 
-  const bridge = await fetch(`${origin}/dsh-harmony/studio/bridge.js`)
+  const bridge = await fetch(`${origin}${studioPath}/bridge.js`)
   assert.equal(bridge.status, 200)
   assert.doesNotMatch(await bridge.text(), new RegExp(token))
-  const studioScript = await fetch(`${origin}/dsh-harmony/studio/assets/studio.js`)
+  const studioScript = await fetch(`${origin}${studioPath}/assets/studio.js`)
   assert.equal(studioScript.status, 200)
   assert.doesNotMatch(await studioScript.text(), /process\.env\.NODE_ENV/)
   for (const icon of ['harmony-icon.png', 'harmony-icon-mono.png']) {
-    const response = await fetch(`${origin}/dsh-harmony/studio/assets/${icon}`)
+    const response = await fetch(`${origin}${studioPath}/assets/${icon}`)
     assert.equal(response.status, 200)
     assert.equal(response.headers.get('content-type'), 'image/png')
     assert.ok((await response.arrayBuffer()).byteLength > 0)
@@ -116,7 +117,7 @@ try {
 
   const call = async <T>(method: string, payload: unknown): Promise<T> => {
     const rpcId = `e2e-${method}`
-    const response = await fetch(`${origin}/dsh-harmony/studio/api/${method}`, {
+    const response = await fetch(`${origin}${studioPath}/api/${method}`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -166,7 +167,7 @@ try {
   assert.doesNotMatch(await fetch(origin).then(response => response.text()), /"id":"studio-draft"/)
   const preview = await fetch(previewUrl)
   const html = await preview.text()
-  const bridgeIndex = html.indexOf('/dsh-harmony/studio/bridge.js')
+  const bridgeIndex = html.indexOf(`${studioPath}/bridge.js`)
   const bootIndex = html.indexOf('window.__DSH_BOOT__')
   assert.notEqual(bridgeIndex, -1, 'Preview bridge was not injected into the official WebUI')
   assert.notEqual(bootIndex, -1, 'official WebUI boot manifest was not found')

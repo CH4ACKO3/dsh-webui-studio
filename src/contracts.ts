@@ -1,4 +1,4 @@
-export const STUDIO_PATH = '/dsh-harmony/studio'
+export const STUDIO_PATH = '/studio'
 export const STUDIO_API_PATH = `${STUDIO_PATH}/api`
 export const STUDIO_PREVIEW_FRAGMENT = 'dsh-studio-preview'
 export const STUDIO_PREVIEW_API_PATH = '/dsh-harmony/studio-preview/api'
