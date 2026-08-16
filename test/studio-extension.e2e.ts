@@ -202,6 +202,7 @@ try {
   assert.notEqual(built.project.graphRev, active.graphRev)
   assert.match(built.build.stdout, /studio draft built/)
   const rebuiltPreview = await fetch(previewUrl)
+  assert.equal(new URL(rebuiltPreview.url).origin, previewOrigin)
   const rebuiltHtml = await rebuiltPreview.text()
   const rebuiltGraphRev = rebuiltHtml.match(/window\.__DSH_BOOT__ = \{"rev":"([a-f0-9]+)"/)?.[1]
   assert.ok(rebuiltGraphRev, 'Rebuilt Preview did not expose its Client graph revision')
@@ -210,6 +211,12 @@ try {
 
   const stopped = await call<StudioDraftView>('studio.drafts.stop', scoped)
   assert.equal(stopped.runtime.state, 'stopped')
+  const restarted = await call<StudioDraftView>('studio.drafts.start', scoped)
+  assert.equal(restarted.runtime.state, 'running')
+  assert.ok(restarted.runtime.previewUrl)
+  assert.notEqual(restarted.runtime.bridgeCapability, started.runtime.bridgeCapability)
+  const restopped = await call<StudioDraftView>('studio.drafts.stop', scoped)
+  assert.equal(restopped.runtime.state, 'stopped')
   const secondStopped = await call<StudioDraftView>('studio.drafts.stop', { draftId: secondCreated.id })
   assert.equal(secondStopped.runtime.state, 'stopped')
 } finally {

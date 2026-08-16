@@ -175,7 +175,7 @@ button, input, textarea, select, iframe { border: 0; }
 .control-section-heading strong, .control-section-heading code, .control-section-heading span { display: block; }
 .control-section-heading strong { overflow: hidden; font-size: 12px; line-height: 17px; text-overflow: ellipsis; white-space: nowrap; }
 .control-section-heading code, .control-section-heading span { margin-top: 2px; color: var(--studio-text-secondary); font: 9px/14px var(--studio-font-mono); }
-.control-action-row { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.control-action-row { display: grid; grid-template-columns: 1fr; gap: 7px; }
 .sidebar-action-button > span { display: flex; align-items: center; justify-content: center; gap: 7px; }
 .sidebar-action-button svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .preview-control-line { display: grid; grid-template-columns: 96px minmax(0, 1fr); align-items: end; gap: 8px; }
@@ -634,6 +634,18 @@ body[data-studio-dragging="true"] iframe { pointer-events: none; }
 .source-actions { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 10px; }
 .source-actions span { color: var(--studio-text-secondary); font-size: 10px; }
 .source-actions .studio-ui-button { min-width: 104px; }
+
+.build-heading { padding-bottom: 13px; border-bottom: 1px solid var(--studio-border); }
+.build-action { display: grid; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--studio-border); }
+.build-action > div strong { font-size: 12px; }
+.build-action > div p { margin: 4px 0 0; color: var(--studio-text-secondary); font-size: 10px; line-height: 16px; }
+.build-action .studio-ui-button { width: 100%; }
+.build-notice { margin-top: 14px; }
+.build-output { margin-top: 18px; }
+.build-output > div { display: grid; gap: 4px; }
+.build-output > div strong { font-size: 11px; }
+.build-output > div code { color: var(--studio-text-secondary); font: 9px/14px var(--studio-font-mono); overflow-wrap: anywhere; }
+.build-output .selection-code { margin-top: 9px; }
 
 .readiness-heading { align-items: center; }
 .readiness-summary {

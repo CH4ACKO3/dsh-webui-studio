@@ -9,6 +9,8 @@ import type {
 } from 'dsh-harmony-react/studio'
 import {
   type StudioCreateAgentResult,
+  type StudioBuildOutput,
+  type StudioBuildResult,
   type StudioDraftSource,
   type StudioDraftView,
   type StudioDomSelection,
@@ -69,10 +71,11 @@ interface ConversationRow {
   text: string
 }
 
-const panels = ['elements', 'selection', 'source', 'readiness', 'agent'] as const
+const panels = ['elements', 'selection', 'source', 'build', 'readiness', 'agent'] as const
 type Panel = typeof panels[number]
 const leftPanels = ['instance', 'plugins'] as const
 type LeftPanel = typeof leftPanels[number]
+type InstanceOperation = 'start' | 'stop' | 'restart'
 
 const previewAspectRatios = ['16:9', '16:10', '4:3', '1:1', '9:16'] as const
 type PreviewAspectRatio = typeof previewAspectRatios[number] | 'custom'
@@ -327,7 +330,9 @@ export function App(): JSX.Element {
   const [running, setRunning] = useState(false)
   const [connected, setConnected] = useState(false)
   const [creating, setCreating] = useState(false)
-  const [instanceOperations, setInstanceOperations] = useState<Record<string, 'start' | 'stop'>>({})
+  const [instanceOperations, setInstanceOperations] = useState<Record<string, InstanceOperation>>({})
+  const [buildOperations, setBuildOperations] = useState<Record<string, true>>({})
+  const [buildOutputs, setBuildOutputs] = useState<Record<string, StudioBuildOutput>>({})
   const [confirming, setConfirming] = useState(false)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string>()
@@ -388,10 +393,14 @@ export function App(): JSX.Element {
   const selectedDraft = drafts.find(draft => draft.id === selectedDraftId)
   const hasUnsavedSource = filePath !== '' && source !== savedSource
   const selectedInstanceOperation = selectedDraftId === undefined ? undefined : instanceOperations[selectedDraftId]
+  const selectedInstanceStarting = selectedInstanceOperation === 'start' || selectedInstanceOperation === 'restart'
+  const selectedBuildRunning = selectedDraftId !== undefined && buildOperations[selectedDraftId] === true
+  const selectedBuildOutput = selectedDraftId === undefined ? undefined : buildOutputs[selectedDraftId]
   const terminalOutput = selectedDraft?.runtime.log ?? ''
   const terminalLatestLine = terminalOutput.trimEnd().split(/\r?\n/).at(-1) ?? '[studio] 实例尚未启动。'
-  const terminalRuntimeState = selectedInstanceOperation === 'start' ? 'starting' : selectedDraft?.runtime.state
-  const terminalRuntimeLabel = selectedInstanceOperation === 'stop' ? '终止中' : terminalRuntimeState === 'starting' ? '执行中'
+  const terminalRuntimeState = selectedInstanceStarting ? 'starting' : selectedDraft?.runtime.state
+  const terminalRuntimeLabel = selectedInstanceOperation === 'restart' ? '重启中'
+    : selectedInstanceOperation === 'stop' ? '终止中' : terminalRuntimeState === 'starting' ? '执行中'
     : terminalRuntimeState === 'running' ? '运行中'
       : terminalRuntimeState === 'failed' ? '失败' : undefined
   const hasLiveDraft = drafts.some(draft => draft.runtime.state === 'starting' || draft.runtime.state === 'running')
@@ -659,6 +668,13 @@ export function App(): JSX.Element {
     if (draftIdRef.current === next.id) setProject(next.project)
   }
 
+  const updateDraftProject = (draftId: string, next: StudioProjectState): void => {
+    setDrafts(current => current.map(draft => draft.id === draftId ? { ...draft, project: next } : draft))
+    if (draftIdRef.current !== draftId) return
+    projectRef.current = next
+    setProject(next)
+  }
+
   const createDraft = async (): Promise<void> => {
     if (hasUnsavedSource) {
       setPanel('source')
@@ -703,10 +719,21 @@ export function App(): JSX.Element {
     }
   }
 
-  const startDraft = async (): Promise<void> => {
+  const clearSelectedRuntime = (draftId: string): void => {
+    if (draftIdRef.current !== draftId) return
+    setSessionId(undefined)
+    setEvents([])
+    setStreaming('')
+    setRunning(false)
+    setInteraction(undefined)
+    setSelection(undefined)
+    setReadiness({ findings: [] })
+  }
+
+  const runDraftStart = async (restart: boolean): Promise<void> => {
     if (selectedDraftId === undefined) return
     const id = selectedDraftId
-    setInstanceOperations(current => ({ ...current, [id]: 'start' }))
+    setInstanceOperations(current => ({ ...current, [id]: restart ? 'restart' : 'start' }))
     setError(undefined)
     let polling = true
     const syncProgress = async (): Promise<void> => {
@@ -724,6 +751,10 @@ export function App(): JSX.Element {
     }
     const progress = syncProgress()
     try {
+      if (restart) {
+        updateDraft(await callStudio<StudioDraftView>('studio.drafts.stop', { draftId: id }))
+        clearSelectedRuntime(id)
+      }
       const next = await callStudio<StudioDraftView>('studio.drafts.start', { draftId: id })
       polling = false
       updateDraft(next)
@@ -747,6 +778,9 @@ export function App(): JSX.Element {
     }
   }
 
+  const startDraft = (): Promise<void> => runDraftStart(false)
+  const restartDraft = (): Promise<void> => runDraftStart(true)
+
   const stopDraft = async (): Promise<void> => {
     if (selectedDraftId === undefined) return
     const id = selectedDraftId
@@ -754,19 +788,37 @@ export function App(): JSX.Element {
     setError(undefined)
     try {
       updateDraft(await callStudio<StudioDraftView>('studio.drafts.stop', { draftId: id }))
-      if (draftIdRef.current === id) {
-        setSessionId(undefined)
-        setEvents([])
-        setStreaming('')
-        setRunning(false)
-        setInteraction(undefined)
-        setSelection(undefined)
-        setReadiness({ findings: [] })
-      }
+      clearSelectedRuntime(id)
     } catch (cause) {
       setError(cause instanceof StudioRpcError ? cause.message : String(cause))
     } finally {
       setInstanceOperations(current => {
+        const next = { ...current }
+        delete next[id]
+        return next
+      })
+    }
+  }
+
+  const hotReloadDraft = async (): Promise<void> => {
+    if (selectedDraftId === undefined) return
+    if (hasUnsavedSource) {
+      setPanel('source')
+      setError('当前文件尚未保存。请先保存，再热重载插件。')
+      return
+    }
+    const id = selectedDraftId
+    setBuildOperations(current => ({ ...current, [id]: true }))
+    setError(undefined)
+    try {
+      const result = await callStudio<StudioBuildResult>('studio.project.build', { draftId: id })
+      setBuildOutputs(current => ({ ...current, [id]: result.build }))
+      updateDraftProject(id, result.project)
+      if (draftIdRef.current === id) setPreviewKey(value => value + 1)
+    } catch (cause) {
+      setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+    } finally {
+      setBuildOperations(current => {
         const next = { ...current }
         delete next[id]
         return next
@@ -780,7 +832,7 @@ export function App(): JSX.Element {
     setError(undefined)
     try {
       const active = await callStudio<StudioProjectState>('studio.project.activate', { draftId: selectedDraftId, graphRev })
-      setProject(active)
+      updateDraftProject(selectedDraftId, active)
     } catch (cause) {
       setError(cause instanceof StudioRpcError ? cause.message : String(cause))
     } finally {
@@ -1295,7 +1347,8 @@ export function App(): JSX.Element {
             ? <span className="draft-tabs-empty">没有打开的草稿</span>
             : <div className="draft-tab-list" role="tablist" aria-label="草稿标签页">
                 {openDrafts.map((draft, index) => {
-                  const state = instanceOperations[draft.id] === 'start' && draft.runtime.state !== 'running'
+                  const state = (instanceOperations[draft.id] === 'start' || instanceOperations[draft.id] === 'restart')
+                    && draft.runtime.state !== 'running'
                     ? 'starting' : draft.runtime.state
                   const dirty = draft.id === selectedDraftId && hasUnsavedSource
                   return <div key={draft.id} className="draft-tab" data-active={draft.id === selectedDraftId || undefined}>
@@ -1388,9 +1441,10 @@ export function App(): JSX.Element {
                     action={<Button size="small" onClick={() => setLeftPanel('plugins')}>打开插件管理</Button>} />
                 : leftPanel === 'instance' && selectedDraft !== undefined && <section id="left-sidebar-panel-instance" role="tabpanel"
                 aria-labelledby="left-sidebar-tab-instance" className="left-sidebar-page instance-control-panel">
-                <div className="instance-summary" data-state={selectedInstanceOperation === 'start' ? 'starting' : selectedDraft.runtime.state}>
+                <div className="instance-summary" data-state={selectedInstanceStarting ? 'starting' : selectedDraft.runtime.state}>
                   <span className="instance-status-dot" aria-hidden="true" />
-                  <strong>实例{selectedInstanceOperation === 'start' ? '正在启动' : selectedInstanceOperation === 'stop' ? '正在终止'
+                  <strong>实例{selectedInstanceOperation === 'restart' ? '正在重启'
+                    : selectedInstanceOperation === 'start' ? '正在启动' : selectedInstanceOperation === 'stop' ? '正在终止'
                     : selectedDraft.runtime.state === 'running' ? '运行中'
                     : selectedDraft.runtime.state === 'failed' ? '启动失败' : '已停止'}</strong>
                 </div>
@@ -1414,8 +1468,10 @@ export function App(): JSX.Element {
                   <Button size="small" className="sidebar-action-button" onClick={() => void stopDraft()}
                     loading={selectedInstanceOperation === 'stop'} loadingLabel="终止中"
                     disabled={selectedDraft.runtime.state !== 'running' || selectedInstanceOperation !== undefined}><StopIcon />终止</Button>
-                  <Button size="small" className="sidebar-action-button" onClick={() => setPreviewKey(value => value + 1)}
-                    disabled={previewUrl === undefined || selectedInstanceOperation !== undefined}><RefreshIcon />刷新</Button>
+                  <Button size="small" className="sidebar-action-button" onClick={() => void restartDraft()}
+                    loading={selectedInstanceOperation === 'restart'} loadingLabel="重启中"
+                    disabled={selectedDraft.runtime.state !== 'running' || selectedInstanceOperation !== undefined}
+                    aria-label="重启实例"><RefreshIcon />重启</Button>
                 </div>
                 {selectedDraft.runtime.error !== undefined && <Notice tone="danger">{selectedDraft.runtime.error}</Notice>}
               </section>}
@@ -1524,8 +1580,6 @@ export function App(): JSX.Element {
               onClick={() => setPreviewFit(true)}>适应画布</Button>
           </div>
           <div className="control-action-row">
-            <Button size="small" className="sidebar-action-button" disabled={previewUrl === undefined}
-              onClick={() => setPreviewKey(value => value + 1)}><RefreshIcon />重新载入</Button>
             <Button size="small" className="sidebar-action-button preview-fullscreen-button" disabled={previewUrl === undefined}
               onClick={() => void togglePreviewFullscreen()}>
               <FullscreenIcon active={previewFullscreen} />{previewFullscreen ? '退出全屏' : '全屏'}
@@ -1538,7 +1592,8 @@ export function App(): JSX.Element {
           <div className="inspector-nav">
             <Tabs id="studio" label="Studio 工具" value={panel} onChange={(value: Panel) => setPanel(value)} options={panels.map(item => ({
               value: item,
-              label: item === 'elements' ? 'Elements' : item === 'selection' ? 'Select' : item === 'source' ? 'Source' : item === 'readiness' ? 'Ready' : 'Agent',
+              label: item === 'elements' ? 'Elements' : item === 'selection' ? 'Select' : item === 'source' ? 'Source'
+                : item === 'build' ? 'Build' : item === 'readiness' ? 'Ready' : 'Agent',
             }))} />
           </div>
 
@@ -1694,6 +1749,29 @@ export function App(): JSX.Element {
                     loadingLabel="正在保存…" disabled={source === savedSource}>保存到 Draft</Button>
                 </div>
               </>}
+        </PanelBody>}
+
+        {panel === 'build' && <PanelBody id="studio-panel-build" aria-labelledby="studio-tab-build"
+          className="panel-content build-panel" role="tabpanel">
+          <div className="panel-heading build-heading">
+            <div><h2>Build</h2><p>构建当前 Draft，并在保留 Preview Host 的同时加载新插件产物。</p></div>
+          </div>
+          <section className="build-action" aria-label="插件热重载">
+            <div><strong>热重载插件</strong><p>运行 package build，应用产物并重新载入当前 Preview。</p></div>
+            <Button variant="primary" onClick={() => void hotReloadDraft()} loading={selectedBuildRunning}
+              loadingLabel="正在构建并重载…"
+              disabled={project?.state !== 'active' || selectedDraft?.runtime.state !== 'running'}>
+              <RefreshIcon />热重载插件
+            </Button>
+          </section>
+          {project?.state !== 'active' && <Notice className="build-notice" tone="warning">
+            先启动实例并等待 Preview 激活，再热重载插件。
+          </Notice>}
+          {selectedBuildOutput !== undefined && <section className="build-output" aria-label="最近一次构建输出">
+            <div><strong>最近一次构建</strong><code>{selectedBuildOutput.argv.join(' ')}</code></div>
+            {(selectedBuildOutput.stdout !== '' || selectedBuildOutput.stderr !== '')
+              && <pre className="selection-code">{[selectedBuildOutput.stdout, selectedBuildOutput.stderr].filter(Boolean).join('\n')}</pre>}
+          </section>}
         </PanelBody>}
 
         {panel === 'readiness' && <PanelBody id="studio-panel-readiness" aria-labelledby="studio-tab-readiness"
