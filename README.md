@@ -107,7 +107,7 @@ must be saved with `Ctrl+S` or `Command+S` before switching or closing tabs.
 > [!IMPORTANT]
 > Studio requires the public Harmony extension and Draft APIs documented in
 > [`docs/harmony-api-requirements.md`](docs/harmony-api-requirements.md).
-> The currently published `dsh-harmony@0.1.2` predates those APIs.
+> `dsh-harmony@0.1.3` is the minimum compatible release.
 
 ```sh
 git clone https://github.com/CH4ACKO3/dsh-webui-studio.git
@@ -118,6 +118,18 @@ npm run check
 dsh plugin --profile web add link:$(pwd)
 dsh web
 ```
+
+To exercise the same single-package installation path as a release artifact:
+
+```sh
+studio_tarball="$(npm pack --silent)"
+dsh plugin --profile web add "file:$(pwd)/${studio_tarball}" \
+  --allow-build=dsh-harmony
+```
+
+The build permission lets Studio's Harmony dependency install its DSH shim;
+Harmony is resolved transitively and does not need to be installed as a second
+plugin.
 
 Open the Studio URL printed by the local `dsh web` process, create or import a
 Draft, and start its Preview Host.

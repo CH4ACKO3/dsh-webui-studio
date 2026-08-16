@@ -100,8 +100,8 @@ Draft 都可以从插件管理页重新打开。Source 存在未保存修改时�
 
 > [!IMPORTANT]
 > Studio 依赖 [`docs/harmony-api-requirements.md`](docs/harmony-api-requirements.md)
-> 中列出的 Harmony 公共 extension 与 Draft API。当前已发布的
-> `dsh-harmony@0.1.2` 早于这些 API。
+> 中列出的 Harmony 公共 extension 与 Draft API，最低兼容版本为
+> `dsh-harmony@0.1.3`。
 
 ```sh
 git clone https://github.com/CH4ACKO3/dsh-webui-studio.git
@@ -112,6 +112,17 @@ npm run check
 dsh plugin --profile web add link:$(pwd)
 dsh web
 ```
+
+如需用发布产物验证相同的单包安装流程：
+
+```sh
+studio_tarball="$(npm pack --silent)"
+dsh plugin --profile web add "file:$(pwd)/${studio_tarball}" \
+  --allow-build=dsh-harmony
+```
+
+该构建权限仅用于让 Studio 的 Harmony 依赖安装 DSH shim；Harmony 会作为传递依赖自动解析，
+无需作为第二个插件单独安装。
 
 打开本地 `dsh web` 进程输出的 Studio 地址，创建或导入 Draft，然后启动它的 Preview Host。
 

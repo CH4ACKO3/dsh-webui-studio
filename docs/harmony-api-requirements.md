@@ -15,10 +15,8 @@ The Studio production path requires Harmony to provide:
 - source Patch declaration metadata and optional render trace metadata used by
   Preview inspection.
 
-These APIs exist in the captured local Harmony public entry, but they are not
-part of the currently published `dsh-harmony@0.1.2` artifact. The package can be
-installed, typechecked, tested, and built against the registry release, but its
-Host integration requires a Harmony release containing those public APIs.
+These APIs are public in `dsh-harmony@0.1.3`, which is the minimum compatible
+registry release for Studio Host integration.
 
 `dsh-harmony-react@0.1.0` exposes the generic `./studio` React element and
 variable registration API used by the browser and Preview bridge. That package
