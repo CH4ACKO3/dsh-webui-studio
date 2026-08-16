@@ -1660,11 +1660,11 @@ export function App(): JSX.Element {
 
         {panel === 'selection' && <PanelBody id="studio-panel-selection" aria-labelledby="studio-tab-selection" className="panel-content selection-panel" role="tabpanel">
           <div className="panel-heading">
-            <div><h2>元素与 Patch</h2><p>上游快照只读；所有修改写入当前 Draft 图层。</p></div>
+            <div><h2>元素与 Patch</h2><p>单击切换目标，双击固定描边；所有修改写入当前 Draft 图层。</p></div>
           </div>
           {selection === undefined
             ? <EmptyState title="在 Preview 中选择一个元素"
-                description="切换到 Inspect，再点击页面元素。按 Escape 可立即回到 Browse。" />
+                description="切换到 Inspect 后单击页面元素。双击可固定描边，点击其他位置解除；Escape 返回 Browse。" />
             : <section className="selection-result" aria-label="已选元素">
                 <div className="selection-title">
                   <code>{selection.tag}{selection.id === undefined ? '' : `#${selection.id}`}

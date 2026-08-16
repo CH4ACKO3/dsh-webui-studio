@@ -210,8 +210,7 @@ function showOverlay(element?: Element): void {
   })
 }
 
-function pointer(event: PointerEvent): void {
-  if (locked) return
+function elementAtPointer(event: MouseEvent | PointerEvent): Element | undefined {
   const eventTarget = event.target !== null && (event.target as Node).nodeType === Node.ELEMENT_NODE
     ? event.target as Element
     : undefined
@@ -220,16 +219,20 @@ function pointer(event: PointerEvent): void {
     : getElementAtPoint(event.clientX, event.clientY, {
         filter: candidate => candidate !== overlay && candidate !== shield && isElementGrabbable(candidate),
       })
-  showOverlay(element ?? undefined)
+  return element ?? undefined
+}
+
+function pointer(event: PointerEvent): void {
+  if (!locked) showOverlay(elementAtPointer(event))
 }
 
 async function click(event: MouseEvent): Promise<void> {
   event.preventDefault()
   event.stopImmediatePropagation()
-  if (candidate === undefined) return
-  locked = true
+  const selected = elementAtPointer(event)
+  if (locked && selected !== candidate) unlockSelection()
+  if (selected === undefined) return
   const request = ++selectionRequest
-  const selected = candidate
   try {
     const selection = await snapshot(selected)
     if (mode === 'inspect' && request === selectionRequest) post({ type: 'selection', selection })
@@ -238,6 +241,15 @@ async function click(event: MouseEvent): Promise<void> {
       post({ type: 'selection-error', error: error instanceof Error ? error.message : String(error) })
     }
   }
+}
+
+function doubleClick(event: MouseEvent): void {
+  event.preventDefault()
+  event.stopImmediatePropagation()
+  const selected = elementAtPointer(event)
+  if (selected === undefined) return
+  locked = true
+  showOverlay(selected)
 }
 
 function pointerleave(): void {
@@ -306,6 +318,7 @@ function setMode(next: 'browse' | 'inspect'): void {
   shield?.removeEventListener('pointermove', pointer)
   shield?.removeEventListener('pointerleave', pointerleave)
   shield?.removeEventListener('click', click)
+  shield?.removeEventListener('dblclick', doubleClick)
   shield?.removeEventListener('wheel', suppress)
   shield?.removeEventListener('contextmenu', suppress)
   shield?.remove()
@@ -323,6 +336,7 @@ function setMode(next: 'browse' | 'inspect'): void {
     shield.addEventListener('pointermove', pointer)
     shield.addEventListener('pointerleave', pointerleave)
     shield.addEventListener('click', click)
+    shield.addEventListener('dblclick', doubleClick)
     shield.addEventListener('wheel', suppress, { passive: false })
     shield.addEventListener('contextmenu', suppress)
     document.addEventListener('keydown', keydown, true)
