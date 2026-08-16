@@ -1,0 +1,190 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-16T20:20:36Z",
+  "title": "Design System: DeepSeek WebUI Studio",
+  "extensions": {
+    "colorMeta": {
+      "primary-accent": {
+        "role": "primary",
+        "displayName": "Studio Accent",
+        "canonical": "var(--studio-accent)",
+        "tonalRamp": [
+          "color-mix(in srgb, var(--studio-accent) 35%, black)",
+          "color-mix(in srgb, var(--studio-accent) 55%, black)",
+          "color-mix(in srgb, var(--studio-accent) 75%, black)",
+          "color-mix(in srgb, var(--studio-accent) 90%, black)",
+          "color-mix(in srgb, var(--studio-accent) 90%, white)",
+          "color-mix(in srgb, var(--studio-accent) 70%, white)",
+          "color-mix(in srgb, var(--studio-accent) 45%, white)",
+          "color-mix(in srgb, var(--studio-accent) 20%, white)"
+        ]
+      },
+      "neutral-canvas": {
+        "role": "neutral",
+        "displayName": "Workbench Canvas",
+        "canonical": "var(--studio-canvas)",
+        "tonalRamp": ["#080d13", "#111923", "#192431", "#405064", "#aeb9c8", "#cdd5df", "#e8edf3", "#f9fafc"]
+      },
+      "neutral-panel": {
+        "role": "neutral",
+        "displayName": "Panel",
+        "canonical": "var(--studio-panel)",
+        "tonalRamp": ["#080d13", "#111923", "#192431", "#405064", "#aeb9c8", "#cdd5df", "#f0f3f7", "#f9fafc"]
+      },
+      "neutral-raised": {
+        "role": "neutral",
+        "displayName": "Raised Panel",
+        "canonical": "var(--studio-panel-raised)",
+        "tonalRamp": ["#080d13", "#111923", "#192431", "#405064", "#aeb9c8", "#cdd5df", "#f9fafc", "#ffffff"]
+      },
+      "neutral-control": {
+        "role": "neutral",
+        "displayName": "Control Surface",
+        "canonical": "var(--studio-control)",
+        "tonalRamp": ["#080d13", "#111923", "#202d3b", "#34475c", "#aeb9c8", "#dce4ef", "#f0f3f7", "#ffffff"]
+      },
+      "neutral-control-hover": {
+        "role": "neutral",
+        "displayName": "Control Hover",
+        "canonical": "var(--studio-control-hover)",
+        "tonalRamp": ["#080d13", "#111923", "#2a3a4c", "#405064", "#aeb9c8", "#cdd5df", "#e5eaf1", "#ffffff"]
+      },
+      "neutral-control-pressed": {
+        "role": "neutral",
+        "displayName": "Control Pressed",
+        "canonical": "var(--studio-control-pressed)",
+        "tonalRamp": ["#080d13", "#111923", "#34475c", "#405064", "#aeb9c8", "#cdd5df", "#dce4ef", "#ffffff"]
+      },
+      "neutral-text": {
+        "role": "neutral",
+        "displayName": "Primary Text",
+        "canonical": "var(--studio-text)",
+        "tonalRamp": ["#080d13", "#18202c", "#243044", "#556174", "#a5b3c3", "#c4ceda", "#e8edf3", "#f4f7fb"]
+      },
+      "neutral-text-secondary": {
+        "role": "neutral",
+        "displayName": "Secondary Text",
+        "canonical": "var(--studio-text-secondary)",
+        "tonalRamp": ["#080d13", "#18202c", "#243044", "#556174", "#a5b3c3", "#c4ceda", "#e8edf3", "#f4f7fb"]
+      },
+      "neutral-border": {
+        "role": "neutral",
+        "displayName": "Divider",
+        "canonical": "var(--studio-border)",
+        "tonalRamp": ["#080d13", "#111923", "#192431", "#405064", "#60738a", "#aeb9c8", "#cdd5df", "#f9fafc"]
+      },
+      "neutral-focus": {
+        "role": "primary",
+        "displayName": "Keyboard Focus",
+        "canonical": "var(--studio-focus)",
+        "tonalRamp": ["#07111e", "#0d2b63", "#194db9", "#1f63e0", "#78adff", "#a2c4ff", "#dce7ff", "#f4f7fb"]
+      },
+      "neutral-overlay": {
+        "role": "neutral",
+        "displayName": "Modal Overlay",
+        "canonical": "var(--studio-overlay)",
+        "tonalRamp": ["rgb(0 0 0 / 90%)", "rgb(0 0 0 / 75%)", "rgb(0 0 0 / 66%)", "rgb(17 24 35 / 50%)", "rgb(17 24 35 / 34%)", "rgb(17 24 35 / 24%)", "rgb(17 24 35 / 14%)", "rgb(17 24 35 / 6%)"]
+      }
+    },
+    "typographyMeta": {
+      "headline": { "displayName": "Settings Page Heading", "purpose": "Names the active settings section." },
+      "title": { "displayName": "Dialog Title", "purpose": "Names the modal in its restrained title bar." },
+      "body": { "displayName": "Utility Body", "purpose": "Carries descriptions and navigation labels." },
+      "label": { "displayName": "Setting Label", "purpose": "Anchors each divider-led settings row." },
+      "control": { "displayName": "Compact Control", "purpose": "Labels settings controls at Studio density." }
+    },
+    "roundedMeta": {
+      "indicator": { "value": "2px", "role": "Hairline indicators and insertion markers." },
+      "compact": { "value": "3px", "role": "Especially dense instance controls." },
+      "sm": { "value": "6px", "role": "Compact navigation and icon controls." },
+      "md": { "value": "9px", "role": "Ordinary controls and grouped surfaces." },
+      "lg": { "value": "13px", "role": "Dialogs and major overlays." }
+    },
+    "shadows": [
+      { "name": "modal-panel", "value": "var(--studio-shadow-panel)", "purpose": "Lifts the settings dialog above the workbench." },
+      { "name": "selected-choice", "value": "0 1px 3px rgb(19 31 49 / 12%)", "purpose": "Adds restrained definition to the selected theme option." },
+      { "name": "sidebar-header", "value": "0 5px 14px -13px rgb(17 31 48 / 70%)", "purpose": "Separates a raised sidebar header without making it opaque." },
+      { "name": "preview-mode-selection", "value": "0 2px 7px rgb(19 55 112 / 26%)", "purpose": "Keeps the Browse and Inspect selection legible over the workbench." }
+    ],
+    "motion": [
+      { "name": "fast", "value": "140ms", "purpose": "Existing Studio state-transition duration." },
+      { "name": "ease-out", "value": "cubic-bezier(.16, 1, .3, 1)", "purpose": "Existing Studio easing for direct, settled motion." },
+      { "name": "dialog-enter", "value": "160ms var(--studio-ease-out)", "purpose": "Modal entrance when reduced motion is not requested." }
+    ],
+    "breakpoints": [
+      { "name": "settings-compact", "value": "560px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Settings Toolbar Trigger",
+      "kind": "button",
+      "refersTo": "settings-trigger",
+      "description": "Compact icon-only entry point that expands to a 40px mobile target.",
+      "html": "<button class=\"ds-settings-trigger\" type=\"button\" aria-label=\"Settings\" title=\"Settings\"><svg aria-hidden=\"true\" viewBox=\"0 0 20 20\"><path d=\"M7.5 3.8h9M3.5 3.8h1.4M12.5 10h4M3.5 10h6.4M9.5 16.2h7M3.5 16.2h3.4\"/><circle cx=\"6.2\" cy=\"3.8\" r=\"1.3\"/><circle cx=\"11.2\" cy=\"10\" r=\"1.3\"/><circle cx=\"8.2\" cy=\"16.2\" r=\"1.3\"/></svg></button>",
+      "css": ".ds-settings-trigger { width: 28px; min-height: 28px; display: inline-grid; place-items: center; padding: 0; border: 1px solid color-mix(in srgb, var(--studio-border) 72%, transparent); border-radius: var(--studio-radius-sm); background: color-mix(in srgb, var(--studio-control) 68%, transparent); color: var(--studio-text-secondary); cursor: pointer; } .ds-settings-trigger svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.45; stroke-linecap: round; stroke-linejoin: round; } .ds-settings-trigger:hover { background: var(--studio-control-hover); color: var(--studio-text); } .ds-settings-trigger:focus-visible { outline: 1px solid var(--studio-focus); outline-offset: 1px; } .ds-settings-trigger:active { transform: translateY(1px); } @media (max-width: 560px) { .ds-settings-trigger { width: 40px; min-height: 40px; } }"
+    },
+    {
+      "name": "Settings Dialog Shell",
+      "kind": "custom",
+      "refersTo": "settings-dialog",
+      "description": "Centered modal with a restrained title bar and viewport-aware dimensions.",
+      "html": "<section class=\"ds-settings-dialog\" role=\"dialog\" aria-labelledby=\"ds-settings-title\"><header><h2 id=\"ds-settings-title\">Settings</h2><button type=\"button\" aria-label=\"Close settings\"><svg aria-hidden=\"true\" viewBox=\"0 0 20 20\"><path d=\"M6 6l8 8M14 6l-8 8\"/></svg></button></header><div class=\"ds-settings-dialog-body\">Settings content</div></section>",
+      "css": ".ds-settings-dialog { width: min(780px, calc(100vw - 40px)); height: min(460px, calc(100vh - 40px)); overflow: hidden; display: grid; grid-template-rows: 52px minmax(0, 1fr); border: 1px solid var(--studio-border); border-radius: var(--studio-radius-lg); background: var(--studio-panel); color: var(--studio-text); box-shadow: var(--studio-shadow-panel); font-family: var(--studio-font-sans); } .ds-settings-dialog header { display: flex; align-items: center; justify-content: space-between; padding: 0 14px 0 18px; border-bottom: 1px solid var(--studio-border); background: var(--studio-panel-raised); } .ds-settings-dialog h2 { margin: 0; font-size: var(--studio-font-size-xl); line-height: 20px; letter-spacing: -.01em; } .ds-settings-dialog header button { width: 28px; min-height: 28px; display: grid; place-items: center; border: 0; border-radius: var(--studio-radius-sm); background: transparent; color: var(--studio-text-secondary); cursor: pointer; } .ds-settings-dialog header button:hover { background: var(--studio-control-hover); color: var(--studio-text); } .ds-settings-dialog header button:focus-visible { outline: 1px solid var(--studio-focus); } .ds-settings-dialog header svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; } .ds-settings-dialog-body { padding: 22px 26px 30px; background: var(--studio-panel-raised); color: var(--studio-text-secondary); font-size: var(--studio-font-size-md); } @media (max-width: 560px) { .ds-settings-dialog { width: calc(100vw - 20px); height: min(500px, calc(100vh - 20px)); grid-template-rows: 48px minmax(0, 1fr); } .ds-settings-dialog header { padding-inline: 14px 10px; } .ds-settings-dialog header button { width: 40px; min-height: 40px; } .ds-settings-dialog-body { padding: 18px 14px 24px; } }"
+    },
+    {
+      "name": "Settings Section Navigation",
+      "kind": "nav",
+      "refersTo": "settings-nav-item",
+      "description": "Vertical desktop tabs that become horizontal at the compact breakpoint.",
+      "html": "<nav class=\"ds-settings-nav\" role=\"tablist\" aria-orientation=\"vertical\" aria-label=\"Settings sections\"><button type=\"button\" role=\"tab\" aria-selected=\"true\"><svg aria-hidden=\"true\" viewBox=\"0 0 20 20\"><path d=\"M4 5.5h12M4 10h12M4 14.5h12\"/></svg><span>General</span></button><button type=\"button\" role=\"tab\" aria-selected=\"false\" tabindex=\"-1\"><svg aria-hidden=\"true\" viewBox=\"0 0 20 20\"><circle cx=\"10\" cy=\"10\" r=\"3.2\"/></svg><span>Appearance</span></button></nav>",
+      "css": ".ds-settings-nav { width: 174px; display: flex; flex-direction: column; gap: 3px; padding: 12px 10px; border-right: 1px solid var(--studio-border); background: color-mix(in srgb, var(--studio-control) 48%, var(--studio-panel)); font-family: var(--studio-font-sans); } .ds-settings-nav button { min-height: 34px; display: flex; align-items: center; gap: 9px; padding: 0 10px; border: 0; border-radius: var(--studio-radius-sm); background: transparent; color: var(--studio-text-secondary); font-size: var(--studio-font-size-md); font-weight: 600; cursor: pointer; } .ds-settings-nav button:hover { background: var(--studio-control-hover); color: var(--studio-text); } .ds-settings-nav button[aria-selected=\"true\"] { background: var(--studio-control-pressed); color: var(--studio-text); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--studio-border) 65%, transparent); } .ds-settings-nav button:focus-visible { outline: 1px solid var(--studio-focus); } .ds-settings-nav svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; } @media (max-width: 560px) { .ds-settings-nav { width: auto; flex-direction: row; gap: 4px; padding: 8px 10px; border-right: 0; border-bottom: 1px solid var(--studio-border); } .ds-settings-nav button { min-height: 42px; flex: 1; justify-content: center; padding-inline: 8px; } }"
+    },
+    {
+      "name": "Settings Content Row",
+      "kind": "custom",
+      "description": "Flat divider-led row with explanatory copy and one trailing control.",
+      "html": "<div class=\"ds-settings-row\"><div><strong>Language</strong><p>Choose the language used across Studio.</p></div><select aria-label=\"Interface language\"><option>English</option><option>简体中文</option></select></div>",
+      "css": ".ds-settings-row { min-height: 84px; display: grid; grid-template-columns: minmax(220px, 1fr) max-content; align-items: center; gap: 28px; padding-block: 16px; border-bottom: 1px solid var(--studio-border); color: var(--studio-text); font-family: var(--studio-font-sans); } .ds-settings-row strong { display: block; font-size: var(--studio-font-size-lg); line-height: 18px; } .ds-settings-row p { margin: 5px 0 0; color: var(--studio-text-secondary); font-size: var(--studio-font-size-md); line-height: 17px; } .ds-settings-row select { min-width: 190px; min-height: 34px; padding: 0 30px 0 10px; border: 1px solid var(--studio-border); border-radius: var(--studio-radius-md); background: var(--studio-panel-raised); color: var(--studio-text); cursor: pointer; } .ds-settings-row select:hover { border-color: var(--studio-border-strong); } .ds-settings-row select:focus-visible { outline: 1px solid var(--studio-focus); } @media (max-width: 560px) { .ds-settings-row { min-height: 0; grid-template-columns: 1fr; align-items: start; gap: 14px; padding-block: 16px 20px; } .ds-settings-row select { width: 100%; min-height: 40px; } }"
+    },
+    {
+      "name": "Settings Theme Choice",
+      "kind": "button",
+      "refersTo": "settings-choice-mobile",
+      "description": "Existing Studio radiogroup reused for theme choices.",
+      "html": "<div class=\"ds-settings-choice\" role=\"radiogroup\" aria-label=\"Color theme\"><button type=\"button\" role=\"radio\" aria-checked=\"true\">Light</button><button type=\"button\" role=\"radio\" aria-checked=\"false\" tabindex=\"-1\">System</button><button type=\"button\" role=\"radio\" aria-checked=\"false\" tabindex=\"-1\">Dark</button></div>",
+      "css": ".ds-settings-choice { display: inline-flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--studio-border); border-radius: var(--studio-radius-md); background: var(--studio-control); font-family: var(--studio-font-sans); } .ds-settings-choice button { min-width: 74px; min-height: 24px; padding: 0 8px; border: 0; border-radius: var(--studio-radius-sm); background: transparent; color: var(--studio-text-secondary); font-size: var(--studio-font-size-sm); font-weight: 600; cursor: pointer; } .ds-settings-choice button:hover { color: var(--studio-text); } .ds-settings-choice button[aria-checked=\"true\"] { background: var(--studio-panel-raised); color: var(--studio-accent); box-shadow: 0 1px 3px rgb(19 31 49 / 12%); } .ds-settings-choice button:focus-visible { outline: 1px solid var(--studio-focus); } .ds-settings-choice button:active { transform: translateY(1px); } @media (max-width: 560px) { .ds-settings-choice { width: 100%; } .ds-settings-choice button { min-width: 0; min-height: 40px; flex: 1; } }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Native Plugin Workbench",
+    "overview": "Studio should feel like a precise native developer workbench. It is compact, calm, and operational: browser-like draft tabs, dense tool rails, transparent workspace layers, focused modal tasks, and familiar controls keep the plugin preview visually primary.\n\nThis contract records the shared Studio palette, type ramp, shape scale, and depth vocabulary. The settings components are the first fully documented surface; they inherit the same tokens, theme behavior, internationalization, and responsive control geometry as the surrounding workbench.",
+    "keyCharacteristics": [
+      "Compact icon-only entry point.",
+      "Theme-aware, divider-led modal surfaces.",
+      "Orientation-aware keyboard navigation.",
+      "40–42px mobile controls."
+    ],
+    "rules": [
+      { "name": "The Theme Inheritance Rule", "body": "Settings must consume existing Studio color primitives; do not introduce a settings-only palette or hard-code a single theme.", "section": "colors" },
+      { "name": "The Utility Type Rule", "body": "Keep settings copy within the existing Studio type scale; do not add a display face or marketing-sized headings to this dialog.", "section": "typography" },
+      { "name": "The Orientation Matches Geometry Rule", "body": "Vertical navigation uses up/down arrows and `aria-orientation=\"vertical\"`; horizontal navigation uses left/right arrows and `aria-orientation=\"horizontal\"`. Home and End remain available in both modes.", "section": "layout" },
+      { "name": "The Modal-Only Lift Rule", "body": "Elevate the dialog as a whole; keep internal settings content flat and divider-led.", "section": "elevation" },
+      { "name": "The Flat Rows Rule", "body": "Settings rows are sections divided by rules, not individually rounded cards.", "section": "shapes" },
+      { "name": "The Reuse Rule", "body": "Settings must use the existing icon-button, select, theme, locale registry, and localization primitives instead of creating parallel variants.", "section": "components" },
+      { "name": "The Mobile Reach Rule", "body": "Interactive settings controls must provide 40–42px targets at widths up to 560px without inflating the desktop density.", "section": "components" }
+    ],
+    "dos": [
+      "Do preserve the existing Studio shell, theme tokens, type scale, focus treatment, and localization path.",
+      "Do keep the title bar restrained and the content rows flat, scannable, and separated by dividers.",
+      "Do change both keyboard semantics and hit areas when navigation changes orientation at 560px.",
+      "Do keep icons paired with localized labels in navigation, even when the toolbar entry point is icon-only."
+    ],
+    "donts": [
+      "Don't turn settings into a separate visual world, branded landing surface, or stack of floating cards.",
+      "Don't use desktop-sized 28–34px interactive targets on the narrow layout.",
+      "Don't rotate navigation visually without also updating `aria-orientation`, arrow-key behavior, and focus movement.",
+      "Don't duplicate theme or language state outside the existing primitives."
+    ]
+  }
+}

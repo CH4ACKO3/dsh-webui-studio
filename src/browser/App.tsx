@@ -1,4 +1,15 @@
-import { type CSSProperties, FormEvent, type PointerEvent as ReactPointerEvent, useEffect, useId, useMemo, useRef, useState } from 'react'
+import {
+  type CSSProperties,
+  FormEvent,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+  type WheelEvent as ReactWheelEvent,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { createPortal } from 'react-dom'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {
@@ -9,9 +20,9 @@ import type {
 } from 'dsh-harmony-react/studio'
 import {
   type StudioCreateAgentResult,
+  type StudioCreateDraftInput,
   type StudioBuildOutput,
   type StudioBuildResult,
-  type StudioDraftSource,
   type StudioDraftView,
   type StudioDomSelection,
   type StudioHarmonyInspection,
@@ -28,6 +39,7 @@ import {
 import { apiValue, studioApi, subscribeStudioEvents } from './events'
 import { callStudio, StudioRpcError } from './rpc'
 import { CodeEditor } from './CodeEditor'
+import { useStudioLocale, type StudioTranslate } from './i18n'
 import {
   clamp,
   constrainRect,
@@ -52,8 +64,18 @@ import {
   Status,
   Tabs,
   Textarea,
-  ThemeSwitcher,
 } from './ui'
+import { CreateDraftDialog } from './CreateDraftDialog'
+import { SettingsDialog, SettingsIcon } from './SettingsDialog'
+import {
+  boundedBridgeText,
+  isBridgeEnvelope,
+  isBridgeOffer,
+  isFinitePreviewPan,
+  isFinitePreviewZoom,
+  isStudioDomSelection,
+  isStudioRegistrySnapshot,
+} from './preview-messages'
 
 interface SessionEvent {
   type: string
@@ -77,6 +99,19 @@ type Panel = typeof panels[number]
 const leftPanels = ['instance', 'plugins'] as const
 type LeftPanel = typeof leftPanels[number]
 type InstanceOperation = 'start' | 'stop' | 'restart'
+type DraftTabDrag = {
+  draftId: string
+  sourceIndex: number
+  targetIndex?: number
+  indicator: boolean
+  span: number
+  width: number
+}
+type PreviewZoomFocus = {
+  x: number
+  y: number
+  phase: 'active' | 'fading'
+}
 
 const previewAspectRatios = ['16:9', '16:10', '4:3', '1:1', '9:16'] as const
 type PreviewAspectRatio = typeof previewAspectRatios[number] | 'custom'
@@ -87,6 +122,8 @@ const RIGHT_SIDEBAR_MIN = 320
 const RIGHT_SIDEBAR_MAX = 560
 const PREVIEW_GUTTER = 32
 const PREVIEW_MIN_SIZE = { width: 1, height: 1 }
+const PREVIEW_ZOOM_FOCUS_FADE_MS = 10_000
+const PREVIEW_ZOOM_FOCUS_REDUCED_FADE_MS = 240
 const TERMINAL_MIN_SIZE = { width: 280, height: 220 }
 const resizeDirections: readonly ResizeDirection[] = ['n', 'e', 's', 'w', 'ne', 'se', 'sw', 'nw']
 
@@ -104,6 +141,16 @@ function FullscreenIcon({ active }: { active: boolean }): JSX.Element {
   return active
     ? <svg aria-hidden="true" viewBox="0 0 20 20"><path d="M8 4v4H4M12 4v4h4M8 16v-4H4M12 16v-4h4" /></svg>
     : <svg aria-hidden="true" viewBox="0 0 20 20"><path d="M8 4H4v4M12 4h4v4M8 16H4v-4M12 16h4v-4" /></svg>
+}
+
+function AspectRatioLockIcon({ locked }: { locked: boolean }): JSX.Element {
+  return locked
+    ? <svg aria-hidden="true" viewBox="0 0 20 20">
+        <path d="M7.5 7.5l-2 2a3 3 0 0 0 4.2 4.2l2-2M12.5 12.5l2-2a3 3 0 0 0-4.2-4.2l-2 2M7.5 12.5l5-5" />
+      </svg>
+    : <svg aria-hidden="true" viewBox="0 0 20 20">
+        <path d="M7 8l-1.5 1.5a3 3 0 0 0 4.2 4.2l1.5-1.5M13 12l1.5-1.5a3 3 0 0 0-4.2-4.2L8.8 7.8M5 4l10 12" />
+      </svg>
 }
 
 function TerminalLayoutIcon({ expanded }: { expanded: boolean }): JSX.Element {
@@ -161,9 +208,9 @@ function previewBounds(width: number, height: number): LayoutRect {
   }
 }
 
-function runtimeLabel(state: StudioDraftView['runtime']['state']): string {
-  return state === 'running' ? '实例运行中' : state === 'starting' ? '实例启动中'
-    : state === 'failed' ? '实例启动失败' : '实例已停止'
+function runtimeLabel(state: StudioDraftView['runtime']['state'], t: StudioTranslate): string {
+  return state === 'running' ? t('runtimeRunning') : state === 'starting' ? t('runtimeStarting')
+    : state === 'failed' ? t('runtimeFailed') : t('runtimeStopped')
 }
 
 function deviceViewport(): { width: number; height: number } {
@@ -238,31 +285,33 @@ function PatchProvenance({
   patches,
   currentOwner,
   boundaryMatched,
+  t,
 }: {
   patches: readonly StudioPatchTrace[]
   currentOwner?: string
   boundaryMatched: boolean
+  t: StudioTranslate
 }): JSX.Element {
   const externallyPatched = boundaryMatched && currentOwner !== undefined
     && patches.some(patch => patch.owner !== currentOwner)
 
-  return <section className="patch-provenance" aria-label="Render-path Patch candidates">
+  return <section className="patch-provenance" aria-label={t('patchCandidates')}>
     <div className="section-heading">
-      <strong>Render-path Patch candidates</strong>
-      <Badge tone="warning">candidate</Badge>
+      <strong>{t('patchCandidates')}</strong>
+      <Badge tone="warning">{t('patchCandidate')}</Badge>
     </div>
     {externallyPatched && <Notice tone="warning">
-      当前 Draft 边界内的这条渲染路径包含其他插件的候选 Patch 影响；选中节点未必能在 Element source 中直接对应。
+      {t('patchExternalNotice')}
     </Notice>}
     {patches.length === 0
-      ? <p className="inspection-empty">当前渲染路径未提供 candidate trace；这不表示没有 Patch 参与。</p>
+      ? <p className="inspection-empty">{t('patchEmpty')}</p>
       : <div className="patch-trace-list">{patches.map(patch => <article
           key={`${patch.owner}:${patch.key}:${patch.effect}:${patch.declaration}:${patch.target.package}:${patch.target.file}`}>
           <div><strong>{patch.owner}</strong><code>{patch.key}</code></div>
           <dl>
-            <div><dt>Effect</dt><dd>{patch.effect}</dd></div>
-            <div><dt>Declaration</dt><dd><code>{patch.declaration}</code></dd></div>
-            <div><dt>Target</dt><dd><code>{patch.target.package} · {patch.target.file}</code></dd></div>
+            <div><dt>{t('effect')}</dt><dd>{patch.effect}</dd></div>
+            <div><dt>{t('declaration')}</dt><dd><code>{patch.declaration}</code></dd></div>
+            <div><dt>{t('target')}</dt><dd><code>{patch.target.package} · {patch.target.file}</code></dd></div>
           </dl>
         </article>)}</div>}
   </section>
@@ -300,16 +349,15 @@ function eventSessionId(envelope: StudioServerRequest<Record<string, unknown>>):
 }
 
 export function App(): JSX.Element {
+  const { t } = useStudioLocale()
   const initialViewport = useMemo(deviceViewport, [])
   const [drafts, setDrafts] = useState<StudioDraftView[]>([])
   const [openDraftIds, setOpenDraftIds] = useState<string[]>([])
+  const [draftTabDrag, setDraftTabDrag] = useState<DraftTabDrag>()
   const [loadingDrafts, setLoadingDrafts] = useState(true)
   const [selectedDraftId, setSelectedDraftId] = useState<string>()
-  const [showCreate, setShowCreate] = useState(false)
-  const [sourceKind, setSourceKind] = useState<StudioDraftSource['kind']>('new')
-  const [packageName, setPackageName] = useState('dsh-webui-draft')
-  const [pluginDirectory, setPluginDirectory] = useState('')
-  const [profileMode, setProfileMode] = useState<'main-home' | 'custom'>('main-home')
+  const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [project, setProject] = useState<StudioProjectState>()
   const [sessionId, setSessionId] = useState<string>()
   const [events, setEvents] = useState<SessionEvent[]>([])
@@ -317,7 +365,8 @@ export function App(): JSX.Element {
   const [streaming, setStreaming] = useState('')
   const [running, setRunning] = useState(false)
   const [connected, setConnected] = useState(false)
-  const [creating, setCreating] = useState(false)
+  const [creatingAgentDraftId, setCreatingAgentDraftId] = useState<string>()
+  const [exportingDraftId, setExportingDraftId] = useState<string>()
   const [instanceOperations, setInstanceOperations] = useState<Record<string, InstanceOperation>>({})
   const [buildOperations, setBuildOperations] = useState<Record<string, true>>({})
   const [buildOutputs, setBuildOutputs] = useState<Record<string, StudioBuildOutput>>({})
@@ -330,6 +379,7 @@ export function App(): JSX.Element {
   const [previewAspectRatio, setPreviewAspectRatio] = useState<PreviewAspectRatio>(
     () => aspectRatioLabel(initialViewport.width, initialViewport.height),
   )
+  const [previewAspectLocked, setPreviewAspectLocked] = useState(false)
   const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(false)
   const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(false)
   const [leftPanel, setLeftPanel] = useState<LeftPanel>('instance')
@@ -339,7 +389,7 @@ export function App(): JSX.Element {
   const [previewStageSize, setPreviewStageSize] = useState({ width: 0, height: 0 })
   const [previewViewport, setPreviewViewport] = useState(initialViewport)
   const [previewScale, setPreviewScale] = useState(1)
-  const [previewFit, setPreviewFit] = useState(true)
+  const [previewZoomFocus, setPreviewZoomFocus] = useState<PreviewZoomFocus>()
   const [previewOrigin, setPreviewOrigin] = useState({ x: PREVIEW_GUTTER, y: PREVIEW_GUTTER })
   const [selection, setSelection] = useState<StudioDomSelection>()
   const [registry, setRegistry] = useState<StudioRegistrySnapshot>(EMPTY_REGISTRY)
@@ -356,7 +406,7 @@ export function App(): JSX.Element {
   const [fileBusy, setFileBusy] = useState(false)
   const [inspection, setInspection] = useState<StudioHarmonyInspection>({ patches: [], targets: [] })
   const [readiness, setReadiness] = useState<StudioReadinessReport>({ findings: [] })
-  const [packing, setPacking] = useState(false)
+  const [packingDraftId, setPackingDraftId] = useState<string>()
   const sessionRef = useRef<string>()
   const runningVersion = useRef(0)
   const draftIdRef = useRef<string>()
@@ -368,12 +418,18 @@ export function App(): JSX.Element {
   const terminalToggleRef = useRef<HTMLButtonElement>(null)
   const terminalPinnedRef = useRef(true)
   const previewPort = useRef<MessagePort>()
+  const previewBridgeHandlerRef = useRef<(event: MessageEvent) => void>(() => {})
   const previewNonce = useRef(crypto.randomUUID())
   const previewModeRef = useRef(previewMode)
+  const previewTransformRef = useRef({ scale: previewScale, origin: previewOrigin })
+  const previewLockedAspectRatioRef = useRef(initialViewport.width / initialViewport.height)
   const previewUpdateQueue = useRef<Promise<void>>(Promise.resolve())
   const workspaceUpdateQueue = useRef<Promise<void>>(Promise.resolve())
+  const suppressDraftTabClickRef = useRef<string>()
   const selectionResolve = useRef(0)
   const fileRequest = useRef(0)
+  const draftViewRequest = useRef(0)
+  const packRequest = useRef(0)
   const activeDragCleanupRef = useRef<() => void>()
   const openDrafts = openDraftIds.flatMap(id => {
     const draft = drafts.find(candidate => candidate.id === id)
@@ -386,12 +442,13 @@ export function App(): JSX.Element {
   const selectedBuildRunning = selectedDraftId !== undefined && buildOperations[selectedDraftId] === true
   const selectedBuildOutput = selectedDraftId === undefined ? undefined : buildOutputs[selectedDraftId]
   const terminalOutput = selectedDraft?.runtime.log ?? ''
-  const terminalLatestLine = terminalOutput.trimEnd().split(/\r?\n/).at(-1) ?? '[studio] 实例尚未启动。'
+  const terminalLatestLine = terminalOutput.trimEnd().split(/\r?\n/).at(-1) ?? t('terminalNotStarted')
   const terminalRuntimeState = selectedInstanceStarting ? 'starting' : selectedDraft?.runtime.state
-  const terminalRuntimeLabel = selectedInstanceOperation === 'restart' ? '重启中'
-    : selectedInstanceOperation === 'stop' ? '终止中' : terminalRuntimeState === 'starting' ? '执行中'
-    : terminalRuntimeState === 'running' ? '运行中'
-      : terminalRuntimeState === 'failed' ? '失败' : undefined
+  const terminalRuntimeLabel = selectedInstanceOperation === 'restart' ? t('operationRestarting')
+    : selectedInstanceOperation === 'stop' ? t('operationStopping') : terminalRuntimeState === 'starting' ? t('operationRunning')
+    : terminalRuntimeState === 'running' ? t('operationActive')
+      : terminalRuntimeState === 'failed' ? t('operationFailed') : undefined
+  const localDshStatusLabel = connected ? t('localDshActive') : t('localDshStopped')
   const hasLiveDraft = drafts.some(draft => draft.runtime.state === 'starting' || draft.runtime.state === 'running')
   const previewSession = selectedDraft?.runtime.bridgeCapability
   const previewUrl = selectedDraft?.runtime.previewUrl
@@ -405,6 +462,12 @@ export function App(): JSX.Element {
   const focusedElement = draftElements.find(item => item.element.id === focusedElementId)
     ?? matchedElement
     ?? draftElements[0]
+  const previewInsets = previewFullscreen
+    ? { left: 0, right: 0 }
+    : {
+        left: leftSidebarCollapsed ? 48 : leftSidebarWidth,
+        right: rightSidebarCollapsed ? 56 : rightSidebarWidth,
+      }
   const previewRect: LayoutRect = {
     x: previewOrigin.x,
     y: previewOrigin.y,
@@ -412,9 +475,42 @@ export function App(): JSX.Element {
     height: previewViewport.height * previewScale,
   }
 
+  const fitPreviewToStage = (viewport = previewViewport): void => {
+    const stage = previewStageRef.current
+    if (stage === null) return
+    const bounds = previewBounds(
+      stage.clientWidth - previewInsets.left - previewInsets.right,
+      stage.clientHeight,
+    )
+    bounds.x += previewInsets.left
+    if (bounds.width < PREVIEW_MIN_SIZE.width || bounds.height < PREVIEW_MIN_SIZE.height) return
+    const fitted = fitRect(bounds, viewport.width / viewport.height)
+    setPreviewScale(fitted.width / viewport.width)
+    setPreviewOrigin({ x: fitted.x, y: fitted.y })
+  }
+
+  const zoomPreviewByWheel = (deltaY: number, deltaMode: number): void => {
+    const stage = previewStageRef.current
+    if (stage === null) return
+    const center = { x: stage.clientWidth / 2, y: stage.clientHeight / 2 }
+    const current = previewTransformRef.current
+    const delta = deltaMode === 1 ? deltaY * 16 : deltaMode === 2 ? deltaY * stage.clientHeight : deltaY
+    const scale = Math.max(0.01, current.scale * Math.exp(clamp(-delta * 0.0015, -0.35, 0.35)))
+    const ratio = scale / current.scale
+    const origin = {
+      x: center.x - (center.x - current.origin.x) * ratio,
+      y: center.y - (center.y - current.origin.y) * ratio,
+    }
+    previewTransformRef.current = { scale, origin }
+    setPreviewScale(scale)
+    setPreviewOrigin(origin)
+  }
+
   const activateDraft = (draftId: string | undefined): void => {
     draftIdRef.current = draftId
     fileRequest.current += 1
+    draftViewRequest.current += 1
+    packRequest.current += 1
     setFileBusy(false)
     setFiles([])
     setFilePath('')
@@ -450,22 +546,43 @@ export function App(): JSX.Element {
     const stage = previewStageRef.current
     if (stage === null) return
     const update = (): void => {
-      const size = { width: stage.clientWidth, height: stage.clientHeight }
-      setPreviewStageSize(size)
-      if (!previewFit) return
-      const bounds = previewBounds(size.width, size.height)
-      if (bounds.width < PREVIEW_MIN_SIZE.width || bounds.height < PREVIEW_MIN_SIZE.height) return
-      const fitted = fitRect(bounds, previewViewport.width / previewViewport.height)
-      setPreviewScale(fitted.width / previewViewport.width)
-      setPreviewOrigin({ x: fitted.x, y: fitted.y })
+      setPreviewStageSize({ width: stage.clientWidth, height: stage.clientHeight })
     }
     const observer = new ResizeObserver(update)
     observer.observe(stage)
     update()
+    fitPreviewToStage()
     return () => observer.disconnect()
-  }, [previewFit, previewViewport.height, previewViewport.width])
+  }, [])
 
   useEffect(() => () => activeDragCleanupRef.current?.(), [])
+
+  useEffect(() => {
+    const receiveBridge = (event: MessageEvent): void => previewBridgeHandlerRef.current(event)
+    window.addEventListener('message', receiveBridge)
+    return () => window.removeEventListener('message', receiveBridge)
+  }, [])
+
+  useEffect(() => {
+    if (previewZoomFocus?.phase !== 'fading') return
+    const duration = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      ? PREVIEW_ZOOM_FOCUS_REDUCED_FADE_MS
+      : PREVIEW_ZOOM_FOCUS_FADE_MS
+    const timeout = window.setTimeout(() => {
+      setPreviewZoomFocus(current => current?.phase === 'fading' ? undefined : current)
+    }, duration)
+    return () => window.clearTimeout(timeout)
+  }, [previewZoomFocus?.phase])
+
+  useEffect(() => {
+    const fadePreviewZoomFocus = (): void => {
+      setPreviewZoomFocus(current => current?.phase === 'active'
+        ? { ...current, phase: 'fading' }
+        : current)
+    }
+    window.addEventListener('blur', fadePreviewZoomFocus)
+    return () => window.removeEventListener('blur', fadePreviewZoomFocus)
+  }, [])
 
   useEffect(() => {
     if (sessionId === undefined) return
@@ -523,10 +640,17 @@ export function App(): JSX.Element {
   }, [previewMode])
 
   useEffect(() => {
-    const changed = (): void => setPreviewFullscreen(document.fullscreenElement === previewSectionRef.current)
-    document.addEventListener('fullscreenchange', changed)
-    return () => document.removeEventListener('fullscreenchange', changed)
-  }, [])
+    previewTransformRef.current = { scale: previewScale, origin: previewOrigin }
+  }, [previewOrigin, previewScale])
+
+  useEffect(() => {
+    if (!previewFullscreen) return
+    const exit = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setPreviewFullscreen(false)
+    }
+    window.addEventListener('keydown', exit)
+    return () => window.removeEventListener('keydown', exit)
+  }, [previewFullscreen])
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => previewPort.current?.postMessage({
@@ -570,7 +694,7 @@ export function App(): JSX.Element {
       setDrafts(next)
       setOpenDraftIds(workspace.openDraftIds)
       activateDraft(workspace.selectedDraftId)
-      if (next.length === 0) setShowCreate(true)
+      if (next.length === 0) setCreateDialogOpen(true)
     }).catch(cause => setError(cause instanceof Error ? cause.message : String(cause)))
       .finally(() => setLoadingDrafts(false))
   }, [])
@@ -604,8 +728,8 @@ export function App(): JSX.Element {
       runningVersion.current += 1
       setRunning(frame.running === true)
     }
-    if (frame.type === 'approval/requested') setInteraction('Agent 正在等待工具授权；请暂时在官方 WebUI 中处理。')
-    if (frame.type === 'question/requested') setInteraction('Agent 正在等待补充信息；请暂时在官方 WebUI 中回答。')
+    if (frame.type === 'approval/requested') setInteraction(t('interactionApproval'))
+    if (frame.type === 'question/requested') setInteraction(t('interactionQuestion'))
     if (frame.type === 'approval/resolved' || frame.type === 'question/resolved') setInteraction(undefined)
     if (frame.type !== 'session/event' || typeof frame.event !== 'object' || frame.event === null) return
     const event = frame.event as unknown as SessionEvent
@@ -621,12 +745,14 @@ export function App(): JSX.Element {
     if (event.type === 'tool/result') {
       const currentDraft = draftIdRef.current
       if (currentDraft === undefined) return
+      const request = ++draftViewRequest.current
       void Promise.all([
         callStudio<StudioProjectState>('studio.project.state', { draftId: currentDraft }),
         callStudio<StudioProjectFile[]>('studio.project.files', { draftId: currentDraft }),
         callStudio<StudioHarmonyInspection>('studio.harmony.inspect', { draftId: currentDraft }),
         callStudio<StudioReadinessReport>('studio.readiness.inspect', { draftId: currentDraft }),
       ]).then(([next, nextFiles, nextInspection, nextReadiness]) => {
+        if (draftViewRequest.current !== request || draftIdRef.current !== currentDraft) return
         const previous = projectRef.current
         projectRef.current = next
         setProject(next)
@@ -643,6 +769,7 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     if (project?.root === undefined || selectedDraftId === undefined) {
+      draftViewRequest.current += 1
       setFiles([])
       setFilePath('')
       setSource('')
@@ -651,16 +778,23 @@ export function App(): JSX.Element {
       setReadiness({ findings: [] })
       return
     }
+    const draftId = selectedDraftId
+    const request = ++draftViewRequest.current
     void Promise.all([
-      callStudio<StudioProjectFile[]>('studio.project.files', { draftId: selectedDraftId }),
-      callStudio<StudioHarmonyInspection>('studio.harmony.inspect', { draftId: selectedDraftId }),
-      callStudio<StudioReadinessReport>('studio.readiness.inspect', { draftId: selectedDraftId }),
+      callStudio<StudioProjectFile[]>('studio.project.files', { draftId }),
+      callStudio<StudioHarmonyInspection>('studio.harmony.inspect', { draftId }),
+      callStudio<StudioReadinessReport>('studio.readiness.inspect', { draftId }),
     ]).then(([nextFiles, nextInspection, nextReadiness]) => {
+      if (draftViewRequest.current !== request || draftIdRef.current !== draftId) return
       setFiles(nextFiles)
       setInspection(nextInspection)
       setReadiness(nextReadiness)
-    }).catch(cause => setError(cause instanceof Error ? cause.message : String(cause)))
-  }, [project?.root, selectedDraftId])
+    }).catch(cause => {
+      if (draftViewRequest.current === request && draftIdRef.current === draftId) {
+        setError(cause instanceof Error ? cause.message : String(cause))
+      }
+    })
+  }, [project?.root, selectedDraftId, t])
 
   const updateDraft = (next: StudioDraftView): void => {
     setDrafts(current => current.some(draft => draft.id === next.id)
@@ -676,49 +810,61 @@ export function App(): JSX.Element {
     setProject(next)
   }
 
-  const createDraft = async (): Promise<void> => {
+  const createDraft = async (input: StudioCreateDraftInput): Promise<void> => {
     if (hasUnsavedSource) {
       setPanel('source')
-      setError('当前文件尚未保存。请先保存，再创建新的草稿。')
+      throw new Error(t('errorUnsavedCreate'))
+    }
+    setError(undefined)
+    const next = await callStudio<StudioDraftView>('studio.drafts.create', input)
+    updateDraft(next)
+    const nextOpenDraftIds = openDraftIds.includes(next.id) ? openDraftIds : [...openDraftIds, next.id]
+    setOpenDraftIds(nextOpenDraftIds)
+    activateDraft(next.id)
+    queueWorkspaceUpdate(nextOpenDraftIds, next.id)
+    setProject(next.project)
+    setCreateDialogOpen(false)
+  }
+
+  const exportDraft = async (): Promise<void> => {
+    if (selectedDraftId === undefined || selectedDraft?.destinationDirectory === undefined) return
+    if (hasUnsavedSource) {
+      setPanel('source')
+      setError(t('errorUnsavedExport'))
       return
     }
-    setCreating(true)
+    const draftId = selectedDraftId
+    setExportingDraftId(draftId)
     setError(undefined)
     try {
-      const source: StudioDraftSource = sourceKind === 'new'
-        ? { kind: 'new', packageName: packageName.trim() }
-        : { kind: 'existing', directory: pluginDirectory.trim() }
-      const next = await callStudio<StudioDraftView>('studio.drafts.create', { source, profileMode })
-      updateDraft(next)
-      const nextOpenDraftIds = openDraftIds.includes(next.id) ? openDraftIds : [...openDraftIds, next.id]
-      setOpenDraftIds(nextOpenDraftIds)
-      activateDraft(next.id)
-      queueWorkspaceUpdate(nextOpenDraftIds, next.id)
-      setProject(next.project)
-      setShowCreate(false)
+      updateDraft(await callStudio<StudioDraftView>('studio.drafts.export', { draftId }))
     } catch (cause) {
-      setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+      if (draftIdRef.current === draftId) setError(cause instanceof StudioRpcError ? cause.message : String(cause))
     } finally {
-      setCreating(false)
+      setExportingDraftId(current => current === draftId ? undefined : current)
     }
   }
 
   const renameDraft = async (): Promise<void> => {
     if (selectedDraft === undefined) return
+    const draftId = selectedDraft.id
+    const previousLabel = selectedDraft.label
     const label = draftLabelInput.trim()
     if (label === selectedDraft.label) return
     if (label === '') {
       setDraftLabelInput(selectedDraft.label)
-      setError('草稿名称不能为空。')
+      setError(t('errorEmptyDraftName'))
       return
     }
     setError(undefined)
     try {
-      updateDraft(await callStudio<StudioDraftView>('studio.drafts.rename', { draftId: selectedDraft.id, label }))
-      setDraftLabelInput(label)
+      updateDraft(await callStudio<StudioDraftView>('studio.drafts.rename', { draftId, label }))
+      if (draftIdRef.current === draftId) setDraftLabelInput(label)
     } catch (cause) {
-      setDraftLabelInput(selectedDraft.label)
-      setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+      if (draftIdRef.current === draftId) {
+        setDraftLabelInput(previousLabel)
+        setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+      }
     }
   }
 
@@ -769,7 +915,7 @@ export function App(): JSX.Element {
         const draft = next.find(candidate => candidate.id === id)
         if (draft !== undefined) updateDraft(draft)
       } catch {}
-      setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+      if (draftIdRef.current === id) setError(cause instanceof StudioRpcError ? cause.message : String(cause))
     } finally {
       polling = false
       await progress
@@ -793,7 +939,7 @@ export function App(): JSX.Element {
       updateDraft(await callStudio<StudioDraftView>('studio.drafts.stop', { draftId: id }))
       clearSelectedRuntime(id)
     } catch (cause) {
-      setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+      if (draftIdRef.current === id) setError(cause instanceof StudioRpcError ? cause.message : String(cause))
     } finally {
       setInstanceOperations(current => {
         const next = { ...current }
@@ -807,7 +953,7 @@ export function App(): JSX.Element {
     if (selectedDraftId === undefined) return
     if (hasUnsavedSource) {
       setPanel('source')
-      setError('当前文件尚未保存。请先保存，再热重载插件。')
+      setError(t('errorUnsavedReload'))
       return
     }
     const id = selectedDraftId
@@ -819,7 +965,7 @@ export function App(): JSX.Element {
       updateDraftProject(id, result.project)
       if (draftIdRef.current === id) setPreviewKey(value => value + 1)
     } catch (cause) {
-      setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+      if (draftIdRef.current === id) setError(cause instanceof StudioRpcError ? cause.message : String(cause))
     } finally {
       setBuildOperations(current => {
         const next = { ...current }
@@ -843,32 +989,20 @@ export function App(): JSX.Element {
     }
   }
 
-  const connectPreview = (): void => {
+  const connectPreview = (event: MessageEvent): void => {
     const target = previewRef.current?.contentWindow
     if (target === undefined || target === null || previewSession === undefined || previewUrl === undefined || selectedDraftId === undefined) return
     const targetOrigin = new URL(previewUrl).origin
-    previewPort.current?.close()
-    const channel = new MessageChannel()
-    previewPort.current = channel.port1
-    channel.port1.onmessage = event => {
-      const message = event.data as {
-        type?: unknown
-        sessionId?: unknown
-        nonce?: unknown
-        graphRev?: unknown
-        mode?: unknown
-        selection?: unknown
-        registry?: unknown
-        error?: unknown
-        ok?: unknown
-        dx?: unknown
-        dy?: unknown
-      }
-      if (message.sessionId !== previewSession || message.nonce !== previewNonce.current) return
-      if (message.type === 'preview-ready' && typeof message.graphRev === 'string') {
-        channel.port1.postMessage({
-          type: 'set-mode', sessionId: previewSession, nonce: previewNonce.current, mode: previewModeRef.current,
-        })
+    if (event.source !== target || event.origin !== targetOrigin || event.ports.length !== 1
+      || previewPort.current !== undefined || !isBridgeOffer(event.data, previewSession)) return
+    const nextPort = event.ports[0]
+    previewPort.current = nextPort
+    nextPort.onmessage = portEvent => {
+      if (!isBridgeEnvelope(portEvent.data, previewSession, previewNonce.current)) return
+      const message = portEvent.data
+      if (message.type === 'preview-ready' && boundedBridgeText(message.graphRev) && message.graphRev !== ''
+        && (message.mode === 'browse' || message.mode === 'inspect')) {
+        nextPort.postMessage({ type: 'set-mode', sessionId: previewSession, nonce: previewNonce.current, mode: previewModeRef.current })
         queuePreviewUpdate(selectedDraftId, {
           connected: true,
           graphRev: message.graphRev,
@@ -876,12 +1010,12 @@ export function App(): JSX.Element {
         })
         void confirmPreview(message.graphRev)
       }
-      if (message.type === 'selection' && typeof message.selection === 'object' && message.selection !== null) {
-        const raw = message.selection as StudioDomSelection
+      if (message.type === 'selection' && isStudioDomSelection(message.selection)) {
+        const raw = message.selection
         const request = ++selectionResolve.current
         const expectedNonce = previewNonce.current
         const commit = (next: StudioDomSelection): void => {
-          if (request !== selectionResolve.current || previewPort.current !== channel.port1
+          if (request !== selectionResolve.current || previewPort.current !== nextPort
             || expectedNonce !== previewNonce.current) return
           setSelection(next)
           queuePreviewUpdate(selectedDraftId, { connected: true, mode: 'inspect', selection: next })
@@ -897,15 +1031,17 @@ export function App(): JSX.Element {
           if (request === selectionResolve.current) setError(cause instanceof StudioRpcError ? cause.message : String(cause))
         })
       }
-      if (message.type === 'preview-pan' && typeof message.dx === 'number' && typeof message.dy === 'number') {
-        setPreviewFit(false)
+      if (message.type === 'preview-pan' && isFinitePreviewPan(message)) {
         setPreviewOrigin(current => ({
-          x: current.x + (message.dx as number),
-          y: current.y + (message.dy as number),
+          x: current.x + message.dx,
+          y: current.y + message.dy,
         }))
       }
-      if (message.type === 'registry' && typeof message.registry === 'object' && message.registry !== null) {
-        const nextRegistry = message.registry as StudioRegistrySnapshot
+      if (message.type === 'preview-zoom' && isFinitePreviewZoom(message)) {
+        zoomPreviewByWheel(message.deltaY, message.deltaMode)
+      }
+      if (message.type === 'registry' && isStudioRegistrySnapshot(message.registry)) {
+        const nextRegistry = message.registry
         setRegistry(nextRegistry)
         queuePreviewUpdate(selectedDraftId, {
           connected: true,
@@ -913,30 +1049,27 @@ export function App(): JSX.Element {
           registry: nextRegistry,
         })
       }
-      if (message.type === 'registry-error' && typeof message.error === 'string') {
+      if (message.type === 'registry-error' && boundedBridgeText(message.error)) {
         setError(message.error)
       }
-      if (message.type === 'selection-error' && typeof message.error === 'string') setError(message.error)
-      if (message.type === 'variable-result' && message.ok === false && typeof message.error === 'string') setError(message.error)
+      if (message.type === 'selection-error' && boundedBridgeText(message.error)) setError(message.error)
+      if (message.type === 'variable-result' && message.ok === false && boundedBridgeText(message.error)) setError(message.error)
       if (message.type === 'mode' && (message.mode === 'browse' || message.mode === 'inspect')) {
         previewModeRef.current = message.mode
         setPreviewMode(message.mode)
       }
     }
-    channel.port1.start()
-    target.postMessage({
-      type: 'dsh-studio-connect',
-      sessionId: previewSession,
-      nonce: previewNonce.current,
-    }, targetOrigin, [channel.port2])
+    nextPort.start()
+    nextPort.postMessage({ type: 'connect', sessionId: previewSession, nonce: previewNonce.current })
   }
+  previewBridgeHandlerRef.current = connectPreview
 
   const openFile = async (path: string): Promise<void> => {
     if (path === '' || selectedDraftId === undefined) return
     if (path === filePath) return
     if (hasUnsavedSource) {
       setPanel('source')
-      setError('当前文件尚未保存。请先保存，再打开其他文件。')
+      setError(t('errorUnsavedOpenFile'))
       return
     }
     const draftId = selectedDraftId
@@ -960,16 +1093,25 @@ export function App(): JSX.Element {
 
   const saveFile = async (): Promise<void> => {
     if (filePath === '' || selectedDraftId === undefined) return
+    const draftId = selectedDraftId
+    const path = filePath
+    const content = source
+    const request = ++fileRequest.current
     setFileBusy(true)
     setError(undefined)
     try {
-      await callStudio('studio.project.writeFile', { draftId: selectedDraftId, path: filePath, content: source })
-      setSavedSource(source)
-      void callStudio<StudioReadinessReport>('studio.readiness.inspect', { draftId: selectedDraftId }).then(setReadiness).catch(() => undefined)
+      await callStudio('studio.project.writeFile', { draftId, path, content })
+      if (fileRequest.current !== request || draftIdRef.current !== draftId) return
+      setSavedSource(content)
+      void callStudio<StudioReadinessReport>('studio.readiness.inspect', { draftId }).then(next => {
+        if (fileRequest.current === request && draftIdRef.current === draftId) setReadiness(next)
+      }).catch(() => undefined)
     } catch (cause) {
-      setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+      if (fileRequest.current === request && draftIdRef.current === draftId) {
+        setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+      }
     } finally {
-      setFileBusy(false)
+      if (fileRequest.current === request && draftIdRef.current === draftId) setFileBusy(false)
     }
   }
 
@@ -1017,45 +1159,53 @@ export function App(): JSX.Element {
     })
   }
 
-  const togglePreviewFullscreen = async (): Promise<void> => {
-    const section = previewSectionRef.current
-    if (section === null) return
-    try {
-      if (document.fullscreenElement === section) await document.exitFullscreen()
-      else await section.requestFullscreen()
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-    }
+  const togglePreviewFullscreen = (): void => {
+    setPreviewZoomFocus(undefined)
+    setPreviewFullscreen(current => !current)
+  }
+
+  const togglePreviewAspectLock = (): void => {
+    setPreviewAspectLocked(current => {
+      if (!current) previewLockedAspectRatioRef.current = previewViewport.width / previewViewport.height
+      return !current
+    })
   }
 
   const runPack = async (): Promise<void> => {
     if (project === undefined || selectedDraftId === undefined) return
-    setPacking(true)
+    const draftId = selectedDraftId
+    const request = ++packRequest.current
+    setPackingDraftId(draftId)
     setError(undefined)
     try {
-      setReadiness(await callStudio<StudioReadinessReport>('studio.readiness.pack', { draftId: selectedDraftId }))
+      const next = await callStudio<StudioReadinessReport>('studio.readiness.pack', { draftId })
+      if (packRequest.current === request && draftIdRef.current === draftId) setReadiness(next)
     } catch (cause) {
-      setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+      if (packRequest.current === request && draftIdRef.current === draftId) {
+        setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+      }
     } finally {
-      setPacking(false)
+      setPackingDraftId(current => current === draftId ? undefined : current)
     }
   }
 
   const createAgent = async (): Promise<void> => {
     if (selectedDraftId === undefined) return
-    setCreating(true)
+    const draftId = selectedDraftId
+    const projectName = project?.name ?? 'Draft'
+    setCreatingAgentDraftId(draftId)
     setError(undefined)
     setInteraction(undefined)
     try {
-      const result = await callStudio<StudioCreateAgentResult>('studio.agent.create', { draftId: selectedDraftId })
-      setDrafts(current => current.map(draft => draft.id === selectedDraftId ? { ...draft, agent: result } : draft))
-      setSessionId(result.sessionId)
+      const result = await callStudio<StudioCreateAgentResult>('studio.agent.create', { draftId })
+      setDrafts(current => current.map(draft => draft.id === draftId ? { ...draft, agent: result } : draft))
+      if (draftIdRef.current === draftId) setSessionId(result.sessionId)
       const studioSession = result.sessionId as SessionId
-      await studioApi.sessions.rename({ sessionId: studioSession, title: `Studio: ${project?.name ?? 'Draft'}` })
+      await studioApi.sessions.rename({ sessionId: studioSession, title: `Studio: ${projectName}` })
     } catch (cause) {
-      setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+      if (draftIdRef.current === draftId) setError(cause instanceof StudioRpcError ? cause.message : String(cause))
     } finally {
-      setCreating(false)
+      setCreatingAgentDraftId(current => current === draftId ? undefined : current)
     }
   }
 
@@ -1091,7 +1241,7 @@ export function App(): JSX.Element {
   const selectDraft = (draftId: string, nextOpenDraftIds = openDraftIds): boolean => {
     if (draftId !== selectedDraftId && hasUnsavedSource) {
       setPanel('source')
-      setError('当前文件尚未保存。请先按 Ctrl+S 或 Command+S 保存，再切换草稿。')
+      setError(t('errorUnsavedSwitchDraft'))
       return false
     }
     activateDraft(draftId)
@@ -1111,7 +1261,7 @@ export function App(): JSX.Element {
   const closeDraft = (draftId: string): void => {
     if (draftId === selectedDraftId && hasUnsavedSource) {
       setPanel('source')
-      setError('当前文件尚未保存。保存后才能关闭这个草稿标签。')
+      setError(t('errorUnsavedCloseDraft'))
       return
     }
     const index = openDraftIds.indexOf(draftId)
@@ -1128,7 +1278,138 @@ export function App(): JSX.Element {
     setFocusedElementId(undefined)
   }
 
+  const moveDraftTabToIndex = (draftId: string, targetIndex: number): void => {
+    const sourceIndex = openDraftIds.indexOf(draftId)
+    if (sourceIndex === -1) return
+    const reordered = openDraftIds.filter(id => id !== draftId)
+    const boundedIndex = Math.max(0, Math.min(targetIndex, reordered.length))
+    reordered.splice(boundedIndex, 0, draftId)
+    if (reordered.every((id, index) => id === openDraftIds[index])) return
+    setOpenDraftIds(reordered)
+    queueWorkspaceUpdate(reordered, selectedDraftId)
+  }
+
+  const beginDraftTabPointerDrag = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+    draftId: string,
+    sourceIndex: number,
+  ): void => {
+    if (!event.isPrimary || event.button !== 0) return
+    const tab = event.currentTarget.closest<HTMLElement>('.draft-tab')
+    const root = event.currentTarget.closest<HTMLElement>('.studio-ui-root')
+    const tabList = tab?.parentElement
+    if (tab === null || root === null || !tabList?.classList.contains('draft-tab-list')) return
+    const rail = tabList.parentElement
+    if (rail === null || rail === undefined) return
+
+    activeDragCleanupRef.current?.()
+    const pointerId = event.pointerId
+    const startX = event.clientX
+    const startY = event.clientY
+    const bounds = tab.getBoundingClientRect()
+    const tabGap = Number.parseFloat(getComputedStyle(tabList).columnGap) || 0
+    const tabSpan = bounds.width + tabGap
+    const tabRects = Array.from(tabList.querySelectorAll<HTMLElement>(':scope > .draft-tab'))
+      .map((element, index) => ({ id: element.dataset.draftId, index, bounds: element.getBoundingClientRect() }))
+    const railBounds = rail.getBoundingClientRect()
+    const siblingCenters = tabRects
+      .filter(item => item.id !== draftId)
+      .map(item => item.bounds.left + item.bounds.width / 2)
+    const collapsedSiblingCenters = tabRects
+      .filter(item => item.id !== draftId)
+      .map(item => item.bounds.left + item.bounds.width / 2 - (item.index > sourceIndex ? tabSpan : 0))
+    const pointerOffsetX = startX - bounds.left
+    const pointerOffsetY = startY - bounds.top
+    const previousCursor = document.body.style.cursor
+    const previousUserSelect = document.body.style.userSelect
+    let dragging = false
+    let targetIndex: number | undefined
+    let indicator = false
+    let preview: HTMLElement | undefined
+
+    const cleanup = (): void => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', end)
+      window.removeEventListener('pointercancel', cancel)
+      preview?.remove()
+      delete document.body.dataset.studioDragging
+      document.body.style.cursor = previousCursor
+      document.body.style.userSelect = previousUserSelect
+      setDraftTabDrag(undefined)
+      activeDragCleanupRef.current = undefined
+    }
+    const start = (nextEvent: PointerEvent): void => {
+      dragging = true
+      preview = tab.cloneNode(true) as HTMLElement
+      preview.classList.add('draft-tab-drag-preview')
+      preview.removeAttribute('data-active')
+      preview.removeAttribute('data-dragging')
+      preview.removeAttribute('data-draft-id')
+      preview.style.removeProperty('--draft-tab-shift')
+      preview.style.width = `${bounds.width}px`
+      preview.style.height = `${bounds.height}px`
+      root.append(preview)
+      document.body.dataset.studioDragging = 'true'
+      document.body.style.cursor = 'grabbing'
+      document.body.style.userSelect = 'none'
+      setDraftTabDrag({ draftId, sourceIndex, targetIndex, indicator, span: tabSpan, width: bounds.width })
+      update(nextEvent)
+    }
+    const update = (nextEvent: PointerEvent): void => {
+      const left = nextEvent.clientX - pointerOffsetX
+      const top = nextEvent.clientY - pointerOffsetY
+      if (preview !== undefined) preview.style.transform = `translate3d(${left}px, ${top}px, 0)`
+      const draggedCenter = left + bounds.width / 2
+      const insideRail = nextEvent.clientX >= railBounds.left && nextEvent.clientX <= railBounds.right
+        && nextEvent.clientY >= railBounds.top && nextEvent.clientY <= railBounds.bottom
+      const insertionIndex = siblingCenters.filter(center => center < draggedCenter).length
+      const nextTargetIndex = insideRail
+        ? insertionIndex !== sourceIndex ? insertionIndex : undefined
+        : collapsedSiblingCenters.filter(center => center < draggedCenter).length
+      const nextIndicator = !insideRail
+      if (nextTargetIndex === targetIndex && nextIndicator === indicator) return
+      targetIndex = nextTargetIndex
+      indicator = nextIndicator
+      setDraftTabDrag(current => current === undefined ? current : { ...current, targetIndex, indicator })
+    }
+    const move = (nextEvent: PointerEvent): void => {
+      if (nextEvent.pointerId !== pointerId) return
+      if (!dragging && Math.hypot(nextEvent.clientX - startX, nextEvent.clientY - startY) < 5) return
+      nextEvent.preventDefault()
+      if (!dragging) start(nextEvent)
+      else update(nextEvent)
+    }
+    const end = (nextEvent: PointerEvent): void => {
+      if (nextEvent.pointerId !== pointerId) return
+      if (!dragging) {
+        cleanup()
+        return
+      }
+      suppressDraftTabClickRef.current = draftId
+      cleanup()
+      if (targetIndex !== undefined) moveDraftTabToIndex(draftId, targetIndex)
+      window.setTimeout(() => {
+        if (suppressDraftTabClickRef.current === draftId) suppressDraftTabClickRef.current = undefined
+      })
+    }
+    const cancel = (nextEvent: PointerEvent): void => {
+      if (nextEvent.pointerId === pointerId) cleanup()
+    }
+
+    activeDragCleanupRef.current = cleanup
+    window.addEventListener('pointermove', move, { passive: false })
+    window.addEventListener('pointerup', end)
+    window.addEventListener('pointercancel', cancel)
+  }
+
   const selectDraftByKeyboard = (event: React.KeyboardEvent<HTMLButtonElement>, index: number): void => {
+    if (event.altKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+      event.preventDefault()
+      const nextIndex = event.key === 'ArrowLeft' ? Math.max(0, index - 1) : Math.min(openDrafts.length - 1, index + 1)
+      const draft = openDrafts[index]
+      if (draft !== undefined && nextIndex !== index) moveDraftTabToIndex(draft.id, nextIndex)
+      return
+    }
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
     event.preventDefault()
     const last = openDrafts.length - 1
@@ -1170,6 +1451,50 @@ export function App(): JSX.Element {
     window.addEventListener('pointercancel', cleanup)
   }
 
+  const beginPreviewPan = (event: ReactPointerEvent<HTMLElement>): void => {
+    if (event.button !== 1) return
+    event.stopPropagation()
+    const initial = previewOrigin
+    beginPointerDrag(event, 'grabbing', (dx, dy) => {
+      setPreviewOrigin({ x: initial.x + dx, y: initial.y + dy })
+    })
+  }
+
+  const beginPreviewZoomFocusMove = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    if (event.button !== 0 || previewZoomFocus === undefined) return
+    event.stopPropagation()
+    const initial = previewZoomFocus
+    const stage = previewStageRef.current?.getBoundingClientRect()
+    const radius = event.currentTarget.getBoundingClientRect().width / 2
+    beginPointerDrag(event, 'grabbing', (dx, dy) => {
+      setPreviewZoomFocus(current => current === undefined || stage === undefined ? current : {
+        x: clamp(initial.x + dx, radius, Math.max(radius, stage.width - radius)),
+        y: clamp(initial.y + dy, radius, Math.max(radius, stage.height - radius)),
+        phase: 'active',
+      })
+    })
+  }
+
+  const suppressPreviewMiddleMouse = (event: ReactMouseEvent<HTMLElement>): void => {
+    if (event.button !== 1) return
+    event.preventDefault()
+    event.stopPropagation()
+  }
+
+  const zoomPreviewFromCanvas = (event: ReactWheelEvent<HTMLElement>): void => {
+    if (event.target instanceof Element && event.target.closest('.preview-artboard') !== null) return
+    event.preventDefault()
+    if (previewMode === 'browse') {
+      const overFocus = event.target instanceof Element && event.target.closest('.preview-zoom-focus') !== null
+      const stage = event.currentTarget.getBoundingClientRect()
+      const phase: PreviewZoomFocus['phase'] = document.hasFocus() ? 'active' : 'fading'
+      setPreviewZoomFocus(current => overFocus && current !== undefined
+        ? { ...current, phase }
+        : { x: event.clientX - stage.left, y: event.clientY - stage.top, phase })
+    }
+    zoomPreviewByWheel(event.deltaY, event.deltaMode)
+  }
+
   const beginSidebarResize = (event: ReactPointerEvent<HTMLElement>, side: 'left' | 'right'): void => {
     const initial = side === 'left' ? leftSidebarWidth : rightSidebarWidth
     beginPointerDrag(event, 'col-resize', dx => {
@@ -1185,15 +1510,27 @@ export function App(): JSX.Element {
 
   const changePreviewAspectRatio = (value: PreviewAspectRatio): void => {
     if (value === 'custom') return
+    const ratio = aspectRatioValue(value)
+    const nextViewport = {
+      ...previewViewport,
+      height: Math.max(1, Math.round(previewViewport.width / ratio)),
+    }
+    if (previewAspectLocked) previewLockedAspectRatioRef.current = ratio
     setPreviewAspectRatio(value)
-    setPreviewViewport(current => ({ ...current, height: Math.max(1, Math.round(current.width / aspectRatioValue(value))) }))
-    setPreviewFit(true)
+    setPreviewViewport(nextViewport)
+    fitPreviewToStage(nextViewport)
   }
 
   const changePreviewDimension = (dimension: 'width' | 'height', value: number): void => {
     if (!Number.isFinite(value)) return
     setPreviewViewport(current => {
-      const next = { ...current, [dimension]: Math.max(1, Math.round(value)) }
+      const nextValue = Math.max(1, Math.round(value))
+      const ratio = previewLockedAspectRatioRef.current
+      const next = previewAspectLocked
+        ? dimension === 'width'
+          ? { width: nextValue, height: Math.max(1, Math.round(nextValue / ratio)) }
+          : { width: Math.max(1, Math.round(nextValue * ratio)), height: nextValue }
+        : { ...current, [dimension]: nextValue }
       setPreviewAspectRatio(aspectRatioLabel(next.width, next.height))
       return next
     })
@@ -1202,22 +1539,21 @@ export function App(): JSX.Element {
   const changePreviewScale = (nextScale: number): void => {
     if (!Number.isFinite(nextScale)) return
     const scale = Math.max(0.01, nextScale)
-    setPreviewFit(false)
+    const visibleWidth = Math.max(0, previewStageSize.width - previewInsets.left - previewInsets.right)
     setPreviewScale(scale)
     setPreviewOrigin({
-      x: (previewStageSize.width - previewViewport.width * scale) / 2,
+      x: previewInsets.left + (visibleWidth - previewViewport.width * scale) / 2,
       y: (previewStageSize.height - previewViewport.height * scale) / 2,
     })
   }
 
   const beginPreviewResize = (event: ReactPointerEvent<HTMLElement>, direction: ResizeDirection): void => {
     const initial = previewRect
-    setPreviewFit(false)
     beginPointerDrag(event, `${direction}-resize`, (dx, dy) => {
       const next = resizeRect(initial, direction, dx, dy, undefined, {
         width: PREVIEW_MIN_SIZE.width * previewScale,
         height: PREVIEW_MIN_SIZE.height * previewScale,
-      }, direction.length === 2)
+      }, previewAspectLocked)
       const viewport = {
         width: Math.max(1, Math.round(next.width / previewScale)),
         height: Math.max(1, Math.round(next.height / previewScale)),
@@ -1308,12 +1644,12 @@ export function App(): JSX.Element {
       width: terminalRect.width,
       height: terminalRect.height,
     } : undefined}
-    aria-label="Draft Host 终端">
+    aria-label={t('terminalHostLabel')}>
     <div className="host-terminal-bar" data-draggable={terminalExpanded || undefined}
       onPointerDown={terminalExpanded ? beginTerminalMove : undefined}>
       <button type="button" className="terminal-section-toggle"
         aria-expanded={!terminalMinimized} aria-controls="draft-terminal-output" onClick={toggleTerminalMinimized}>
-        <DisclosureIcon expanded={!terminalMinimized} /><strong>终端</strong>
+        <DisclosureIcon expanded={!terminalMinimized} /><strong>{t('terminal')}</strong>
         {terminalMinimized && <code className="terminal-latest-line" title={terminalLatestLine}>{terminalLatestLine}</code>}
         {!terminalMinimized && terminalRuntimeLabel !== undefined
           && <span className="terminal-runtime-state" aria-live="polite" data-state={terminalRuntimeState}>
@@ -1323,16 +1659,16 @@ export function App(): JSX.Element {
       <div className="host-terminal-actions">
         <IconButton ref={terminalToggleRef} className="terminal-layout-button" size="small" variant="ghost"
           aria-expanded={terminalExpanded} aria-controls="draft-terminal" onClick={toggleTerminal}
-          label={terminalExpanded ? '将终端停靠回左侧栏' : '在底部展开终端'}>
+          label={terminalExpanded ? t('terminalDock') : t('terminalExpand')}>
           <TerminalLayoutIcon expanded={terminalExpanded} />
         </IconButton>
       </div>
     </div>
     {!terminalMinimized && <pre id="draft-terminal-output" ref={terminalRef} role="log" aria-live="off"
-      aria-label="实例终端只读输出" tabIndex={0} onScroll={event => {
+      aria-label={t('terminalReadonly')} tabIndex={0} onScroll={event => {
       const terminal = event.currentTarget
       terminalPinnedRef.current = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 24
-    }}>{terminalOutput || '[studio] 实例尚未启动。'}</pre>}
+    }}>{terminalOutput || t('terminalNotStarted')}</pre>}
     {terminalExpanded && !terminalMinimized && <ResizeHandles kind="terminal" onPointerDown={beginTerminalResize} />}
   </section>
 
@@ -1346,25 +1682,55 @@ export function App(): JSX.Element {
           <img className="studio-mark-color" src={`${STUDIO_PATH}/assets/harmony-icon.png`} alt="" />
           <img className="studio-mark-mono" src={`${STUDIO_PATH}/assets/harmony-icon-mono.png`} alt="" />
         </span>
-        <div><strong>DeepSeek WebUI Studio</strong><span>Plugin client workspace</span></div>
+        <div><strong>DeepSeek WebUI Studio</strong><span>{t('appSubtitle')}</span></div>
       </div>
-      <nav className="draft-tabs" aria-label="Draft 工作区">
-        {loadingDrafts
-          ? <span className="draft-tabs-empty" aria-live="polite">正在载入草稿…</span>
-          : openDrafts.length === 0
-            ? <span className="draft-tabs-spacer" aria-hidden="true" />
-            : <div className="draft-tab-list" role="tablist" aria-label="草稿标签页">
-                {openDrafts.map((draft, index) => {
+      <nav className="draft-tabs" aria-label={t('draftWorkspace')} data-empty={!loadingDrafts && openDrafts.length === 0 || undefined}>
+        <div className="draft-tab-list" role="tablist" aria-label={t('draftTabs')}>
+          {loadingDrafts
+            ? <span className="draft-tabs-loading" aria-live="polite">{t('draftLoading')}</span>
+            : <>
+              {openDrafts.map((draft, index) => {
                   const state = (instanceOperations[draft.id] === 'start' || instanceOperations[draft.id] === 'restart')
                     && draft.runtime.state !== 'running'
                     ? 'starting' : draft.runtime.state
                   const dirty = draft.id === selectedDraftId && hasUnsavedSource
-                  return <div key={draft.id} className="draft-tab" data-active={draft.id === selectedDraftId || undefined}>
+                  let shift = 0
+                  let dropIndicator: 'before' | 'after' | undefined
+                  if (draftTabDrag !== undefined && draft.id !== draftTabDrag.draftId) {
+                    const visibleIndex = index < draftTabDrag.sourceIndex ? index : index - 1
+                    if (index > draftTabDrag.sourceIndex) shift -= draftTabDrag.span
+                    if (!draftTabDrag.indicator && draftTabDrag.targetIndex !== undefined
+                      && visibleIndex >= draftTabDrag.targetIndex) {
+                      shift += draftTabDrag.span
+                    }
+                    if (draftTabDrag.indicator && draftTabDrag.targetIndex !== undefined) {
+                      if (visibleIndex === draftTabDrag.targetIndex) dropIndicator = 'before'
+                      else if (draftTabDrag.targetIndex === openDrafts.length - 1
+                        && visibleIndex === openDrafts.length - 2) dropIndicator = 'after'
+                    }
+                  }
+                  return <div key={draft.id} className="draft-tab" data-draft-id={draft.id}
+                    data-active={draft.id === selectedDraftId || undefined}
+                    data-dragging={draftTabDrag?.draftId === draft.id || undefined}
+                    data-drop-indicator={dropIndicator}
+                    style={{ '--draft-tab-shift': `${shift}px` } as CSSProperties}>
                     <button id={`draft-tab-${draft.id}`} className="draft-tab-select" type="button" role="tab"
                       aria-selected={draft.id === selectedDraftId} aria-controls="draft-workspace"
                       tabIndex={draft.id === selectedDraftId ? 0 : -1}
-                      aria-label={`${draft.label}，${runtimeLabel(state)}${dirty ? '，有未保存修改' : ''}`}
-                      onClick={() => selectDraft(draft.id)} onKeyDown={event => selectDraftByKeyboard(event, index)}>
+                      aria-label={t('draftTabLabel', {
+                        name: draft.label,
+                        state: runtimeLabel(state, t),
+                        dirty: dirty ? t('draftTabDirtySuffix') : '',
+                      })}
+                      title={t('draftTabMoveHint')}
+                      onPointerDown={event => beginDraftTabPointerDrag(event, draft.id, index)}
+                      onClick={() => {
+                        if (suppressDraftTabClickRef.current === draft.id) {
+                          suppressDraftTabClickRef.current = undefined
+                          return
+                        }
+                        selectDraft(draft.id)
+                      }} onKeyDown={event => selectDraftByKeyboard(event, index)}>
                       <span className="draft-tab-label" data-state={state}>
                         <span className="draft-tab-dot" aria-hidden="true" />
                         <span>{draft.label}</span>
@@ -1372,93 +1738,70 @@ export function App(): JSX.Element {
                       </span>
                     </button>
                     <IconButton className="draft-tab-close" size="small" variant="ghost"
-                      onClick={() => closeDraft(draft.id)} label={`关闭草稿 ${draft.label}`}><CloseIcon /></IconButton>
+                      onClick={() => closeDraft(draft.id)} label={t('draftClose', { name: draft.label })}><CloseIcon /></IconButton>
                   </div>
                 })}
-              </div>}
-        <IconButton size="small" variant="ghost" aria-pressed={showCreate}
-          onClick={() => {
-            setLeftSidebarCollapsed(false)
-            setShowCreate(value => !value)
-          }} label={showCreate ? '收起新建草稿表单' : '新建草稿'}><PlusIcon /></IconButton>
+            </>}
+        </div>
+        <IconButton className="draft-tab-add" size="small" variant="ghost" aria-haspopup="dialog"
+          aria-expanded={createDialogOpen} aria-controls="studio-create-draft-dialog"
+          style={{ '--draft-tab-add-shift': `${draftTabDrag !== undefined
+            && (draftTabDrag.indicator || draftTabDrag.targetIndex === undefined) ? -draftTabDrag.span : 0}px` } as CSSProperties}
+          data-empty={!loadingDrafts && openDrafts.length === 0 || undefined}
+          onClick={() => setCreateDialogOpen(true)} label={t('draftNew')}>
+          <PlusIcon />
+          {!loadingDrafts && openDrafts.length === 0 && <span className="draft-tab-add-label">{t('draftNew')}</span>}
+        </IconButton>
+        {!loadingDrafts && openDrafts.length === 0
+          && <span className="draft-tabs-empty">{t('draftOpenFromPlugins')}</span>}
       </nav>
       <div className="studio-header-actions">
-        <ThemeSwitcher labels={{ light: '浅色', system: '跟随系统', dark: '深色' }} label="Studio 主题" />
-        <Status tone={connected ? 'success' : 'warning'} label={connected ? 'DSH 已连接' : 'DSH 正在重连'}>
-          {connected ? 'DSH 已连接' : '正在重连'}
-        </Status>
+        <IconButton className="settings-button" size="small" variant="ghost" label={t('settings')}
+          title={t('settings')} onClick={() => setSettingsOpen(true)}><SettingsIcon /></IconButton>
+        <Status tone={connected ? 'success' : 'neutral'} label={localDshStatusLabel}>{localDshStatusLabel}</Status>
       </div>
     </header>
 
     <main id="draft-workspace" className="studio-main" role="tabpanel"
       aria-labelledby={selectedDraftId === undefined ? undefined : `draft-tab-${selectedDraftId}`}
       data-left-collapsed={leftSidebarCollapsed} data-right-collapsed={rightSidebarCollapsed}
+      data-preview-fullscreen={previewFullscreen || undefined}
       style={{
         '--studio-left-sidebar': `${leftSidebarCollapsed ? 48 : leftSidebarWidth}px`,
         '--studio-right-sidebar': `${rightSidebarCollapsed ? 56 : rightSidebarWidth}px`,
       } as CSSProperties}>
       <Panel id="dsh-control-sidebar" as="aside" className="studio-project studio-sidebar" data-collapsed={leftSidebarCollapsed}
-        aria-label="DSH 控制">
+        aria-label={t('controlSidebar')}>
         <div className="sidebar-heading">
-          <div className="sidebar-title"><strong>DSH Instance Control</strong><span>插件运行环境与实例状态</span></div>
+          <div className="sidebar-title"><strong>{t('controlTitle')}</strong><span>{t('controlSubtitle')}</span></div>
           <IconButton size="small" variant="ghost" aria-expanded={!leftSidebarCollapsed}
             aria-controls="dsh-control-sidebar" onClick={() => setLeftSidebarCollapsed(value => !value)}
-            label={leftSidebarCollapsed ? '展开 DSH 控制栏' : '收起 DSH 控制栏'}>
+            label={leftSidebarCollapsed ? t('controlExpand') : t('controlCollapse')}>
             <SidebarToggleIcon side="left" collapsed={leftSidebarCollapsed} />
           </IconButton>
         </div>
         <div className="project-body sidebar-content">
-        {showCreate && <form className="draft-create" onSubmit={event => { event.preventDefault(); void createDraft() }}>
-          <FormField id="draft-source" label="来源">
-            <Select value={sourceKind} onChange={event => setSourceKind(event.target.value as StudioDraftSource['kind'])}>
-              <option value="new">新插件</option>
-              <option value="existing">已有本地插件</option>
-            </Select>
-          </FormField>
-          {sourceKind === 'new'
-            ? <FormField id="draft-package-name" label="包名称" required>
-                <Input value={packageName} onChange={event => setPackageName(event.target.value)}
-                  placeholder="dsh-webui-draft" maxLength={214} />
-              </FormField>
-            : <>
-                <FormField id="draft-plugin-directory" label="插件文件夹" required
-                  description="输入本机绝对路径；Studio 会复制快照，不会修改原文件夹。">
-                  <Input value={pluginDirectory} onChange={event => setPluginDirectory(event.target.value)}
-                    placeholder="/Users/me/.dsh/profiles/web/node_modules/my-plugin" maxLength={4096} />
-                </FormField>
-              </>}
-          <FormField id="draft-profile" label="配置"
-            description={profileMode === 'custom' ? '自定义配置编辑器尚未实现；请选择主 DSH_HOME 配置继续。' : undefined}>
-            <Select value={profileMode} onChange={event => setProfileMode(event.target.value as 'main-home' | 'custom')}>
-              <option value="main-home">使用当前主 DSH_HOME 配置</option>
-              <option value="custom">自定义配置（占位）</option>
-            </Select>
-          </FormField>
-          {error !== undefined && <Notice tone="danger">{error}</Notice>}
-          <Button variant="primary" type="submit" loading={creating} loadingLabel="正在创建…"
-            disabled={profileMode === 'custom'}>创建草稿</Button>
-        </form>}
         {drafts.length === 0
-          ? !showCreate && <EmptyState title="创建第一个草稿" description="从一个新插件开始，或导入已有本地插件。"
-              action={<Button size="small" variant="primary" onClick={() => setShowCreate(true)}>新建草稿</Button>} />
+          ? <EmptyState title={t('createFirstDraft')} description={t('createFirstDraftDescription')}
+              action={<Button size="small" variant="primary" onClick={() => setCreateDialogOpen(true)}>{t('draftNew')}</Button>} />
           : <>
-              <Tabs id="left-sidebar" className="left-sidebar-tabs" label="DSH 控制页面" value={leftPanel}
+              <Tabs id="left-sidebar" className="left-sidebar-tabs" label={t('controlPages')} value={leftPanel}
                 onChange={(value: LeftPanel) => setLeftPanel(value)}
-                options={[{ value: 'instance', label: '实例状态' }, { value: 'plugins', label: '插件管理' }]} />
+                options={[{ value: 'instance', label: t('instanceStatus') }, { value: 'plugins', label: t('pluginManagement') }]} />
               {leftPanel === 'instance' && selectedDraft === undefined
-                ? <EmptyState title="没有激活的草稿" description="在插件管理中重新打开一个已保存草稿。"
-                    action={<Button size="small" onClick={() => setLeftPanel('plugins')}>打开插件管理</Button>} />
+                ? <EmptyState title={t('noActiveDraft')} description={t('noActiveDraftDescription')}
+                    action={<Button size="small" onClick={() => setLeftPanel('plugins')}>{t('openPluginManagement')}</Button>} />
                 : leftPanel === 'instance' && selectedDraft !== undefined && <section id="left-sidebar-panel-instance" role="tabpanel"
                 aria-labelledby="left-sidebar-tab-instance" className="left-sidebar-page instance-control-panel">
                 <div className="instance-summary" data-state={selectedInstanceStarting ? 'starting' : selectedDraft.runtime.state}>
                   <span className="instance-status-dot" aria-hidden="true" />
-                  <strong>实例{selectedInstanceOperation === 'restart' ? '正在重启'
-                    : selectedInstanceOperation === 'start' ? '正在启动' : selectedInstanceOperation === 'stop' ? '正在终止'
-                    : selectedDraft.runtime.state === 'running' ? '运行中'
-                    : selectedDraft.runtime.state === 'failed' ? '启动失败' : '已停止'}</strong>
+                  <strong>{selectedInstanceOperation === 'restart' ? t('instanceRestarting')
+                    : selectedInstanceOperation === 'start' ? t('instanceStarting') : selectedInstanceOperation === 'stop' ? t('instanceStopping')
+                    : selectedDraft.runtime.state === 'running' ? t('instanceRunning')
+                    : selectedDraft.runtime.state === 'failed' ? t('instanceFailed') : t('instanceStopped')}</strong>
                 </div>
                 <div className="instance-fields">
-                  <label><span>草稿名称</span><Input value={draftLabelInput} maxLength={120}
+                  <label><span>{t('draftName')}</span><Input value={draftLabelInput} maxLength={120}
                     onChange={event => setDraftLabelInput(event.target.value)} onBlur={() => void renameDraft()}
                     onKeyDown={event => {
                       if (event.key === 'Enter') event.currentTarget.blur()
@@ -1467,40 +1810,51 @@ export function App(): JSX.Element {
                         event.currentTarget.blur()
                       }
                     }} /></label>
-                  <label><span>工作树位置</span><code title={selectedDraft.worktreeDir}>{selectedDraft.worktreeDir}</code></label>
+                  <label><span>{t('worktreeLocation')}</span><code title={selectedDraft.worktreeDir}>{selectedDraft.worktreeDir}</code></label>
+                  {selectedDraft.destinationDirectory !== undefined && <label>
+                    <span>{t('draftDestinationDirectory')}</span>
+                    <code title={selectedDraft.destinationDirectory}>{selectedDraft.destinationDirectory}</code>
+                  </label>}
                 </div>
                 <div className="instance-actions">
                   <Button size="small" variant="primary" className="sidebar-action-button"
                     onClick={() => void startDraft()} loading={selectedInstanceOperation === 'start'}
-                    loadingLabel="启动中" disabled={selectedDraft.runtime.state === 'running' || selectedInstanceOperation !== undefined}>
-                    <StartIcon />启动</Button>
+                    loadingLabel={t('starting')} disabled={selectedDraft.runtime.state === 'running' || selectedInstanceOperation !== undefined}>
+                    <StartIcon />{t('start')}</Button>
                   <Button size="small" className="sidebar-action-button" onClick={() => void stopDraft()}
-                    loading={selectedInstanceOperation === 'stop'} loadingLabel="终止中"
-                    disabled={selectedDraft.runtime.state !== 'running' || selectedInstanceOperation !== undefined}><StopIcon />终止</Button>
+                    loading={selectedInstanceOperation === 'stop'} loadingLabel={t('stopping')}
+                    disabled={selectedDraft.runtime.state !== 'running' || selectedInstanceOperation !== undefined}><StopIcon />{t('stop')}</Button>
                   <Button size="small" className="sidebar-action-button" onClick={() => void restartDraft()}
-                    loading={selectedInstanceOperation === 'restart'} loadingLabel="重启中"
+                    loading={selectedInstanceOperation === 'restart'} loadingLabel={t('restarting')}
                     disabled={selectedDraft.runtime.state !== 'running' || selectedInstanceOperation !== undefined}
-                    aria-label="重启实例"><RefreshIcon />重启</Button>
+                    aria-label={t('restartInstance')}><RefreshIcon />{t('restart')}</Button>
                 </div>
+                {selectedDraft.destinationDirectory !== undefined && <div className="instance-export">
+                  <Button size="small" className="sidebar-action-button" onClick={() => void exportDraft()}
+                    loading={exportingDraftId === selectedDraft.id} loadingLabel={t('draftExporting')}>
+                    {t('draftExportToFolder')}
+                  </Button>
+                  <span>{selectedDraft.exportedAt === undefined ? t('draftDestinationPending') : t('draftDestinationSaved')}</span>
+                </div>}
                 {selectedDraft.runtime.error !== undefined && <Notice tone="danger">{selectedDraft.runtime.error}</Notice>}
               </section>}
 
               {leftPanel === 'plugins' && <section id="left-sidebar-panel-plugins" role="tabpanel"
                 aria-labelledby="left-sidebar-tab-plugins" className="left-sidebar-page plugin-management-page">
-                <div className="persistent-draft-list" aria-label="Studio 持久化草稿">
+                <div className="persistent-draft-list" aria-label={t('persistedDrafts')}>
                   {drafts.map(draft => <article key={draft.id} data-open={openDraftIds.includes(draft.id) || undefined}>
                     <div><strong>{draft.label}</strong><code>{draft.name}</code></div>
                     <Button size="small" variant="ghost" disabled={openDraftIds.includes(draft.id)}
-                      onClick={() => openDraft(draft.id)}>{openDraftIds.includes(draft.id) ? '已打开' : '打开'}</Button>
+                      onClick={() => openDraft(draft.id)}>{openDraftIds.includes(draft.id) ? t('alreadyOpen') : t('open')}</Button>
                   </article>)}
                 </div>
-                <p>草稿保存在 Studio 数据目录；关闭标签不会删除插件或停止实例。</p>
+                <p>{t('persistedDraftsDescription')}</p>
               </section>}
             </>}
         </div>
         {!terminalExpanded && terminal}
         {!leftSidebarCollapsed && <span className="sidebar-resizer" data-side="left" role="separator" tabIndex={0}
-          aria-label="调整 DSH 控制栏宽度" aria-orientation="vertical"
+          aria-label={t('controlResize')} aria-orientation="vertical"
           aria-valuemin={LEFT_SIDEBAR_MIN} aria-valuemax={LEFT_SIDEBAR_MAX} aria-valuenow={leftSidebarWidth}
           onPointerDown={event => beginSidebarResize(event, 'left')}
           onKeyDown={event => {
@@ -1510,50 +1864,62 @@ export function App(): JSX.Element {
           }} />}
       </Panel>
 
-      <Panel ref={previewSectionRef} className="studio-preview studio-ui-fullscreen-surface" aria-label="WebUI 实时预览">
-        {previewFullscreen && <IconButton className="preview-fullscreen-exit" variant="secondary"
-          onClick={() => void togglePreviewFullscreen()} label="退出全屏预览">
-          <FullscreenIcon active />
-        </IconButton>}
-        <div ref={previewStageRef} className="preview-stage">
+      <Panel ref={previewSectionRef} className="studio-preview"
+        data-fullscreen={previewFullscreen || undefined} aria-label={t('previewLabel')}>
+        {previewFullscreen && <div className="preview-fullscreen-tools" aria-label={t('fullscreenStudioControls')}>
+          <IconButton className="preview-fullscreen-exit" variant="secondary"
+            onClick={togglePreviewFullscreen} label={t('previewExitFullscreen')}>
+            <FullscreenIcon active />
+          </IconButton>
+        </div>}
+        <div ref={previewStageRef} className="preview-stage"
+          onPointerDownCapture={previewFullscreen ? undefined : beginPreviewPan}
+          onMouseDownCapture={previewFullscreen ? undefined : suppressPreviewMiddleMouse}
+          onAuxClickCapture={previewFullscreen ? undefined : suppressPreviewMiddleMouse}
+          onWheel={previewFullscreen ? undefined : zoomPreviewFromCanvas}>
+          {previewZoomFocus !== undefined && !previewFullscreen && <div className="preview-zoom-focus" aria-hidden="true"
+            data-phase={previewZoomFocus.phase}
+            style={{ left: previewZoomFocus.x, top: previewZoomFocus.y }}
+            onPointerDown={beginPreviewZoomFocusMove}
+            onPointerEnter={() => setPreviewZoomFocus(current => current === undefined
+              ? undefined : { ...current, phase: document.hasFocus() ? 'active' : 'fading' })}
+            onPointerLeave={() => setPreviewZoomFocus(current => current === undefined
+              ? undefined : { ...current, phase: 'fading' })} />}
           <div className="preview-artboard" data-empty={previewUrl === undefined || undefined}
             data-mode={previewMode}
-            style={{ left: previewRect.x, top: previewRect.y, width: previewRect.width, height: previewRect.height }}>
-            <div className="preview-viewport" style={{
-              width: previewViewport.width,
-              height: previewViewport.height,
-              transform: `scale(${previewScale})`,
-            }}>
+            style={previewFullscreen
+              ? { inset: 0, width: '100%', height: '100%' }
+              : { left: previewRect.x, top: previewRect.y, width: previewRect.width, height: previewRect.height }}>
+            <div className="preview-viewport" style={previewFullscreen
+              ? { width: '100%', height: '100%' }
+              : { width: previewViewport.width, height: previewViewport.height, transform: `scale(${previewScale})` }}>
                 {previewUrl === undefined
                   ? <EmptyState className="preview-empty"
-                      title={selectedDraft !== undefined ? `启动 ${selectedDraft.label}`
-                        : drafts.length === 0 ? '创建第一个 Draft' : '工作区没有打开的 Draft'}
-                      description={selectedDraft !== undefined ? 'Preview Host 将使用隔离的 DSH_HOME 和端口。'
-                        : drafts.length === 0 ? '创建新插件，或导入已有的本地 WebUI 插件。'
-                          : '已保存的草稿仍在插件管理中，可以随时重新打开。'}
+                      title={selectedDraft !== undefined ? t('previewStartDraft', { name: selectedDraft.label })
+                        : drafts.length === 0 ? t('createFirstDraft') : t('previewNoOpenDraft')}
+                      description={selectedDraft !== undefined ? t('previewHostDescription')
+                        : drafts.length === 0 ? t('previewCreateDescription')
+                          : t('previewReopenDescription')}
                       action={selectedDraft === undefined
                         ? drafts.length === 0
-                          ? <Button variant="primary" onClick={() => {
-                              setLeftSidebarCollapsed(false)
-                              setShowCreate(true)
-                            }}>创建草稿</Button>
+                          ? <Button variant="primary" onClick={() => setCreateDialogOpen(true)}>{t('createDraft')}</Button>
                           : <Button variant="primary" onClick={() => {
                               setLeftSidebarCollapsed(false)
                               setLeftPanel('plugins')
-                            }}>打开插件管理</Button>
+                            }}>{t('openPluginManagement')}</Button>
                         : undefined} />
-                  : <iframe ref={previewRef} key={`${selectedDraftId}:${previewKey}`} title="DSH WebUI preview"
-                      src={previewUrl} onLoad={connectPreview} />}
+                  : <iframe ref={previewRef} key={`${selectedDraftId}:${previewKey}`} title={t('previewFrameTitle')}
+                      src={previewUrl} />}
             </div>
-            <ResizeHandles kind="preview" onPointerDown={beginPreviewResize} />
+            {!previewFullscreen && <ResizeHandles kind="preview" onPointerDown={beginPreviewResize} />}
           </div>
         </div>
       </Panel>
 
       <aside id="draft-control-sidebar" className="studio-inspector-rail studio-sidebar" data-collapsed={rightSidebarCollapsed}
-        aria-label="Draft 与 UI 控制">
+        aria-label={t('inspectorSidebar')}>
         {!rightSidebarCollapsed && <span className="sidebar-resizer" data-side="right" role="separator" tabIndex={0}
-          aria-label="调整 Draft 控制栏宽度" aria-orientation="vertical"
+          aria-label={t('inspectorResize')} aria-orientation="vertical"
           aria-valuemin={RIGHT_SIDEBAR_MIN} aria-valuemax={RIGHT_SIDEBAR_MAX} aria-valuenow={rightSidebarWidth}
           onPointerDown={event => beginSidebarResize(event, 'right')}
           onKeyDown={event => {
@@ -1563,54 +1929,60 @@ export function App(): JSX.Element {
           }} />}
         <Panel className="preview-inspector studio-inspector-block">
           <div className="preview-inspector-heading">
-            {!rightSidebarCollapsed && <div className="control-section-heading"><div><strong>实时预览</strong><span>交互与画板</span></div></div>}
+            {!rightSidebarCollapsed && <div className="control-section-heading"><div><strong>{t('livePreview')}</strong><span>{t('previewInteractionCanvas')}</span></div></div>}
           <IconButton size="small" variant="ghost" aria-expanded={!rightSidebarCollapsed}
             aria-controls="draft-control-sidebar" onClick={() => setRightSidebarCollapsed(value => !value)}
-            label={rightSidebarCollapsed ? '展开 Draft 控制栏' : '收起 Draft 控制栏'}>
+            label={rightSidebarCollapsed ? t('inspectorExpand') : t('inspectorCollapse')}>
             <SidebarToggleIcon side="right" collapsed={rightSidebarCollapsed} />
           </IconButton>
           </div>
 
-        {!rightSidebarCollapsed && <section className="preview-controls" aria-label="实时预览控制">
+        {!rightSidebarCollapsed && <section className="preview-controls" aria-label={t('livePreview')}>
           <div className="preview-mode-field" data-mode={previewMode} data-disabled={previewUrl === undefined || undefined}>
             <div className="preview-mode-heading">
-              <strong>交互模式</strong>
-              <span>{previewMode === 'browse' ? '正常操作 WebUI' : '选择并追踪元素'}</span>
+              <strong>{t('interactionMode')}</strong>
+              <span>{previewMode === 'browse' ? t('interactionBrowseDescription') : t('interactionInspectDescription')}</span>
             </div>
-            <SegmentedControl className="preview-mode-control" label="预览交互模式" value={previewMode}
+            <SegmentedControl className="preview-mode-control" label={t('previewInteractionMode')} value={previewMode}
               options={[
-                { value: 'browse', label: '浏览', disabled: previewUrl === undefined },
-                { value: 'inspect', label: '检查', disabled: previewUrl === undefined },
+                { value: 'browse', label: t('browse'), disabled: previewUrl === undefined },
+                { value: 'inspect', label: t('inspect'), disabled: previewUrl === undefined },
               ]} onChange={changePreviewMode} />
           </div>
-          <FormField id="preview-aspect-ratio" className="preview-aspect-field" label="画板比例">
-            <Select value={previewAspectRatio}
+          <div className="preview-resolution-line">
+            <label><span>W</span><Input type="number" min={1} value={previewViewport.width}
+              aria-label={t('viewportWidth')} onChange={event => changePreviewDimension('width', event.target.valueAsNumber)} /></label>
+            <label><span>H</span><Input type="number" min={1} value={previewViewport.height}
+              aria-label={t('viewportHeight')} onChange={event => changePreviewDimension('height', event.target.valueAsNumber)} /></label>
+          </div>
+          <div className="preview-canvas-line">
+            <div className="preview-zoom-control" aria-label={t('previewZoom')}>
+              <Button size="small" className="preview-zoom-step" onClick={() => changePreviewScale(previewScale / 1.25)}
+                aria-label={t('zoomOut')}>-</Button>
+              <span onWheel={event => {
+                event.preventDefault()
+                zoomPreviewByWheel(event.deltaY, event.deltaMode)
+              }}>{Math.round(previewScale * 100)}%</span>
+              <Button size="small" className="preview-zoom-step" onClick={() => changePreviewScale(previewScale * 1.25)}
+                aria-label={t('zoomIn')}>+</Button>
+            </div>
+            <Select className="preview-aspect-select" value={previewAspectRatio} aria-label={t('artboardRatio')}
               onChange={event => changePreviewAspectRatio(event.target.value as PreviewAspectRatio)}>
               {previewAspectRatios.map(ratio => <option key={ratio} value={ratio}>{ratio}</option>)}
-              {previewAspectRatio === 'custom' && <option value="custom">自定义</option>}
+              {previewAspectRatio === 'custom' && <option value="custom">{t('custom')}</option>}
             </Select>
-          </FormField>
-          <div className="preview-resolution-line">
-            <span>WebUI 尺寸</span>
-            <label><span>W</span><Input type="number" min={1} value={previewViewport.width}
-              aria-label="WebUI viewport 宽度" onChange={event => changePreviewDimension('width', event.target.valueAsNumber)} /></label>
-            <span aria-hidden="true">x</span>
-            <label><span>H</span><Input type="number" min={1} value={previewViewport.height}
-              aria-label="WebUI viewport 高度" onChange={event => changePreviewDimension('height', event.target.valueAsNumber)} /></label>
-          </div>
-          <div className="preview-zoom-line" aria-label="Studio 预览缩放">
-            <Button size="small" className="preview-zoom-step" onClick={() => changePreviewScale(previewScale / 1.25)}
-              aria-label="缩小 Studio 预览">-</Button>
-            <span>{Math.round(previewScale * 100)}%</span>
-            <Button size="small" className="preview-zoom-step" onClick={() => changePreviewScale(previewScale * 1.25)}
-              aria-label="放大 Studio 预览">+</Button>
-            <Button size="small" className="preview-fit-button" data-active={previewFit || undefined}
-              onClick={() => setPreviewFit(true)}>适应画布</Button>
+            <IconButton className="preview-aspect-lock" size="small" variant="secondary"
+              aria-pressed={previewAspectLocked} onClick={togglePreviewAspectLock}
+              label={previewAspectLocked ? t('unlockAspectRatio') : t('lockAspectRatio')}>
+              <AspectRatioLockIcon locked={previewAspectLocked} />
+            </IconButton>
           </div>
           <div className="control-action-row">
+            <Button size="small" className="sidebar-action-button preview-fit-button"
+              onClick={() => fitPreviewToStage()}>{t('fitCanvas')}</Button>
             <Button size="small" className="sidebar-action-button preview-fullscreen-button" disabled={previewUrl === undefined}
-              onClick={() => void togglePreviewFullscreen()}>
-              <FullscreenIcon active={previewFullscreen} />{previewFullscreen ? '退出全屏' : '全屏'}
+              onClick={togglePreviewFullscreen}>
+              <FullscreenIcon active={previewFullscreen} />{previewFullscreen ? t('exitFullscreen') : t('fullscreen')}
             </Button>
           </div>
         </section>}
@@ -1618,10 +1990,10 @@ export function App(): JSX.Element {
 
         <Panel className="studio-inspector studio-inspector-block">
           <div className="inspector-nav">
-            <Tabs id="studio" label="Studio 工具" value={panel} onChange={(value: Panel) => setPanel(value)} options={panels.map(item => ({
+            <Tabs id="studio" label={t('studioTools')} value={panel} onChange={(value: Panel) => setPanel(value)} options={panels.map(item => ({
               value: item,
-              label: item === 'elements' ? 'Elements' : item === 'selection' ? 'Select' : item === 'source' ? 'Source'
-                : item === 'build' ? 'Build' : item === 'readiness' ? 'Ready' : 'Agent',
+              label: item === 'elements' ? t('panelElements') : item === 'selection' ? t('panelSelect') : item === 'source' ? t('panelSource')
+                : item === 'build' ? t('panelBuild') : item === 'readiness' ? t('panelReady') : t('panelAgent'),
             }))} />
           </div>
 
@@ -1629,39 +2001,39 @@ export function App(): JSX.Element {
 
         {panel === 'elements' && <PanelBody id="studio-panel-elements" aria-labelledby="studio-tab-elements" className="panel-content elements-panel" role="tabpanel">
           <div className="panel-heading">
-            <div><h2>Draft Elements</h2><p>只展示当前 Draft 显式注册的子树与变量。</p></div>
+            <div><h2>{t('elementsTitle')}</h2><p>{t('elementsDescription')}</p></div>
             <Badge tone="info">{draftElements.length}</Badge>
           </div>
           {draftElements.length === 0 && draftVariables.length === 0
-            ? <EmptyState title="当前 Draft 尚未注册 Elements"
-                description="使用 dsh-harmony-react/studio 注册边界、源码入口和实时变量。" />
+            ? <EmptyState title={t('elementsEmpty')}
+                description={t('elementsEmptyDescription')} />
             : <>
-                {draftElements.length > 0 && <div className="element-list" aria-label="Registered Draft Elements">
+                {draftElements.length > 0 && <div className="element-list" aria-label={t('registeredElements')}>
                   {draftElements.map(item => <button key={item.element.id} type="button"
                     data-active={focusedElement?.element.id === item.element.id}
                     data-matched={matchedElement?.element.id === item.element.id}
                     onClick={() => setFocusedElementId(item.element.id)}>
                     <span><strong>{item.element.label}</strong><code>{item.element.id}</code></span>
-                    {matchedElement?.element.id === item.element.id && <small>Preview selection</small>}
+                    {matchedElement?.element.id === item.element.id && <small>{t('previewSelection')}</small>}
                   </button>)}
                 </div>}
 
-                {focusedElement !== undefined && <section className="element-detail" aria-label={`${focusedElement.element.label} controls`}>
+                {focusedElement !== undefined && <section className="element-detail" aria-label={t('elementControls', { name: focusedElement.element.label })}>
                   <div className="element-source-row">
                     <div><strong>{focusedElement.element.label}</strong><code>{focusedElement.element.source.file}</code></div>
                     <Button className="source-link" variant="ghost" size="small" disabled={!files.some(file => file.path === focusedElement.element.source.file)}
                       onClick={() => {
                         setPanel('source')
                         void openFile(focusedElement.element.source.file)
-                      }}>打开 Element source</Button>
+                      }}>{t('openElementSource')}</Button>
                   </div>
                   {matchedElement?.element.id === focusedElement.element.id
-                    ? <p className="element-match" data-state="matched">选中节点位于这个 Element 的边界内。</p>
-                    : selection !== undefined && <p className="element-match">当前选中节点不在这个 Element 的已注册边界内。</p>}
+                    ? <p className="element-match" data-state="matched">{t('elementMatched')}</p>
+                    : selection !== undefined && <p className="element-match">{t('elementNotMatched')}</p>}
                   {matchedElement?.element.id === focusedElement.element.id && selection?.react !== undefined
-                    && <PatchProvenance patches={selection.react.patches} currentOwner={selectedDraft?.name} boundaryMatched />}
+                    && <PatchProvenance patches={selection.react.patches} currentOwner={selectedDraft?.name} boundaryMatched t={t} />}
                   {(focusedElement.element.variables ?? []).length === 0
-                    ? <p className="inspection-empty">这个 Element 没有注册实时变量。</p>
+                    ? <p className="inspection-empty">{t('elementNoVariables')}</p>
                     : <div className="element-variables">{focusedElement.element.variables?.map(definition => <VariableControl
                         key={definition.id}
                         definition={definition}
@@ -1674,7 +2046,7 @@ export function App(): JSX.Element {
                 </section>}
 
                 {draftVariables.map(group => <section className="global-variables" key={group.owner}>
-                  <div className="section-heading"><strong>Plugin Variables</strong><span>{group.variables.length}</span></div>
+                  <div className="section-heading"><strong>{t('pluginVariables')}</strong><span>{group.variables.length}</span></div>
                   <div className="element-variables">{group.variables.map(definition => <VariableControl
                     key={definition.id}
                     definition={definition}
@@ -1682,33 +2054,33 @@ export function App(): JSX.Element {
                     onChange={value => setVariable({ scope: 'global', owner: group.owner, variableId: definition.id, value })}
                   />)}</div>
                 </section>)}
-                <p className="variable-note">这些控件只修改当前 Preview 的插件状态；重新载入前请通过源码或 Agent 固化。</p>
+                <p className="variable-note">{t('variableNote')}</p>
               </>}
         </PanelBody>}
 
         {panel === 'selection' && <PanelBody id="studio-panel-selection" aria-labelledby="studio-tab-selection" className="panel-content selection-panel" role="tabpanel">
           <div className="panel-heading">
-            <div><h2>元素与 Patch</h2><p>单击切换目标，双击固定描边；所有修改写入当前 Draft 图层。</p></div>
+            <div><h2>{t('selectionTitle')}</h2><p>{t('selectionDescription')}</p></div>
           </div>
           {selection === undefined
-            ? <EmptyState title="在 Preview 中选择一个元素"
-                description="切换到“检查”后单击页面元素。双击可固定描边，点击其他位置解除；Escape 返回“浏览”。" />
-            : <section className="selection-result" aria-label="已选元素">
+            ? <EmptyState title={t('selectionEmpty')}
+                description={t('selectionEmptyDescription')} />
+            : <section className="selection-result" aria-label={t('selectedElement')}>
                 <div className="selection-title">
                   <code>{selection.tag}{selection.id === undefined ? '' : `#${selection.id}`}
                     {selection.classes.map(name => `.${name}`).join('')}</code>
                   <Badge tone={selection.confidence === 'mapped' ? 'success' : selection.confidence === 'component-only' ? 'info' : 'neutral'}>
-                    {selection.confidence === 'mapped' ? 'Source mapped'
-                      : selection.confidence === 'component-only' ? 'React mapped' : 'DOM only'}
+                    {selection.confidence === 'mapped' ? t('confidenceSourceMapped')
+                      : selection.confidence === 'component-only' ? t('confidenceReactMapped') : t('confidenceDomOnly')}
                   </Badge>
                 </div>
                 {selection.text !== '' && <p className="selection-text">{selection.text}</p>}
                 <dl className="selection-meta">
-                  <div><dt>位置</dt><dd>{Math.round(selection.rect.x)}, {Math.round(selection.rect.y)} · {Math.round(selection.rect.width)} × {Math.round(selection.rect.height)}</dd></div>
-                  {selection.react?.component !== undefined && <div><dt>组件</dt><dd>{selection.react.component}</dd></div>}
+                  <div><dt>{t('position')}</dt><dd>{Math.round(selection.rect.x)}, {Math.round(selection.rect.y)} · {Math.round(selection.rect.width)} × {Math.round(selection.rect.height)}</dd></div>
+                  {selection.react?.component !== undefined && <div><dt>{t('component')}</dt><dd>{selection.react.component}</dd></div>}
                   {selection.react !== undefined && selection.react.owners.length > 0
-                    && <div><dt>Owners</dt><dd>{selection.react.owners.join(' → ')}</dd></div>}
-                  {selection.react?.source !== undefined && <div><dt>Source</dt><dd>
+                    && <div><dt>{t('owners')}</dt><dd>{selection.react.owners.join(' → ')}</dd></div>}
+                  {selection.react?.source !== undefined && <div><dt>{t('source')}</dt><dd>
                     <code>{selection.react.source.resolved?.package === undefined ? '' : `${selection.react.source.resolved.package} · `}
                       {selection.react.source.resolved?.file ?? selection.react.source.file}
                       {selection.react.source.line === undefined ? '' : `:${selection.react.source.line}`}
@@ -1719,35 +2091,35 @@ export function App(): JSX.Element {
                     {selection.react.source.resolved?.kind === 'draft' && <Button className="source-link" variant="ghost" size="small" onClick={() => {
                       setPanel('source')
                       void openFile(selection.react!.source!.resolved!.file)
-                    }}>打开 Selected node source</Button>}
+                    }}>{t('openSelectedSource')}</Button>}
                   </dd></div>}
                 </dl>
                 {selection.react !== undefined && <PatchProvenance patches={selection.react.patches}
-                  currentOwner={selectedDraft?.name} boundaryMatched={matchedElement !== undefined} />}
+                  currentOwner={selectedDraft?.name} boundaryMatched={matchedElement !== undefined} t={t} />}
                 {selection.react !== undefined && Object.keys(selection.react.props).length > 0 && <details>
-                  <summary>安全 Props</summary>
+                  <summary>{t('safeProps')}</summary>
                   <pre className="selection-code">{JSON.stringify(selection.react.props, null, 2)}</pre>
                 </details>}
                 <details>
-                  <summary>Sanitized outerHTML</summary>
+                  <summary>{t('sanitizedHtml')}</summary>
                   <pre className="selection-code">{selection.outerHTML}</pre>
                 </details>
               </section>}
 
-          <section className="harmony-inspection" aria-label="Harmony Patch 目标">
-            <div className="section-heading"><strong>已物化的 Harmony targets</strong><span>{inspection.targets.length}</span></div>
+          <section className="harmony-inspection" aria-label={t('harmonyTargets')}>
+            <div className="section-heading"><strong>{t('materializedTargets')}</strong><span>{inspection.targets.length}</span></div>
             {inspection.targets.length === 0
-              ? <p className="inspection-empty">当前 runtime 尚无已物化的 target inspection。先让 Preview 加载相关 bundle。</p>
+              ? <p className="inspection-empty">{t('materializedTargetsEmpty')}</p>
               : inspection.targets.map(target => <details className="harmony-target" key={`${target.package}:${target.file}`}>
                   <summary><span>{target.package}</span><code>{target.file}</code></summary>
                   <div className="harmony-target-body">
-                    <p>{target.steps.length} 个有序 Patch step · 上游只读</p>
+                    <p>{t('patchSteps', { count: target.steps.length })}</p>
                     {target.steps.map(step => <details key={`${step.owner}:${step.key}`}>
-                      <summary>{step.owner} / {step.key} · {step.matches} matches</summary>
+                      <summary>{step.owner} / {step.key} · {step.matches} {t('matches')}</summary>
                       <pre className="selection-code">{step.source}</pre>
                     </details>)}
-                    <details><summary>Original</summary><pre className="selection-code">{target.original}</pre></details>
-                    <details><summary>Final</summary><pre className="selection-code">{target.final}</pre></details>
+                    <details><summary>{t('original')}</summary><pre className="selection-code">{target.original}</pre></details>
+                    <details><summary>{t('final')}</summary><pre className="selection-code">{target.final}</pre></details>
                   </div>
                 </details>)}
           </section>
@@ -1755,26 +2127,26 @@ export function App(): JSX.Element {
 
         {panel === 'source' && <PanelBody id="studio-panel-source" aria-labelledby="studio-tab-source" className="panel-content source-panel" role="tabpanel">
           <div className="panel-heading">
-            <div><h2>Draft Source</h2><p>只编辑 linked Draft 根目录内的 UTF-8 文件。</p></div>
+            <div><h2>{t('sourceTitle')}</h2><p>{t('sourceDescription')}</p></div>
           </div>
           <div className="source-toolbar">
-            <FormField id="source-file" label="Project file">
+            <FormField id="source-file" label={t('projectFile')}>
               <Select value={filePath} onChange={event => void openFile(event.target.value)}
                 disabled={project === undefined || fileBusy}>
-                <option value="">{files.length === 0 ? '没有可编辑文件' : '选择文件…'}</option>
+                <option value="">{files.length === 0 ? t('noEditableFiles') : t('selectFile')}</option>
                 {files.map(file => <option key={file.path} value={file.path}>{file.path}</option>)}
               </Select>
             </FormField>
           </div>
           {filePath === ''
-            ? <EmptyState className="source-empty" title={project === undefined ? '先打开 linked Draft' : '选择一个 Draft 文件'}
-                description="编辑器不会写入 DSH 或其他已安装插件的源码。" />
+            ? <EmptyState className="source-empty" title={project === undefined ? t('openLinkedDraft') : t('selectDraftFile')}
+                description={t('sourceSafety')} />
             : <>
                 <CodeEditor key={filePath} path={filePath} value={source} onChange={setSource} />
                 <div className="source-actions">
-                  <span>{source === savedSource ? '已保存' : '有未保存修改'}</span>
+                  <span>{source === savedSource ? t('saved') : t('unsaved')}</span>
                   <Button variant="primary" onClick={() => void saveFile()} loading={fileBusy}
-                    loadingLabel="正在保存…" disabled={source === savedSource}>保存到 Draft</Button>
+                    loadingLabel={t('saving')} disabled={source === savedSource}>{t('saveToDraft')}</Button>
                 </div>
               </>}
         </PanelBody>}
@@ -1782,21 +2154,21 @@ export function App(): JSX.Element {
         {panel === 'build' && <PanelBody id="studio-panel-build" aria-labelledby="studio-tab-build"
           className="panel-content build-panel" role="tabpanel">
           <div className="panel-heading build-heading">
-            <div><h2>Build</h2><p>构建当前 Draft，并在保留 Preview Host 的同时加载新插件产物。</p></div>
+            <div><h2>{t('panelBuild')}</h2><p>{t('buildDescription')}</p></div>
           </div>
-          <section className="build-action" aria-label="插件热重载">
-            <div><strong>热重载插件</strong><p>运行 package build，应用产物并重新载入当前 Preview。</p></div>
+          <section className="build-action" aria-label={t('hotReload')}>
+            <div><strong>{t('hotReload')}</strong><p>{t('hotReloadDescription')}</p></div>
             <Button variant="primary" onClick={() => void hotReloadDraft()} loading={selectedBuildRunning}
-              loadingLabel="正在构建并重载…"
+              loadingLabel={t('hotReloading')}
               disabled={project?.state !== 'active' || selectedDraft?.runtime.state !== 'running'}>
-              <RefreshIcon />热重载插件
+              <RefreshIcon />{t('hotReload')}
             </Button>
           </section>
           {project?.state !== 'active' && <Notice className="build-notice" tone="warning">
-            先启动实例并等待 Preview 激活，再热重载插件。
+            {t('hotReloadUnavailable')}
           </Notice>}
-          {selectedBuildOutput !== undefined && <section className="build-output" aria-label="最近一次构建输出">
-            <div><strong>最近一次构建</strong><code>{selectedBuildOutput.argv.join(' ')}</code></div>
+          {selectedBuildOutput !== undefined && <section className="build-output" aria-label={t('latestBuildOutput')}>
+            <div><strong>{t('latestBuild')}</strong><code>{selectedBuildOutput.argv.join(' ')}</code></div>
             {(selectedBuildOutput.stdout !== '' || selectedBuildOutput.stderr !== '')
               && <pre className="selection-code">{[selectedBuildOutput.stdout, selectedBuildOutput.stderr].filter(Boolean).join('\n')}</pre>}
           </section>}
@@ -1805,32 +2177,33 @@ export function App(): JSX.Element {
         {panel === 'readiness' && <PanelBody id="studio-panel-readiness" aria-labelledby="studio-tab-readiness"
           className="panel-content readiness-panel" role="tabpanel">
           <div className="panel-heading readiness-heading">
-            <div><h2>发布就绪检查</h2><p>验证当前 Draft 与真实 Preview；不承诺其他 profile 的 ambient providers。</p></div>
-            <Button size="small" onClick={() => void runPack()} loading={packing} loadingLabel="检查中…"
-              disabled={project === undefined}>npm pack dry-run</Button>
+            <div><h2>{t('readinessTitle')}</h2><p>{t('readinessDescription')}</p></div>
+            <Button size="small" onClick={() => void runPack()} loading={packingDraftId === selectedDraftId} loadingLabel={t('checking')}
+              disabled={project === undefined}>{t('packDryRun')}</Button>
           </div>
           {project === undefined
-            ? <EmptyState title="先打开 Draft" description="Readiness 只检查当前叠加图层，不修改上游包。" />
+            ? <EmptyState title={t('openDraftFirst')} description={t('readinessEmptyDescription')} />
             : <>
-                <div className="readiness-summary" aria-label="Readiness summary">
+                <div className="readiness-summary" aria-label={t('readinessSummary')}>
                   {(['error', 'warning', 'info'] as StudioReadinessLevel[]).map(level => <div key={level} data-level={level}>
-                    <strong>{readiness.findings.filter(item => item.level === level).length}</strong><span>{level}</span>
+                    <strong>{readiness.findings.filter(item => item.level === level).length}</strong>
+                    <span>{level === 'error' ? t('readinessError') : level === 'warning' ? t('readinessWarning') : t('readinessInfo')}</span>
                   </div>)}
                 </div>
                 {readiness.findings.length === 0
-                  ? <p className="readiness-clear">静态检查与当前 Preview 未发现问题。仍建议在发布前运行 package dry-run。</p>
+                  ? <p className="readiness-clear">{t('readinessClear')}</p>
                   : <div className="readiness-findings">{readiness.findings.map((item, index) => <article
                       key={`${item.code}:${item.patch ?? item.file ?? index}`} data-level={item.level}>
                       <div><span>{item.level}</span><code>{item.code}</code></div>
                       <p>{item.message}</p>
                       {(item.file !== undefined || item.patch !== undefined) && <small>{[item.patch, item.file].filter(Boolean).join(' · ')}</small>}
                     </article>)}</div>}
-                {readiness.pack !== undefined && <section className="pack-result" data-ok={readiness.pack.ok} aria-label="npm pack dry-run result">
-                  <div><strong>{readiness.pack.ok ? 'Package dry-run 通过' : 'Package dry-run 失败'}</strong>
-                    <span>{readiness.pack.files.length} files</span></div>
-                  {readiness.pack.files.length > 0 && <details><summary>查看打包文件</summary>
+                {readiness.pack !== undefined && <section className="pack-result" data-ok={readiness.pack.ok} aria-label={t('packDryRunResult')}>
+                  <div><strong>{readiness.pack.ok ? t('packPassed') : t('packFailed')}</strong>
+                    <span>{t('fileCount', { count: readiness.pack.files.length })}</span></div>
+                  {readiness.pack.files.length > 0 && <details><summary>{t('viewPackFiles')}</summary>
                     <pre className="selection-code">{readiness.pack.files.join('\n')}</pre></details>}
-                  {(readiness.pack.stdout !== '' || readiness.pack.stderr !== '') && <details><summary>查看 npm 输出</summary>
+                  {(readiness.pack.stdout !== '' || readiness.pack.stderr !== '') && <details><summary>{t('viewNpmOutput')}</summary>
                     <pre className="selection-code">{[readiness.pack.stdout, readiness.pack.stderr].filter(Boolean).join('\n')}</pre></details>}
                 </section>}
               </>}
@@ -1838,35 +2211,37 @@ export function App(): JSX.Element {
 
         {panel === 'agent' && <PanelBody id="studio-panel-agent" aria-labelledby="studio-tab-agent" className="agent-panel" role="tabpanel">
           <div className="panel-heading agent-heading">
-            <div><h2>辅助 Agent</h2><p>{running ? '正在处理草稿' : sessionId === undefined ? '等待启动' : '可以继续提出修改'}</p></div>
-            {running && <Button variant="danger" size="small" onClick={() => void cancel()}>停止</Button>}
+            <div><h2>{t('agentTitle')}</h2><p>{running ? t('agentWorking') : sessionId === undefined ? t('agentWaiting') : t('agentReady')}</p></div>
+            {running && <Button variant="danger" size="small" onClick={() => void cancel()}>{t('agentCancel')}</Button>}
           </div>
-          <p className="agent-scope">真实 DSH session，仅开放 Selection、Harmony inspection、Draft 文件和构建预览工具。</p>
+          <p className="agent-scope">{t('agentScope')}</p>
           <div className="conversation" aria-live="polite">
             {messages.length === 0 && streaming === '' && <EmptyState className="agent-empty"
-              title={project?.state === 'active' ? '让 Agent 从当前 Draft 开始' : '先打开并激活 linked Draft'}
-              description="Agent 使用 DSH 自身的模型与 session；Draft 生命周期不依赖 Agent。"
+              title={project?.state === 'active' ? t('agentStartFromDraft') : t('agentOpenDraftFirst')}
+              description={t('agentDescription')}
               action={project?.state === 'active' && sessionId === undefined
-                ? <Button variant="primary" loading={creating} loadingLabel="正在创建…"
-                    onClick={() => void createAgent()}>启动 Studio Agent</Button>
+                ? <Button variant="primary" loading={creatingAgentDraftId === selectedDraftId} loadingLabel={t('agentStarting')}
+                    onClick={() => void createAgent()}>{t('agentStart')}</Button>
                 : undefined} />}
             {messages.map(message => <article key={message.id} className={`message ${message.role}`}>
-              <span>{message.role === 'user' ? '你' : 'Agent'}</span><p>{message.text}</p>
+              <span>{message.role === 'user' ? t('you') : t('panelAgent')}</span><p>{message.text}</p>
             </article>)}
-            {streaming !== '' && <article className="message assistant streaming"><span>Agent</span><p>{streaming}</p></article>}
+            {streaming !== '' && <article className="message assistant streaming"><span>{t('panelAgent')}</span><p>{streaming}</p></article>}
           </div>
           {interaction !== undefined && <Notice className="interaction-notice" tone="warning">{interaction}</Notice>}
           <form className="composer" onSubmit={event => void sendPrompt(event)}>
-            <Textarea aria-label="给 Studio Agent 的消息" value={prompt} onChange={event => setPrompt(event.target.value)}
-              placeholder={sessionId === undefined ? '先启动 Studio Agent' : '描述你希望叠加到 WebUI 的修改…'}
+            <Textarea aria-label={t('agentMessage')} value={prompt} onChange={event => setPrompt(event.target.value)}
+              placeholder={sessionId === undefined ? t('agentPlaceholderStart') : t('agentPlaceholder')}
               disabled={sessionId === undefined || sending} rows={3} />
-            <Button variant="primary" type="submit" loading={sending} loadingLabel="发送中…"
-              disabled={sessionId === undefined || prompt.trim() === ''}>发送</Button>
+            <Button variant="primary" type="submit" loading={sending} loadingLabel={t('sending')}
+              disabled={sessionId === undefined || prompt.trim() === ''}>{t('send')}</Button>
           </form>
         </PanelBody>}
       </Panel>
       </aside>
     </main>
     {terminalExpanded && terminal !== null && createPortal(terminal, document.body)}
+    <CreateDraftDialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} onCreate={createDraft} />
+    <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
   </div>
 }

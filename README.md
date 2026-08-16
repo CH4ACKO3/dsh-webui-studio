@@ -22,6 +22,8 @@
   </p>
 
   [![License: MIT](https://img.shields.io/badge/license-MIT-0b63f6.svg)](LICENSE)
+  [![CI](https://github.com/CH4ACKO3/dsh-webui-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/CH4ACKO3/dsh-webui-studio/actions/workflows/ci.yml)
+  [![npm](https://img.shields.io/npm/v/dsh-webui-studio.svg?color=0b63f6)](https://www.npmjs.com/package/dsh-webui-studio)
   [![Node.js](https://img.shields.io/badge/node-%5E22.22.3%20%7C%7C%20%3E%3D24.11.1-2f6f3e.svg)](package.json)
   [![GitHub stars](https://img.shields.io/github/stars/CH4ACKO3/dsh-webui-studio?style=flat&color=0b63f6)](https://github.com/CH4ACKO3/dsh-webui-studio/stargazers)
   [![Powered by Harmony](https://img.shields.io/badge/powered%20by-dsh--harmony-111827.svg)](https://github.com/CH4ACKO3/dsh-harmony)
@@ -92,6 +94,11 @@ studio/
 ```
 
 Creating a new plugin initializes and commits a minimal DSH Web Client package.
+New plugins stay inside Studio by default. Creation can optionally record an
+absolute destination for a new or empty local folder; Studio does not create
+or modify that folder until **Save plugin to folder** is used from the instance
+panel. Later saves synchronize the Studio-owned project snapshot while leaving
+destination-only files such as `node_modules` untouched.
 Importing an existing plugin accepts an absolute local folder after validating
 its Web Client manifest, then copies an isolated snapshot without `.git` or
 `node_modules` into a Studio-owned Git repository. Symbolic links are rejected,
@@ -112,6 +119,17 @@ any persisted Draft. Unsaved Source changes must be saved with `Ctrl+S` or
 > `dsh-harmony@0.1.3` is the minimum compatible release.
 
 ```sh
+dsh plugin --profile web add dsh-webui-studio --allow-build=dsh-harmony
+dsh web
+```
+
+Harmony is resolved transitively and does not need to be installed as a second
+plugin. The build permission allows its global-only DSH shim installer; normal
+profile installs do not modify the global command.
+
+To develop Studio itself from source:
+
+```sh
 git clone https://github.com/CH4ACKO3/dsh-webui-studio.git
 cd dsh-webui-studio
 npm install
@@ -129,10 +147,6 @@ dsh plugin --profile web add "file:$(pwd)/${studio_tarball}" \
   --allow-build=dsh-harmony
 ```
 
-The build permission lets Studio's Harmony dependency install its DSH shim;
-Harmony is resolved transitively and does not need to be installed as a second
-plugin.
-
 Open the Studio URL printed by the local `dsh web` process, create or import a
 Draft, and start its Preview Host.
 
@@ -149,8 +163,8 @@ A Draft package must:
 | `npm run typecheck` | Check the Host, browser app, and Preview bridge |
 | `npm test` | Run the unit and component test suite |
 | `npm run build` | Build the Host, Studio UI, and Preview bridge |
-| `npm run check` | Run typecheck, tests, and the complete build |
-| `npm run test:integration` | Exercise Host, Draft, Preview, build, activation, and shutdown end to end |
+| `npm run check` | Run typecheck, tests, build, and packed fresh-install integration |
+| `npm run test:integration` | Pack and install the tarball in a fresh DSH home, then exercise Host, Draft, Preview, build, activation, and shutdown end to end |
 
 The integration test requires a Harmony build that exposes the APIs described
 in the compatibility note above.

@@ -22,6 +22,8 @@
   </p>
 
   [![License: MIT](https://img.shields.io/badge/license-MIT-0b63f6.svg)](LICENSE)
+  [![CI](https://github.com/CH4ACKO3/dsh-webui-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/CH4ACKO3/dsh-webui-studio/actions/workflows/ci.yml)
+  [![npm](https://img.shields.io/npm/v/dsh-webui-studio.svg?color=0b63f6)](https://www.npmjs.com/package/dsh-webui-studio)
   [![Node.js](https://img.shields.io/badge/node-%5E22.22.3%20%7C%7C%20%3E%3D24.11.1-2f6f3e.svg)](package.json)
   [![GitHub stars](https://img.shields.io/github/stars/CH4ACKO3/dsh-webui-studio?style=flat&color=0b63f6)](https://github.com/CH4ACKO3/dsh-webui-studio/stargazers)
   [![Powered by Harmony](https://img.shields.io/badge/powered%20by-dsh--harmony-111827.svg)](https://github.com/CH4ACKO3/dsh-harmony)
@@ -87,7 +89,10 @@ studio/
 └── runtimes/<draft-id>/dsh-home/profiles/web/
 ```
 
-创建新插件时，Studio 会初始化并提交一个最小 DSH Web Client package。导入已有插件时，
+创建新插件时，Studio 会初始化并提交一个最小 DSH Web Client package，并默认只将它
+保存在 Studio 内。创建时也可以记录一个新建或空白本地文件夹的绝对路径；在实例面板
+显式点击“保存插件到文件夹”前，Studio 不会创建或修改该目录。后续保存会同步 Studio
+中的项目快照，同时保留目标目录独有的 `node_modules` 等文件。导入已有插件时，
 Studio 只接受本机绝对文件夹路径；验证 Web Client manifest 后，它会跳过 `.git` 与
 `node_modules`，将快照复制到 Studio 自有 Git repository。符号链接会被拒绝，原插件
 文件夹始终保持只读且不会被修改。
@@ -103,6 +108,16 @@ Draft 显示名与 npm package identity 相互独立，可在实例面板中重�
 > Studio 依赖 [`docs/harmony-api-requirements.md`](docs/harmony-api-requirements.md)
 > 中列出的 Harmony 公共 extension 与 Draft API，最低兼容版本为
 > `dsh-harmony@0.1.3`。
+
+```sh
+dsh plugin --profile web add dsh-webui-studio --allow-build=dsh-harmony
+dsh web
+```
+
+Harmony 会作为传递依赖自动解析，无需作为第二个插件单独安装。该构建权限用于允许其
+仅在全局安装时生效的 DSH shim 安装器；普通 profile 安装不会修改全局命令。
+
+如需开发 Studio 本身：
 
 ```sh
 git clone https://github.com/CH4ACKO3/dsh-webui-studio.git
@@ -122,9 +137,6 @@ dsh plugin --profile web add "file:$(pwd)/${studio_tarball}" \
   --allow-build=dsh-harmony
 ```
 
-该构建权限仅用于让 Studio 的 Harmony 依赖安装 DSH shim；Harmony 会作为传递依赖自动解析，
-无需作为第二个插件单独安装。
-
 打开本地 `dsh web` 进程输出的 Studio 地址，创建或导入 Draft，然后启动它的 Preview Host。
 
 Draft package 必须：
@@ -140,8 +152,8 @@ Draft package 必须：
 | `npm run typecheck` | 检查 Host、浏览器应用和 Preview bridge |
 | `npm test` | 运行单元测试与组件测试 |
 | `npm run build` | 构建 Host、Studio UI 和 Preview bridge |
-| `npm run check` | 运行 typecheck、测试和完整构建 |
-| `npm run test:integration` | 端到端验证 Host、Draft、Preview、构建、激活与停止 |
+| `npm run check` | 运行 typecheck、测试、构建和 tarball 全新安装集成验证 |
+| `npm run test:integration` | 将 tarball 安装到全新的 DSH home，再端到端验证 Host、Draft、Preview、构建、激活与停止 |
 
 集成测试需要 Harmony build 已公开兼容性说明中列出的 API。
 

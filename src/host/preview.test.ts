@@ -90,3 +90,67 @@ it('forcefully reaps a Preview Host that ignores SIGTERM', async () => {
   expect(child.exitCode !== null || child.signalCode !== null).toBe(true)
   if (process.platform !== 'win32') expect(child.signalCode).toBe('SIGKILL')
 })
+
+it('cancels and waits for a Preview start that is still installing dependencies', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-studio-preview-cancel-'))
+  roots.push(root)
+  const mainProfile = join(root, 'main', 'profiles', 'web')
+  const draftRoot = join(root, 'draft')
+  await Promise.all([mkdir(mainProfile, { recursive: true }), mkdir(draftRoot)])
+  await writeFile(join(mainProfile, 'package.json'), JSON.stringify({ name: 'dsh-profile-web', private: true }))
+  await writeFile(join(draftRoot, 'package.json'), JSON.stringify({
+    name: 'draft-plugin',
+    packageManager: 'npm@11',
+    dependencies: { example: '1.0.0' },
+  }))
+  const draft: StudioDraftRecord = {
+    id: 'id', name: 'draft-plugin', label: 'Draft plugin', source: { kind: 'new', packageName: 'draft-plugin' },
+    repositoryDir: root, worktreeDir: draftRoot, root: draftRoot,
+    runtimeHome: join(root, 'runtime-home'), profileMode: 'main-home', createdAt: 'now',
+  }
+  let commandStarted!: () => void
+  const started = new Promise<void>(resolve => { commandStarted = resolve })
+  const commands: StudioCommandRunner = {
+    async run(_command, _args, _cwd, _onOutput, signal) {
+      await new Promise<void>((_resolve, reject) => {
+        if (signal?.aborted) reject(signal.reason)
+        else signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
+        commandStarted()
+      })
+    },
+  }
+  const preview = new StudioPreviewSupervisor(draft, mainProfile, 'http://127.0.0.1:3081', commands, '/unused/dsh.js')
+
+  const start = preview.start().catch(error => error as Error)
+  await started
+  await expect(preview.stop()).resolves.toMatchObject({ state: 'stopped' })
+  await expect(start).resolves.toMatchObject({ message: 'Preview start canceled' })
+  expect(preview.snapshot()).toMatchObject({ state: 'stopped' })
+})
+
+it('terminates a spawned Preview child before waiting for start to settle', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-studio-preview-start-stop-'))
+  roots.push(root)
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1_000)'], { stdio: 'ignore' })
+  children.push(child)
+  const draft: StudioDraftRecord = {
+    id: 'id', name: 'draft-plugin', label: 'Draft plugin', source: { kind: 'new', packageName: 'draft-plugin' },
+    repositoryDir: root, worktreeDir: root, root,
+    runtimeHome: join(root, 'runtime-home'), profileMode: 'main-home', createdAt: 'now',
+  }
+  const preview = new StudioPreviewSupervisor(draft, root, 'http://127.0.0.1:3081', { async run() {} }, '/unused/dsh.js', 100)
+  const abort = new AbortController()
+  const start = once(child, 'exit').then(() => { throw abort.signal.reason })
+  const mutablePreview = preview as unknown as {
+    child: ChildProcess
+    startAbort: AbortController
+    startPromise: Promise<never>
+  }
+  mutablePreview.child = child
+  mutablePreview.startAbort = abort
+  mutablePreview.startPromise = start
+
+  await expect(preview.stop()).resolves.toMatchObject({ state: 'stopped' })
+  await expect(start).rejects.toThrow('Preview start canceled')
+  expect(child.exitCode !== null || child.signalCode !== null).toBe(true)
+})

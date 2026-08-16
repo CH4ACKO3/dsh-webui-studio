@@ -40,9 +40,25 @@ const previewEnabled = previewConfig !== undefined && previewCapability === prev
 let port: MessagePort | undefined
 let sessionId = ''
 let nonce = ''
+let readySent = false
 
 function post(message: Record<string, unknown>): void {
-  port?.postMessage({ ...message, sessionId, nonce })
+  if (port !== undefined && nonce !== '') port.postMessage({ ...message, sessionId, nonce })
+}
+
+function boundedText(value: unknown, max = 2_000): value is string {
+  return typeof value === 'string' && value.length <= max
+}
+
+function variableTarget(value: unknown): value is StudioVariableTarget {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const target = value as Record<string, unknown>
+  const variableValue = target.value
+  if (!(typeof variableValue === 'boolean' || (typeof variableValue === 'number' && Number.isFinite(variableValue))
+    || boundedText(variableValue))) return false
+  if (!boundedText(target.owner, 1_000) || !boundedText(target.variableId, 500)) return false
+  if (target.scope === 'global') return true
+  return target.scope === 'element' && boundedText(target.elementId, 500)
 }
 
 const registry = new StudioPreviewRegistry(() => {
@@ -261,6 +277,12 @@ function suppress(event: Event): void {
   event.stopImmediatePropagation()
 }
 
+function zoom(event: WheelEvent): void {
+  event.preventDefault()
+  event.stopImmediatePropagation()
+  post({ type: 'preview-zoom', deltaY: event.deltaY, deltaMode: event.deltaMode })
+}
+
 function refreshOverlay(): void {
   if (candidate?.isConnected === true) showOverlay(candidate)
   else if (candidate !== undefined) unlockSelection()
@@ -309,7 +331,7 @@ function suppressMiddleMouse(event: MouseEvent): void {
 function keydown(event: KeyboardEvent): void {
   if (event.key !== 'Escape') return
   setMode('browse')
-  port?.postMessage({ type: 'mode', sessionId, nonce, mode })
+  post({ type: 'mode', mode })
 }
 
 function setMode(next: 'browse' | 'inspect'): void {
@@ -319,10 +341,10 @@ function setMode(next: 'browse' | 'inspect'): void {
   shield?.removeEventListener('pointerleave', pointerleave)
   shield?.removeEventListener('click', click)
   shield?.removeEventListener('dblclick', doubleClick)
-  shield?.removeEventListener('wheel', suppress)
   shield?.removeEventListener('contextmenu', suppress)
   shield?.remove()
   shield = undefined
+  window.removeEventListener('wheel', zoom, true)
   document.removeEventListener('keydown', keydown, true)
   window.removeEventListener('resize', refreshOverlay)
   document.removeEventListener('scroll', refreshOverlay, true)
@@ -337,49 +359,57 @@ function setMode(next: 'browse' | 'inspect'): void {
     shield.addEventListener('pointerleave', pointerleave)
     shield.addEventListener('click', click)
     shield.addEventListener('dblclick', doubleClick)
-    shield.addEventListener('wheel', suppress, { passive: false })
     shield.addEventListener('contextmenu', suppress)
+    window.addEventListener('wheel', zoom, { capture: true, passive: false })
     document.addEventListener('keydown', keydown, true)
     window.addEventListener('resize', refreshOverlay)
     document.addEventListener('scroll', refreshOverlay, true)
   }
 }
 
-window.addEventListener('message', event => {
-  const message = event.data as BridgeMessage
-  if (!previewEnabled || event.source !== parent || event.origin !== previewConfig?.parentOrigin
-    || message.type !== 'dsh-studio-connect' || message.sessionId !== previewCapability
-    || typeof message.nonce !== 'string' || event.ports.length !== 1) return
-  port?.close()
-  port = event.ports[0]
-  sessionId = previewCapability
-  nonce = message.nonce
-  port.onmessage = portEvent => {
-    const command = portEvent.data as BridgeMessage
-    if (command.sessionId !== sessionId || command.nonce !== nonce) return
-    if (command.type === 'set-mode' && (command.mode === 'browse' || command.mode === 'inspect')) setMode(command.mode)
-    if (command.type === 'unlock-selection') unlockSelection()
-    if (command.type === 'refresh-overlay') requestAnimationFrame(refreshOverlay)
-    if (command.type === 'set-variable' && typeof command.requestId === 'string'
-      && typeof command.target === 'object' && command.target !== null) {
-      void registry.set(command.target as StudioVariableTarget).then(() => {
-        post({ type: 'variable-result', requestId: command.requestId, ok: true })
-      }).catch(error => {
-        post({ type: 'variable-result', requestId: command.requestId, ok: false, error: error instanceof Error ? error.message : String(error) })
-      })
-    }
-  }
-  port.start()
+function announceReady(): void {
+  if (readySent || nonce === '') return
   const boot = (globalThis as typeof globalThis & { __DSH_BOOT__?: { rev?: unknown } }).__DSH_BOOT__
-  port.postMessage({
-    type: 'preview-ready', sessionId, nonce, mode,
-    graphRev: typeof boot?.rev === 'string' ? boot.rev : undefined,
-    react: 'react-grab',
-  })
+  if (typeof boot?.rev !== 'string' || boot.rev === '') return
+  readySent = true
+  post({ type: 'preview-ready', mode, graphRev: boot.rev.slice(0, 2_000), react: 'react-grab' })
   post({ type: 'registry', registry: registry.snapshot() })
-})
+}
+
+function receiveParentCommand(portEvent: MessageEvent): void {
+  if (typeof portEvent.data !== 'object' || portEvent.data === null || Array.isArray(portEvent.data)) return
+  const command = portEvent.data as BridgeMessage
+  if (command.sessionId !== sessionId) return
+  if (nonce === '') {
+    if (command.type !== 'connect' || !boundedText(command.nonce, 200) || command.nonce === '') return
+    nonce = command.nonce
+    announceReady()
+    return
+  }
+  if (command.nonce !== nonce) return
+  if (command.type === 'set-mode' && (command.mode === 'browse' || command.mode === 'inspect')) setMode(command.mode)
+  if (command.type === 'unlock-selection') unlockSelection()
+  if (command.type === 'refresh-overlay') requestAnimationFrame(refreshOverlay)
+  if (command.type === 'set-variable' && boundedText(command.requestId, 200)
+    && variableTarget(command.target)) {
+    void registry.set(command.target).then(() => {
+      post({ type: 'variable-result', requestId: command.requestId, ok: true })
+    }).catch(error => {
+      post({ type: 'variable-result', requestId: command.requestId, ok: false, error: error instanceof Error ? error.message : String(error) })
+    })
+  }
+}
 
 if (previewEnabled) {
+  const channel = new MessageChannel()
+  port = channel.port1
+  sessionId = previewCapability
+  port.onmessage = portEvent => {
+    receiveParentCommand(portEvent)
+  }
+  port.start()
+  parent.postMessage({ type: 'dsh-studio-bridge', sessionId }, previewConfig.parentOrigin, [channel.port2])
+  window.addEventListener('load', announceReady, { once: true })
   window.addEventListener('pointerdown', beginPan, true)
   window.addEventListener('pointermove', movePan, true)
   window.addEventListener('pointerup', endPan, true)
@@ -396,6 +426,7 @@ window.addEventListener('beforeunload', () => {
   window.removeEventListener('pointercancel', endPan, true)
   window.removeEventListener('mousedown', suppressMiddleMouse, true)
   window.removeEventListener('auxclick', suppressMiddleMouse, true)
+  window.removeEventListener('load', announceReady)
   port?.close()
   registry.dispose()
   if (studioGlobal[STUDIO_RUNTIME_KEY] === registry) delete studioGlobal[STUDIO_RUNTIME_KEY]

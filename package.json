@@ -24,6 +24,11 @@
     "url": "git+https://github.com/CH4ACKO3/dsh-webui-studio.git"
   },
   "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "registry": "https://registry.npmjs.org/"
+  },
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
@@ -51,7 +56,8 @@
     "typecheck": "tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.browser.json --noEmit && tsc -p tsconfig.bridge.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "test": "vitest run",
     "test:integration": "npm run build && node test/studio-extension.e2e.ts",
-    "check": "npm run typecheck && npm test && npm run build",
+    "check": "npm run typecheck && npm test && npm run test:integration",
+    "prepublishOnly": "npm run check",
     "prepare": "npm run build"
   },
   "engines": {

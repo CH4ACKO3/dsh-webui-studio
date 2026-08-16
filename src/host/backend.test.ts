@@ -55,16 +55,17 @@ function record(root: string): StudioDraftRecord {
   }
 }
 
-function backend(draft: StudioDraftRecord): StudioBackend {
+function backend(draft: StudioDraftRecord, get = vi.fn(async () => draft)): StudioBackend {
   previewState.project = { name: draft.name, root: draft.root, state: 'staged', graphRev: 'graph-1' }
   const harmony = { profileDir: '/home/profiles/web' } as StudioHarmonyService
   const agents = { create: vi.fn(async () => ({ dispose: vi.fn(async () => {}) })) } as unknown as AgentRegistry
   const subprocess = {} as SubprocessRuntime
   const registry = {
     list: vi.fn(async () => [draft]),
-    get: vi.fn(async () => draft),
+    get,
     create: vi.fn(async () => draft),
     rename: vi.fn(async (_id: string, label: string) => ({ ...draft, label: label.trim() })),
+    export: vi.fn(async () => ({ ...draft, exportedAt: '2026-08-17T00:00:00.000Z' })),
   } as unknown as StudioDraftRegistry
   const workspace = {
     read: vi.fn(async () => ({ openDraftIds: [] })),
@@ -88,6 +89,22 @@ describe('StudioBackend', () => {
       runtime: { state: 'running', previewUrl: 'http://127.0.0.1:4000/' },
       project: { state: 'staged', graphRev: 'graph-1' },
     } })
+  })
+
+  it('creates one controller for concurrent first access to a persistent Draft', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-studio-backend-'))
+    temporaryDirectories.push(root)
+    const draft = record(root)
+    const get = vi.fn(async () => draft)
+    const studio = backend(draft, get)
+
+    const responses = await Promise.all([
+      studio.call(request('studio.drafts.start', { draftId: draft.id })),
+      studio.call(request('studio.drafts.start', { draftId: draft.id })),
+    ])
+
+    expect(responses.every(response => response.result.ok)).toBe(true)
+    expect(get).toHaveBeenCalledTimes(1)
   })
 
   it('renames the persistent Draft without replacing its package identity', async () => {
@@ -172,6 +189,20 @@ describe('StudioBackend', () => {
 
     expect(read.result).toMatchObject({ ok: true, value: { content: 'before\n' } })
     expect(saved.result).toMatchObject({ ok: true, value: { saved: true } })
+  })
+
+  it('exports a Draft only through its explicit folder action', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-studio-backend-'))
+    temporaryDirectories.push(root)
+    const draft = { ...record(root), destinationDirectory: join(root, 'saved-plugin') }
+    const studio = backend(draft)
+
+    const exported = await studio.call(request('studio.drafts.export', { draftId: draft.id }))
+
+    expect(exported.result).toMatchObject({ ok: true, value: {
+      destinationDirectory: draft.destinationDirectory,
+      exportedAt: '2026-08-17T00:00:00.000Z',
+    } })
   })
 
   it('requires a Draft id for Draft-scoped methods', async () => {

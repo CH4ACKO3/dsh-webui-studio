@@ -25,6 +25,18 @@ describe('studio layout geometry', () => {
       .toEqual({ x: 100, y: 100, width: 500, height: 250 })
   })
 
+  it('locks the current ratio while resizing a horizontal edge', () => {
+    expect(resizeRect({ x: 100, y: 100, width: 400, height: 200 }, 'e', 100, 0, undefined,
+      { width: 1, height: 1 }, true))
+      .toEqual({ x: 100, y: 75, width: 500, height: 250 })
+  })
+
+  it('locks the current ratio while resizing a vertical edge', () => {
+    expect(resizeRect({ x: 100, y: 100, width: 400, height: 200 }, 'n', 0, -50, undefined,
+      { width: 1, height: 1 }, true))
+      .toEqual({ x: 50, y: 50, width: 500, height: 250 })
+  })
+
   it('allows an unbounded preview to reach a one-pixel viewport', () => {
     expect(resizeRect({ x: 100, y: 100, width: 400, height: 225 }, 'w', 500, 0, undefined,
       { width: 1, height: 1 }, false))
