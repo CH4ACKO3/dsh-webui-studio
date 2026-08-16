@@ -36,9 +36,11 @@ jobs:
         run: npm run check
       - name: Pack release artifact
         run: |
-          pack_json="$(npm pack --ignore-scripts --json)"
-          package_tarball="$(node -e 'const [item] = JSON.parse(process.argv[1]); if (!item?.filename) process.exit(1); process.stdout.write(item.filename)' "$pack_json")"
-          test -f "$package_tarball"
+          mkdir -p "$RUNNER_TEMP/studio-package"
+          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/studio-package"
+          package_tarballs=("$RUNNER_TEMP/studio-package"/*.tgz)
+          test "${#package_tarballs[@]}" -eq 1
+          package_tarball="${package_tarballs[0]}"
           echo "PACKAGE_TARBALL=$package_tarball" >> "$GITHUB_ENV"
       - name: Publish npm package
         run: npm publish "$PACKAGE_TARBALL" --access public --provenance

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -55,24 +55,24 @@ window.__ModuleLoader__.load({ id: 'studio-draft', factory: () => ({ build: 1 })
 \`)
 console.log('studio draft built')
 `)
-const env = { ...process.env, DSH_HOME: home }
+const env: NodeJS.ProcessEnv = { ...process.env, DSH_HOME: home }
+delete env.npm_config_dry_run
+delete env.NPM_CONFIG_DRY_RUN
 const add = (packageSpec: string) => spawnSync(process.execPath, [
   harmonyBin, 'plugin', '--profile', 'web', 'add', packageSpec, '--allow-build=dsh-harmony',
 ], { cwd: root, env, encoding: 'utf8' })
 
 let child: ChildProcess | undefined
 try {
-  const packed = spawnSync('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', root], {
+  const packed = spawnSync('npm', ['pack', '--ignore-scripts', '--pack-destination', root], {
     cwd: packageRoot,
     env,
     encoding: 'utf8',
   })
   assert.equal(packed.status, 0, packed.stderr || packed.stdout)
-  const packResult = JSON.parse(packed.stdout) as Array<{ filename?: unknown }>
-  assert.equal(packResult.length, 1, packed.stdout)
-  assert.equal(typeof packResult[0]?.filename, 'string', packed.stdout)
-  const studioTarball = join(root, packResult[0]!.filename as string)
-  assert.equal(existsSync(studioTarball), true, 'npm pack did not create the Studio tarball')
+  const tarballs = readdirSync(root).filter((entry) => entry.endsWith('.tgz'))
+  assert.equal(tarballs.length, 1, `npm pack created unexpected artifacts: ${tarballs.join(', ')}`)
+  const studioTarball = join(root, tarballs[0]!)
   const installed = add(studioTarball)
   assert.equal(installed.status, 0, `${installed.stdout}\n${installed.stderr}`)
 
