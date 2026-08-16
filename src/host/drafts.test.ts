@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -46,6 +46,119 @@ describe('StudioDraftRegistry', () => {
     expect(registration?.factory().apply).toBeTypeOf('function')
     await expect(registry.list()).resolves.toEqual([draft])
     await expect(registry.get(draft.id)).resolves.toEqual(draft)
+  })
+
+  it('defers a new plugin destination until an explicit export', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-studio-registry-'))
+    roots.push(home)
+    const destination = join(home, 'saved-plugin')
+    const registry = new StudioDraftRegistry(home)
+
+    const draft = await registry.create({
+      source: { kind: 'new', packageName: 'saved-plugin' },
+      profileMode: 'main-home',
+      destinationDirectory: destination,
+    })
+
+    expect(draft.destinationDirectory).toBe(join(await realpath(home), 'saved-plugin'))
+    expect(draft.exportedAt).toBeUndefined()
+    await expect(lstat(destination)).rejects.toMatchObject({ code: 'ENOENT' })
+
+    await writeFile(join(draft.root, 'README.md'), '# First save\n')
+    const exported = await registry.export(draft.id)
+    expect(exported.exportedAt).toEqual(expect.any(String))
+    expect(await readFile(join(destination, 'README.md'), 'utf8')).toBe('# First save\n')
+    await expect(lstat(join(destination, '.git'))).rejects.toMatchObject({ code: 'ENOENT' })
+
+    await writeFile(join(draft.root, 'README.md'), '# Saved again\n')
+    await writeFile(join(draft.root, 'obsolete.txt'), 'remove me\n')
+    await registry.export(draft.id)
+    expect(await readFile(join(destination, 'README.md'), 'utf8')).toBe('# Saved again\n')
+    await mkdir(join(destination, '.git'))
+    await mkdir(join(destination, 'node_modules'))
+    await writeFile(join(destination, '.git', 'config'), 'preserve git\n')
+    await writeFile(join(destination, 'node_modules', 'cache'), 'preserve dependencies\n')
+    await rm(join(draft.root, 'obsolete.txt'))
+    await registry.export(draft.id)
+    await expect(lstat(join(destination, 'obsolete.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readFile(join(destination, '.git', 'config'), 'utf8')).toBe('preserve git\n')
+    expect(await readFile(join(destination, 'node_modules', 'cache'), 'utf8')).toBe('preserve dependencies\n')
+  })
+
+  it('keeps the previous export intact when staging the next snapshot fails', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-studio-registry-'))
+    const outside = await mkdtemp(join(tmpdir(), 'dsh-studio-export-outside-'))
+    roots.push(home, outside)
+    const destination = join(home, 'saved-plugin')
+    const registry = new StudioDraftRegistry(home)
+    const draft = await registry.create({
+      source: { kind: 'new', packageName: 'saved-plugin' },
+      profileMode: 'main-home',
+      destinationDirectory: destination,
+    })
+    await writeFile(join(draft.root, 'README.md'), '# Stable\n')
+    await registry.export(draft.id)
+    await writeFile(join(outside, 'secret.txt'), 'secret\n')
+    await symlink(join(outside, 'secret.txt'), join(draft.root, 'unsafe-link'))
+
+    await expect(registry.export(draft.id)).rejects.toThrow('does not include symbolic links')
+    expect(await readFile(join(destination, 'README.md'), 'utf8')).toBe('# Stable\n')
+    await expect(lstat(join(destination, 'unsafe-link'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('serializes rename and export without losing persistent fields', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-studio-registry-'))
+    roots.push(home)
+    const registry = new StudioDraftRegistry(home)
+    const draft = await registry.create({
+      source: { kind: 'new', packageName: 'saved-plugin' },
+      profileMode: 'main-home',
+      destinationDirectory: join(home, 'saved-plugin'),
+    })
+
+    await Promise.all([registry.export(draft.id), registry.rename(draft.id, 'Renamed Draft')])
+
+    await expect(registry.get(draft.id)).resolves.toMatchObject({
+      label: 'Renamed Draft',
+      exportedAt: expect.any(String),
+    })
+  })
+
+  it('rejects exporting a Draft whose package identity was edited', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-studio-registry-'))
+    roots.push(home)
+    const registry = new StudioDraftRegistry(home)
+    const draft = await registry.create({
+      source: { kind: 'new', packageName: 'saved-plugin' },
+      profileMode: 'main-home',
+      destinationDirectory: join(home, 'saved-plugin'),
+    })
+    const manifest = JSON.parse(await readFile(join(draft.root, 'package.json'), 'utf8'))
+    await writeFile(join(draft.root, 'package.json'), JSON.stringify({ ...manifest, name: 'renamed-plugin' }))
+
+    await expect(registry.export(draft.id)).rejects.toThrow('name must remain "saved-plugin"')
+  })
+
+  it('rejects an unsafe destination without modifying it', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-studio-registry-'))
+    const destination = join(home, 'existing-plugin')
+    roots.push(home)
+    await mkdir(destination)
+    await writeFile(join(destination, 'keep.txt'), 'keep\n')
+    const registry = new StudioDraftRegistry(home)
+
+    await expect(registry.create({
+      source: { kind: 'new', packageName: 'saved-plugin' },
+      profileMode: 'main-home',
+      destinationDirectory: destination,
+    })).rejects.toThrow('new or empty')
+    expect(await readFile(join(destination, 'keep.txt'), 'utf8')).toBe('keep\n')
+
+    await expect(registry.create({
+      source: { kind: 'new', packageName: 'saved-plugin' },
+      profileMode: 'main-home',
+      destinationDirectory: 'relative/plugin',
+    })).rejects.toThrow('absolute path')
   })
 
   it('imports an existing WebUI plugin as an isolated snapshot', async () => {
@@ -136,5 +249,25 @@ describe('StudioDraftRegistry', () => {
       source: { kind: 'new', packageName: 'dsh-test-draft' },
       profileMode: 'custom',
     })).rejects.toThrow('not implemented')
+  })
+
+  it('cleans managed artifacts when Draft creation fails before the record commits', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-studio-registry-'))
+    roots.push(home)
+    const registry = new StudioDraftRegistry(home, {
+      async run(_command, args) {
+        if (args[0] === 'worktree') throw new Error('worktree creation failed')
+      },
+    })
+
+    await expect(registry.create({
+      source: { kind: 'new', packageName: 'failed-plugin' },
+      profileMode: 'main-home',
+    })).rejects.toThrow('worktree creation failed')
+
+    expect(await readdir(registry.repositoriesDir)).toEqual([])
+    expect(await readdir(registry.worktreesDir)).toEqual([])
+    expect(await readdir(registry.runtimesDir)).toEqual([])
+    expect(await registry.list()).toEqual([])
   })
 })

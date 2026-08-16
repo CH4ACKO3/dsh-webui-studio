@@ -1,12 +1,11 @@
 import { createRequire } from 'node:module'
-import { access, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import type { StudioDraftRecord } from '../contracts.js'
 import { resolvePackageManager } from './build.js'
 import type { StudioCommandRunner } from './drafts.js'
 
 const PROFILE_FILES = ['cordis.patch.yml', 'cordis.yml', 'harmony.json', 'pnpm-workspace.yaml'] as const
-const READY_FILE = '.dsh-studio-profile-ready'
 const require = createRequire(import.meta.url)
 const PNPM_ENTRY = join(dirname(require.resolve('pnpm')), 'bin', 'pnpm.cjs')
 
@@ -17,6 +16,7 @@ interface ProfileManifest {
 }
 
 interface DraftManifest {
+  name?: unknown
   packageManager?: unknown
   dependencies?: Record<string, unknown>
   devDependencies?: Record<string, unknown>
@@ -41,19 +41,30 @@ function hasDependencies(manifest: DraftManifest): boolean {
     .some(dependencies => dependencies !== undefined && Object.keys(dependencies).length > 0)
 }
 
+export async function assertDraftPackageIdentity(draft: StudioDraftRecord): Promise<DraftManifest> {
+  const manifest = JSON.parse(await readFile(join(draft.root, 'package.json'), 'utf8')) as DraftManifest
+  if (manifest.name !== draft.name) {
+    throw new Error(`Draft package.json name must remain ${JSON.stringify(draft.name)}`)
+  }
+  return manifest
+}
+
 export async function installDraftDependencies(
   draft: StudioDraftRecord,
   commands: StudioCommandRunner,
   onOutput?: (chunk: string) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
-  const manifest = JSON.parse(await readFile(join(draft.root, 'package.json'), 'utf8')) as DraftManifest
+  signal?.throwIfAborted()
+  const manifest = await assertDraftPackageIdentity(draft)
   if (!hasDependencies(manifest)) return
   const manager = resolvePackageManager(draft.root, manifest)
   const [command, args] = manager === 'pnpm' ? bundledPnpmCommand(['install']) : [manager, ['install']]
   onOutput?.(terminalCommandLine(draft.root, command, args))
   try {
-    await commands.run(command, args, draft.root, onOutput)
+    await commands.run(command, args, draft.root, onOutput, signal)
   } catch (error) {
+    signal?.throwIfAborted()
     const message = (error instanceof Error ? error.message : String(error)).split('\n', 1)[0]
     onOutput?.(`[studio] ${message}\n`)
     throw new Error('Draft dependency installation failed. Check the startup terminal for details.')
@@ -72,13 +83,11 @@ export async function materializeDraftProfile(
   studioPackageRoot: string,
   commands: StudioCommandRunner,
   onOutput?: (chunk: string) => void,
+  signal?: AbortSignal,
 ): Promise<string> {
+  signal?.throwIfAborted()
   if (draft.profileMode !== 'main-home') throw new Error('Custom Draft profiles are not implemented yet')
   const profileDir = join(draft.runtimeHome, 'profiles', 'web')
-  try {
-    await access(join(profileDir, READY_FILE))
-    return profileDir
-  } catch {}
   await rm(profileDir, { recursive: true, force: true })
   await mkdir(profileDir, { recursive: true })
   const manifest = JSON.parse(await readFile(join(mainProfileDir, 'package.json'), 'utf8')) as ProfileManifest
@@ -98,12 +107,12 @@ export async function materializeDraftProfile(
   const [command, args] = bundledPnpmCommand(['install', '--prefer-offline'])
   onOutput?.(terminalCommandLine(profileDir, command, args))
   try {
-    await commands.run(command, args, profileDir, onOutput)
+    await commands.run(command, args, profileDir, onOutput, signal)
   } catch (error) {
+    signal?.throwIfAborted()
     const message = (error instanceof Error ? error.message : String(error)).split('\n', 1)[0]
     onOutput?.(`[studio] ${message}\n`)
     throw new Error('Profile dependency installation failed. Check the startup terminal for details.')
   }
-  await writeFile(join(profileDir, READY_FILE), `${new Date().toISOString()}\n`)
   return profileDir
 }

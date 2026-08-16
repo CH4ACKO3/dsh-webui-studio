@@ -40,6 +40,20 @@ test('reports a built, declared Draft as ready', () => {
   }]), root)).toEqual({ findings: [] })
 })
 
+test('rejects a manifest name that diverges from the persistent Draft identity', () => {
+  const root = project({
+    name: 'renamed-draft', version: '1.0.0', scripts: { build: 'tsc' },
+    exports: { '.': './index.js', './client': './client.js', './package.json': './package.json' },
+    dsh: { client: { platform: 'web' } },
+  })
+  writeFileSync(join(root, 'index.js'), '')
+  writeFileSync(join(root, 'client.js'), '')
+
+  expect(inspectReadiness(root, 'draft', inspection(), root).findings).toContainEqual(expect.objectContaining({
+    level: 'error', code: 'manifest-identity', file: 'package.json',
+  }))
+})
+
 test('separates definite failures from ambient provider warnings and effective order info', () => {
   const root = project({
     name: 'draft', version: '', scripts: {}, exports: { '.': './dist/index.js', './client': './dist/client.js' },

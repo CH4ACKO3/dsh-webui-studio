@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: npm and GitHub
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: npm
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.11.1
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - name: Validate release tag
+        run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
+      - name: Install dependencies
+        run: npm ci
+      - name: Run release gate
+        run: npm run check
+      - name: Pack release artifact
+        run: |
+          pack_json="$(npm pack --ignore-scripts --json)"
+          package_tarball="$(node -e 'const [item] = JSON.parse(process.argv[1]); if (!item?.filename) process.exit(1); process.stdout.write(item.filename)' "$pack_json")"
+          test -f "$package_tarball"
+          echo "PACKAGE_TARBALL=$package_tarball" >> "$GITHUB_ENV"
+      - name: Publish npm package
+        run: npm publish "$PACKAGE_TARBALL" --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Create GitHub Release
+        run: gh release create "$GITHUB_REF_NAME" "$PACKAGE_TARBALL" --generate-notes --verify-tag --title "$GITHUB_REF_NAME"
+        env:
+          GH_TOKEN: ${{ github.token }}

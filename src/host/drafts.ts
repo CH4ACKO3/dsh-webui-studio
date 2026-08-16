@@ -1,20 +1,20 @@
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { chmod, copyFile, lstat, mkdir, readFile, readdir, realpath, rename, writeFile } from 'node:fs/promises'
-import { basename, dirname, isAbsolute, join } from 'node:path'
+import { chmod, copyFile, lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { StudioCreateDraftInput, StudioDraftRecord } from '../contracts.js'
 
 const PACKAGE_NAME = /^(?:@[a-z0-9._~-]+\/)?[a-z0-9._~-]+$/
 const COMMAND_OUTPUT_LIMIT = 2 * 1024 * 1024
 
 export interface StudioCommandRunner {
-  run(command: string, args: string[], cwd?: string, onOutput?: (chunk: string) => void): Promise<void>
+  run(command: string, args: string[], cwd?: string, onOutput?: (chunk: string) => void, signal?: AbortSignal): Promise<void>
 }
 
 export const studioCommands: StudioCommandRunner = {
-  run(command, args, cwd, onOutput) {
+  run(command, args, cwd, onOutput, signal) {
     return new Promise<void>((resolve, reject) => {
-      const child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+      const child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], signal })
       let output = ''
       const read = (chunk: Buffer | string): void => {
         const text = chunk.toString()
@@ -89,7 +89,15 @@ async function copyPluginDirectory(source: string, target: string): Promise<void
   const info = await lstat(source)
   if (info.isSymbolicLink()) throw new Error(`Plugin snapshot does not include symbolic links: ${source}`)
   if (info.isDirectory()) {
-    await mkdir(target, { mode: info.mode, recursive: true })
+    try {
+      const targetInfo = await lstat(target)
+      if (targetInfo.isSymbolicLink() || !targetInfo.isDirectory()) {
+        throw new Error(`Plugin destination must contain only regular files and directories: ${target}`)
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      await mkdir(target, { mode: info.mode, recursive: true })
+    }
     const entries = await readdir(source, { withFileTypes: true })
     for (const entry of entries) {
       if (entry.name === '.git' || entry.name === 'node_modules') continue
@@ -98,8 +106,96 @@ async function copyPluginDirectory(source: string, target: string): Promise<void
     return
   }
   if (!info.isFile()) throw new Error(`Plugin snapshot only supports regular files and directories: ${source}`)
+  try {
+    const targetInfo = await lstat(target)
+    if (targetInfo.isSymbolicLink() || !targetInfo.isFile()) {
+      throw new Error(`Plugin destination must contain only regular files and directories: ${target}`)
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
   await copyFile(source, target)
   await chmod(target, info.mode)
+}
+
+const PRESERVED_EXPORT_ENTRIES = ['.git', 'node_modules'] as const
+
+async function replacePluginDirectory(source: string, target: string, targetExists: boolean): Promise<void> {
+  const parent = dirname(target)
+  const suffix = randomUUID()
+  const staging = join(parent, `.${basename(target)}.${suffix}.dsh-studio.tmp`)
+  const backup = join(parent, `.${basename(target)}.${suffix}.dsh-studio.backup`)
+  let movedTarget = false
+  let committed = false
+  try {
+    await copyPluginDirectory(source, staging)
+    if (targetExists) {
+      for (const entry of PRESERVED_EXPORT_ENTRIES) {
+        const info = await pathInfo(join(target, entry))
+        if (info?.isSymbolicLink()) throw new Error(`Local plugin folder contains an unsafe symbolic link: ${entry}`)
+      }
+      await rename(target, backup)
+      movedTarget = true
+      for (const entry of PRESERVED_EXPORT_ENTRIES) {
+        if (await pathInfo(join(backup, entry)) !== undefined) {
+          await rename(join(backup, entry), join(staging, entry))
+        }
+      }
+    }
+    await rename(staging, target)
+    committed = true
+    if (movedTarget) await rm(backup, { recursive: true, force: true })
+  } catch (error) {
+    if (movedTarget && !committed) {
+      for (const entry of PRESERVED_EXPORT_ENTRIES) {
+        if (await pathInfo(join(staging, entry)) !== undefined) {
+          await rename(join(staging, entry), join(backup, entry))
+        }
+      }
+      if (await pathInfo(target) === undefined) await rename(backup, target)
+    }
+    await rm(staging, { recursive: true, force: true })
+    throw error
+  }
+}
+
+async function pathInfo(path: string): Promise<Awaited<ReturnType<typeof lstat>> | undefined> {
+  try {
+    return await lstat(path)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+    throw error
+  }
+}
+
+function inside(root: string, target: string): boolean {
+  const path = relative(root, target)
+  return path === '' || (path !== '..' && !path.startsWith(`..${sep}`) && !isAbsolute(path))
+}
+
+async function validateDestinationDirectory(input: unknown, studioRoot: string): Promise<string | undefined> {
+  if (input === undefined) return undefined
+  if (typeof input !== 'string' || input.trim() === '') throw new Error('Local plugin folder is required')
+  const requested = input.trim()
+  if (!isAbsolute(requested)) throw new Error('Local plugin folder must be an absolute path')
+  const requestedPath = resolve(requested)
+  let canonicalParent: string
+  try {
+    canonicalParent = await realpath(dirname(requestedPath))
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new Error('The parent of the local plugin folder must already exist')
+    throw error
+  }
+  const target = join(canonicalParent, basename(requestedPath))
+  if (inside(await realpath(studioRoot), target)) throw new Error('Local plugin folder must be outside the Studio data directory')
+  const info = await pathInfo(target)
+  if (info?.isSymbolicLink() || (info !== undefined && !info.isDirectory())) {
+    throw new Error('Local plugin folder must be a directory and cannot be a symbolic link')
+  }
+  if (info !== undefined && (await readdir(target)).length > 0) {
+    throw new Error('Local plugin folder must be new or empty')
+  }
+  return target
 }
 
 async function initializeRepository(root: string, name: string, commands: StudioCommandRunner): Promise<void> {
@@ -127,6 +223,7 @@ export class StudioDraftRegistry {
   readonly repositoriesDir: string
   readonly worktreesDir: string
   readonly runtimesDir: string
+  private readonly recordMutations = new Map<string, Promise<void>>()
 
   constructor(
     dshHome: string,
@@ -163,69 +260,130 @@ export class StudioDraftRegistry {
       mkdir(dirname(runtimeHome), { recursive: true }),
     ])
 
-    let name: string
-    let label: string
-    let source: StudioCreateDraftInput['source']
-    if (input.source.kind === 'new') {
-      const packageName = input.source.packageName
-      if (typeof packageName !== 'string' || !PACKAGE_NAME.test(packageName)) throw new Error('New Draft package name is invalid')
-      name = packageName
-      label = nextNewPluginLabel(await this.list())
-      source = { kind: 'new', packageName }
-      await mkdir(repositoryDir)
-      await initializeRepository(repositoryDir, packageName, this.commands)
-      await this.commands.run('git', ['worktree', 'add', '-b', `dsh-studio/${id}`, worktreeDir, 'HEAD'], repositoryDir)
-    } else {
-      if (typeof input.source.directory !== 'string' || input.source.directory.trim() === '') {
-        throw new Error('Existing plugin folder is required')
+    try {
+      let name: string
+      let label: string
+      let source: StudioCreateDraftInput['source']
+      let destinationDirectory: string | undefined
+      if (input.source.kind === 'new') {
+        const packageName = input.source.packageName
+        if (typeof packageName !== 'string' || !PACKAGE_NAME.test(packageName)) throw new Error('New Draft package name is invalid')
+        name = packageName
+        label = nextNewPluginLabel(await this.list())
+        source = { kind: 'new', packageName }
+        destinationDirectory = await validateDestinationDirectory(input.destinationDirectory, this.root)
+        await mkdir(repositoryDir)
+        await initializeRepository(repositoryDir, packageName, this.commands)
+        await this.commands.run('git', ['worktree', 'add', '-b', `dsh-studio/${id}`, worktreeDir, 'HEAD'], repositoryDir)
+      } else {
+        if (input.destinationDirectory !== undefined) throw new Error('Only new plugins can have a local destination folder')
+        if (typeof input.source.directory !== 'string' || input.source.directory.trim() === '') {
+          throw new Error('Existing plugin folder is required')
+        }
+        const directory = input.source.directory.trim()
+        if (!isAbsolute(directory)) throw new Error('Existing plugin folder must be an absolute path')
+        const canonicalSource = await realpath(directory)
+        if (!(await lstat(canonicalSource)).isDirectory()) throw new Error('Existing plugin path must be a directory')
+        const manifest = await pluginManifest(canonicalSource)
+        name = manifest.name
+        label = basename(canonicalSource)
+        source = { kind: 'existing', directory: canonicalSource }
+        await mkdir(repositoryDir)
+        await copyPluginDirectory(canonicalSource, repositoryDir)
+        await this.commands.run('git', ['init', '--initial-branch=main'], repositoryDir)
+        await this.commands.run('git', ['add', '.'], repositoryDir)
+        await this.commands.run('git', [
+          '-c', 'user.name=dsh-webui-studio', '-c', 'user.email=studio@localhost',
+          'commit', '-m', 'Import plugin snapshot',
+        ], repositoryDir)
+        await this.commands.run('git', ['worktree', 'add', '-b', `dsh-studio/${id}`, worktreeDir, 'HEAD'], repositoryDir)
       }
-      const directory = input.source.directory.trim()
-      if (!isAbsolute(directory)) throw new Error('Existing plugin folder must be an absolute path')
-      const canonicalSource = await realpath(directory)
-      if (!(await lstat(canonicalSource)).isDirectory()) throw new Error('Existing plugin path must be a directory')
-      const manifest = await pluginManifest(canonicalSource)
-      name = manifest.name
-      label = basename(canonicalSource)
-      source = { kind: 'existing', directory: canonicalSource }
-      await mkdir(repositoryDir)
-      await copyPluginDirectory(canonicalSource, repositoryDir)
-      await this.commands.run('git', ['init', '--initial-branch=main'], repositoryDir)
-      await this.commands.run('git', ['add', '.'], repositoryDir)
-      await this.commands.run('git', [
-        '-c', 'user.name=dsh-webui-studio', '-c', 'user.email=studio@localhost',
-        'commit', '-m', 'Import plugin snapshot',
-      ], repositoryDir)
-      await this.commands.run('git', ['worktree', 'add', '-b', `dsh-studio/${id}`, worktreeDir, 'HEAD'], repositoryDir)
-    }
 
-    const canonicalWorktree = await realpath(worktreeDir)
-    const root = canonicalWorktree
-    const record: StudioDraftRecord = {
-      id,
-      name,
-      label,
-      source,
-      repositoryDir: await realpath(repositoryDir),
-      worktreeDir: canonicalWorktree,
-      root,
-      runtimeHome,
-      profileMode: input.profileMode,
-      createdAt: new Date().toISOString(),
+      const canonicalWorktree = await realpath(worktreeDir)
+      const root = canonicalWorktree
+      const record: StudioDraftRecord = {
+        id,
+        name,
+        label,
+        source,
+        ...(destinationDirectory === undefined ? {} : { destinationDirectory }),
+        repositoryDir: await realpath(repositoryDir),
+        worktreeDir: canonicalWorktree,
+        root,
+        runtimeHome,
+        profileMode: input.profileMode,
+        createdAt: new Date().toISOString(),
+      }
+      await writeFile(join(this.recordsDir, `${id}.json`), `${JSON.stringify(record, null, 2)}\n`, { flag: 'wx' })
+      return record
+    } catch (error) {
+      const cleanup = await Promise.allSettled([
+        rm(worktreeDir, { recursive: true, force: true }),
+        rm(repositoryDir, { recursive: true, force: true }),
+        rm(dirname(runtimeHome), { recursive: true, force: true }),
+      ])
+      const cleanupErrors = cleanup.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
+      if (cleanupErrors.length > 0) throw new AggregateError([error, ...cleanupErrors], 'Draft creation failed and cleanup was incomplete')
+      throw error
     }
-    await writeFile(join(this.recordsDir, `${id}.json`), `${JSON.stringify(record, null, 2)}\n`, { flag: 'wx' })
-    return record
   }
 
   async rename(id: string, label: string): Promise<StudioDraftRecord> {
     const nextLabel = label.trim()
     if (nextLabel === '' || nextLabel.length > 120) throw new Error('Draft name must contain 1 to 120 characters')
-    const record = await this.get(id)
-    const next = { ...record, label: nextLabel }
-    const file = join(this.recordsDir, `${id}.json`)
-    const temporary = join(this.recordsDir, `.${id}.${randomUUID()}.tmp`)
-    await writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, { flag: 'wx' })
+    return this.mutate(id, record => ({ ...record, label: nextLabel }))
+  }
+
+  async export(id: string): Promise<StudioDraftRecord> {
+    return this.mutate(id, async record => {
+      const sourceManifest = JSON.parse(await readFile(join(record.root, 'package.json'), 'utf8')) as { name?: unknown }
+      if (sourceManifest.name !== record.name) {
+        throw new Error(`Draft package.json name must remain ${JSON.stringify(record.name)}`)
+      }
+      const target = record.destinationDirectory
+      if (target === undefined) throw new Error('This Draft does not have a local plugin folder')
+      const info = await pathInfo(target)
+      if (record.exportedAt === undefined) {
+        if (info?.isSymbolicLink() || (info !== undefined && !info.isDirectory())) {
+          throw new Error('Local plugin folder must be a directory and cannot be a symbolic link')
+        }
+        if (info !== undefined && (await readdir(target)).length > 0) {
+          throw new Error('Local plugin folder is no longer empty; choose another folder')
+        }
+      } else {
+        if (info?.isSymbolicLink() || info === undefined || !info.isDirectory()) {
+          throw new Error('The saved local plugin folder is missing or is no longer a regular directory')
+        }
+        const manifest = await pluginManifest(target)
+        if (manifest.name !== record.name) throw new Error('The local plugin folder now belongs to a different package')
+      }
+      await replacePluginDirectory(record.root, target, info !== undefined)
+      return { ...record, exportedAt: new Date().toISOString() }
+    })
+  }
+
+  private async mutate(id: string, update: (record: StudioDraftRecord) => StudioDraftRecord | Promise<StudioDraftRecord>): Promise<StudioDraftRecord> {
+    const previous = this.recordMutations.get(id)?.catch(() => undefined) ?? Promise.resolve()
+    let release!: () => void
+    const turn = new Promise<void>(resolve => { release = resolve })
+    const queued = previous.then(() => turn)
+    this.recordMutations.set(id, queued)
+    await previous
+    try {
+      const next = await update(await this.get(id))
+      await this.replace(next)
+      return next
+    } finally {
+      release()
+      if (this.recordMutations.get(id) === queued) this.recordMutations.delete(id)
+    }
+  }
+
+  private async replace(record: StudioDraftRecord): Promise<void> {
+    const file = join(this.recordsDir, `${record.id}.json`)
+    const temporary = join(this.recordsDir, `.${record.id}.${randomUUID()}.tmp`)
+    await writeFile(temporary, `${JSON.stringify(record, null, 2)}\n`, { flag: 'wx' })
     await rename(temporary, file)
-    return next
   }
 }
 

@@ -23,6 +23,7 @@ import type { StudioCommandRunner, StudioDraftRegistry } from './drafts.js'
 import { StudioPreviewSupervisor } from './preview.js'
 import { applyProjectPatch, listProjectFiles, readProjectFile, writeProjectFile } from './project-files.js'
 import { inspectReadiness, StudioPackRunner } from './readiness.js'
+import { assertDraftPackageIdentity } from './runtime-profile.js'
 import type { StudioWorkspaceStore } from './workspace.js'
 
 function failure<T = never>(rpcId: string, code: string, message: string, details: unknown = {}): StudioServerResponse<T> {
@@ -53,7 +54,7 @@ class StudioDraftController implements StudioAgentWorkspace {
   readonly preview: StudioPreviewSupervisor
 
   constructor(
-    readonly record: StudioDraftRecord,
+    public record: StudioDraftRecord,
     profileDir: string,
     parentOrigin: string,
     commands: StudioCommandRunner,
@@ -173,6 +174,7 @@ class StudioDraftController implements StudioAgentWorkspace {
   async build(signal: AbortSignal): Promise<StudioBuildResult> {
     const current = this.project()
     if (current.state !== 'active') throw new Error('Draft must be active before it can be built')
+    await assertDraftPackageIdentity(this.record)
     const build = await this.builds.run(current.root, signal)
     this.projectState = await this.preview.applyBuild()
     return { build, project: this.projectState }
@@ -194,6 +196,7 @@ class StudioDraftController implements StudioAgentWorkspace {
 /** Stable-Host control plane for persistent, isolated Draft Preview runtimes. */
 export class StudioBackend {
   private readonly controllers = new Map<string, StudioDraftController>()
+  private readonly controllerCreations = new Map<string, Promise<StudioDraftController>>()
 
   constructor(
     private readonly harmony: StudioHarmonyService,
@@ -226,7 +229,12 @@ export class StudioBackend {
         const label = objectPayload(payload).label
         if (typeof label !== 'string') throw new Error('Draft name is required')
         const record = await this.registry.rename(controller.record.id, label)
-        controller.record.label = record.label
+        controller.record = record
+        return success(rpcId, controller.view())
+      }
+      if (method === 'studio.drafts.export') {
+        const record = await this.registry.export(controller.record.id)
+        controller.record = record
         return success(rpcId, controller.view())
       }
       if (method === 'studio.drafts.start') return success(rpcId, await controller.start())
@@ -285,8 +293,10 @@ export class StudioBackend {
   }
 
   async dispose(): Promise<void> {
+    await Promise.all([...this.controllerCreations.values()].map(creation => creation.catch(() => undefined)))
     await Promise.all([...this.controllers.values()].map(controller => controller.dispose()))
     this.controllers.clear()
+    this.controllerCreations.clear()
   }
 
   private async list(): Promise<StudioDraftView[]> {
@@ -301,7 +311,8 @@ export class StudioBackend {
     const candidate = objectPayload(payload) as unknown as StudioCreateDraftInput
     if ((candidate.profileMode !== 'main-home' && candidate.profileMode !== 'custom')
       || typeof candidate.source !== 'object' || candidate.source === null
-      || (candidate.source.kind !== 'new' && candidate.source.kind !== 'existing')) {
+      || (candidate.source.kind !== 'new' && candidate.source.kind !== 'existing')
+      || (candidate.destinationDirectory !== undefined && typeof candidate.destinationDirectory !== 'string')) {
       throw new Error('Draft source and profileMode are invalid')
     }
     const record = await this.registry.create(candidate)
@@ -311,7 +322,15 @@ export class StudioBackend {
   private async controller(id: string): Promise<StudioDraftController> {
     const current = this.controllers.get(id)
     if (current !== undefined) return current
-    return this.makeController(await this.registry.get(id))
+    const pending = this.controllerCreations.get(id)
+    if (pending !== undefined) return pending
+    const creation = this.registry.get(id).then(record => this.controllers.get(id) ?? this.makeController(record))
+    this.controllerCreations.set(id, creation)
+    try {
+      return await creation
+    } finally {
+      if (this.controllerCreations.get(id) === creation) this.controllerCreations.delete(id)
+    }
   }
 
   private makeController(record: StudioDraftRecord): StudioDraftController {

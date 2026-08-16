@@ -50,8 +50,42 @@ export function resizeRect(
   const topBound = bounds?.y ?? Number.NEGATIVE_INFINITY
   const rightBound = bounds === undefined ? Number.POSITIVE_INFINITY : bounds.x + bounds.width
   const bottomBound = bounds === undefined ? Number.POSITIVE_INFINITY : bounds.y + bounds.height
-  if (lockAspectRatio && direction.length === 2) {
+  if (lockAspectRatio) {
     const ratio = rect.width / rect.height
+    if (direction.length === 1) {
+      const centerX = rect.x + rect.width / 2
+      const centerY = rect.y + rect.height / 2
+      if (direction === 'e' || direction === 'w') {
+        const anchorX = direction === 'w' ? rect.x + rect.width : rect.x
+        const horizontalRoom = direction === 'w' ? anchorX - leftBound : rightBound - anchorX
+        const verticalRoom = 2 * Math.min(centerY - topBound, bottomBound - centerY)
+        const maximumWidth = Math.min(horizontalRoom, verticalRoom * ratio)
+        const minimumWidth = Math.min(maximumWidth, Math.max(minimum.width, minimum.height * ratio))
+        const requestedWidth = rect.width + (direction === 'e' ? dx : -dx)
+        const width = clamp(requestedWidth, minimumWidth, maximumWidth)
+        const height = width / ratio
+        return {
+          x: direction === 'w' ? anchorX - width : anchorX,
+          y: centerY - height / 2,
+          width,
+          height,
+        }
+      }
+      const anchorY = direction === 'n' ? rect.y + rect.height : rect.y
+      const horizontalRoom = 2 * Math.min(centerX - leftBound, rightBound - centerX)
+      const verticalRoom = direction === 'n' ? anchorY - topBound : bottomBound - anchorY
+      const maximumHeight = Math.min(verticalRoom, horizontalRoom / ratio)
+      const minimumHeight = Math.min(maximumHeight, Math.max(minimum.height, minimum.width / ratio))
+      const requestedHeight = rect.height + (direction === 's' ? dy : -dy)
+      const height = clamp(requestedHeight, minimumHeight, maximumHeight)
+      const width = height * ratio
+      return {
+        x: centerX - width / 2,
+        y: direction === 'n' ? anchorY - height : anchorY,
+        width,
+        height,
+      }
+    }
     const horizontalGrowth = direction.includes('e') ? dx : -dx
     const verticalGrowth = (direction.includes('s') ? dy : -dy) * ratio
     const requestedWidth = rect.width + (Math.abs(horizontalGrowth) >= Math.abs(verticalGrowth)

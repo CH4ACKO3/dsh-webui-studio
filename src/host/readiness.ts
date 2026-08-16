@@ -81,6 +81,8 @@ export function inspectReadiness(
   const findings: StudioReadinessFinding[] = []
   if (typeof manifest.name !== 'string' || manifest.name === '') {
     findings.push(finding('error', 'manifest-name', 'package.json must declare a non-empty name', { file: 'package.json' }))
+  } else if (manifest.name !== projectName) {
+    findings.push(finding('error', 'manifest-identity', `package.json name must remain ${JSON.stringify(projectName)}`, { file: 'package.json' }))
   }
   if (typeof manifest.version !== 'string' || manifest.version === '') {
     findings.push(finding('error', 'manifest-version', 'package.json must declare a publishable version', { file: 'package.json' }))

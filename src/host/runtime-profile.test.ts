@@ -47,9 +47,9 @@ it('snapshots main profile declarations and links the Draft worktree', async () 
   expect(manifest.dsh.profile.bundles).toEqual(['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'])
   expect(await readFile(join(profile, 'pnpm-workspace.yaml'), 'utf8')).toBe(workspacePolicy)
   const [command, args] = bundledPnpmCommand(['install', '--prefer-offline'])
-  expect(run).toHaveBeenCalledWith(command, args, profile, undefined)
+  expect(run).toHaveBeenCalledWith(command, args, profile, undefined, undefined)
   await materializeDraftProfile(draft, mainProfile, studioRoot, { run })
-  expect(run).toHaveBeenCalledOnce()
+  expect(run).toHaveBeenCalledTimes(2)
 })
 
 it('runs the bundled pnpm without relying on the Host PATH', async () => {
@@ -78,7 +78,7 @@ it('installs Draft dependencies in the worktree with its declared package manage
   await installDraftDependencies(draft, { run }, output)
 
   const [command, args] = bundledPnpmCommand(['install'])
-  expect(run).toHaveBeenCalledWith(command, args, root, output)
+  expect(run).toHaveBeenCalledWith(command, args, root, output, undefined)
   expect(output).toHaveBeenCalledWith(expect.stringContaining(`${root}\n$ `))
 })
 
@@ -96,4 +96,18 @@ it('skips a Draft install when its manifest has no dependencies', async () => {
   await installDraftDependencies(draft, { run })
 
   expect(run).not.toHaveBeenCalled()
+})
+
+it('rejects a package identity that diverges from the persistent Draft record', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-studio-draft-identity-'))
+  roots.push(root)
+  await writeFile(join(root, 'package.json'), JSON.stringify({ name: 'renamed-plugin', packageManager: 'npm@11' }))
+  const draft: StudioDraftRecord = {
+    id: 'id', name: 'draft-plugin', label: 'Draft plugin', source: { kind: 'new', packageName: 'draft-plugin' },
+    repositoryDir: root, worktreeDir: root, root,
+    runtimeHome: join(root, 'runtime-home'), profileMode: 'main-home', createdAt: 'now',
+  }
+
+  await expect(installDraftDependencies(draft, { async run() {} }))
+    .rejects.toThrow('Draft package.json name must remain "draft-plugin"')
 })

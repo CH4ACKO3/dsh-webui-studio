@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -16,7 +16,6 @@ import type {
 
 const packageRoot = fileURLToPath(new URL('..', import.meta.url))
 const studioPath = '/studio'
-const studioRoot = packageRoot
 const harmonyBin = process.env.DSH_HARMONY_BIN_ENTRY ?? fileURLToPath(import.meta.resolve('dsh-harmony/bin'))
 const root = mkdtempSync(join(tmpdir(), 'dsh-harmony-studio-'))
 const home = join(root, 'home')
@@ -57,19 +56,28 @@ window.__ModuleLoader__.load({ id: 'studio-draft', factory: () => ({ build: 1 })
 console.log('studio draft built')
 `)
 const env = { ...process.env, DSH_HOME: home }
-const add = (packageDir: string) => spawnSync(process.execPath, [
-  harmonyBin, 'plugin', '--profile', 'web', 'add', `link:${packageDir}`,
-], { cwd: packageRoot, env, encoding: 'utf8' })
+const add = (packageSpec: string) => spawnSync(process.execPath, [
+  harmonyBin, 'plugin', '--profile', 'web', 'add', packageSpec, '--allow-build=dsh-harmony',
+], { cwd: root, env, encoding: 'utf8' })
 
 let child: ChildProcess | undefined
 try {
-  for (const packageDir of [studioRoot]) {
-    const result = add(packageDir)
-    assert.equal(result.status, 0, result.stderr || result.stdout)
-  }
+  const packed = spawnSync('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', root], {
+    cwd: packageRoot,
+    env,
+    encoding: 'utf8',
+  })
+  assert.equal(packed.status, 0, packed.stderr || packed.stdout)
+  const packResult = JSON.parse(packed.stdout) as Array<{ filename?: unknown }>
+  assert.equal(packResult.length, 1, packed.stdout)
+  assert.equal(typeof packResult[0]?.filename, 'string', packed.stdout)
+  const studioTarball = join(root, packResult[0]!.filename as string)
+  assert.equal(existsSync(studioTarball), true, 'npm pack did not create the Studio tarball')
+  const installed = add(studioTarball)
+  assert.equal(installed.status, 0, `${installed.stdout}\n${installed.stderr}`)
 
   const dump = spawnSync(process.execPath, [harmonyBin, '--profile', 'web', '--dump-config'], {
-    cwd: packageRoot,
+    cwd: root,
     env,
     encoding: 'utf8',
   })
@@ -77,7 +85,7 @@ try {
   assert.doesNotMatch(dump.stdout, /name: dsh-webui-studio/)
 
   const hostChild = spawn(process.execPath, [harmonyBin, 'web', '--port', '0'], {
-    cwd: packageRoot,
+    cwd: root,
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -109,7 +117,10 @@ try {
 
   const bridge = await fetch(`${origin}${studioPath}/bridge.js`)
   assert.equal(bridge.status, 200)
-  assert.doesNotMatch(await bridge.text(), new RegExp(token))
+  const bridgeScript = await bridge.text()
+  assert.doesNotMatch(bridgeScript, new RegExp(token))
+  assert.match(bridgeScript, /dsh-studio-bridge/)
+  assert.doesNotMatch(bridgeScript, /dsh-studio-connect/)
   const studioScript = await fetch(`${origin}${studioPath}/assets/studio.js`)
   assert.equal(studioScript.status, 200)
   assert.doesNotMatch(await studioScript.text(), /process\.env\.NODE_ENV/)
@@ -139,6 +150,17 @@ try {
   }
 
   assert.deepEqual(await call<StudioWorkspaceState>('studio.workspace.get', {}), { openDraftIds: [] })
+
+  const destination = join(root, 'saved-new-plugin')
+  const stagedNewPlugin = await call<StudioDraftView>('studio.drafts.create', {
+    source: { kind: 'new', packageName: 'saved-new-plugin' },
+    profileMode: 'main-home',
+    destinationDirectory: destination,
+  })
+  assert.equal(existsSync(destination), false, 'Creating a Draft must not materialize its local destination')
+  const exportedNewPlugin = await call<StudioDraftView>('studio.drafts.export', { draftId: stagedNewPlugin.id })
+  assert.ok(exportedNewPlugin.exportedAt)
+  assert.equal(JSON.parse(readFileSync(join(destination, 'package.json'), 'utf8')).name, 'saved-new-plugin')
 
   const created = await call<StudioDraftView>('studio.drafts.create', {
     source: { kind: 'existing', directory: draftRoot },

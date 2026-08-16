@@ -165,6 +165,8 @@ export interface StudioDraftRecord {
   name: string
   label: string
   source: StudioDraftSource
+  destinationDirectory?: string
+  exportedAt?: string
   repositoryDir: string
   worktreeDir: string
   root: string
@@ -188,6 +190,7 @@ export interface StudioDraftView extends StudioDraftRecord {
 export interface StudioCreateDraftInput {
   source: StudioDraftSource
   profileMode: StudioDraftProfileMode
+  destinationDirectory?: string
 }
 
 export interface StudioWorkspaceState {

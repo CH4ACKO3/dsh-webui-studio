@@ -54,6 +54,8 @@ export class StudioPreviewSupervisor {
   private child?: ChildProcess
   private controlToken?: string
   private runtime: StudioPreviewRuntime = { state: 'stopped', log: '' }
+  private startAbort?: AbortController
+  private startPromise?: Promise<StudioPreviewRuntime>
 
   constructor(
     readonly draft: StudioDraftRecord,
@@ -69,13 +71,30 @@ export class StudioPreviewSupervisor {
   }
 
   async start(): Promise<StudioPreviewRuntime> {
-    if (this.runtime.state === 'running' || this.runtime.state === 'starting') return this.snapshot()
+    if (this.runtime.state === 'running') return this.snapshot()
+    if (this.startPromise !== undefined) return this.startPromise
+    const abort = new AbortController()
+    const startPromise = this.startRuntime(abort.signal)
+    this.startAbort = abort
+    this.startPromise = startPromise
+    try {
+      return await startPromise
+    } finally {
+      if (this.startPromise === startPromise) {
+        this.startAbort = undefined
+        this.startPromise = undefined
+      }
+    }
+  }
+
+  private async startRuntime(signal: AbortSignal): Promise<StudioPreviewRuntime> {
     this.runtime = { state: 'starting', log: '[studio] Preparing Draft dependencies and isolated profile\n' }
     try {
       await installDraftDependencies(
         this.draft,
         this.commands,
         chunk => { this.runtime.log = appendLog(this.runtime.log, chunk) },
+        signal,
       )
       await materializeDraftProfile(
         this.draft,
@@ -83,7 +102,9 @@ export class StudioPreviewSupervisor {
         studioPackageRoot(),
         this.commands,
         chunk => { this.runtime.log = appendLog(this.runtime.log, chunk) },
+        signal,
       )
+      signal.throwIfAborted()
       const hostArgs = [this.harmonyBinEntry, 'web', '--port', '0']
       this.runtime.log = appendLog(this.runtime.log,
         `[studio] Profile dependencies ready\n[studio] Starting Preview Host\nDSH_HOME=${this.draft.runtimeHome}\n${terminalCommandLine(this.draft.worktreeDir, process.execPath, hostArgs)}`)
@@ -126,21 +147,39 @@ export class StudioPreviewSupervisor {
         const error = `Preview Host exited (${signal ?? code ?? 'unknown'})`
         this.runtime = { state: 'failed', error, log: this.runtime.log }
       })
-      await this.waitUntilRunning(child)
-      await this.waitForWorker(child)
-      await this.worker<WorkerState>('state', {})
+      await this.waitUntilRunning(child, signal)
+      await this.waitForWorker(child, signal)
+      await this.worker<WorkerState>('state', {}, signal)
       return this.snapshot()
     } catch (error) {
-      await this.stop()
+      await this.terminateChild()
+      if (signal.aborted) {
+        this.runtime = { state: 'stopped', log: this.runtime.log }
+        throw signal.reason
+      }
       this.runtime = { state: 'failed', error: error instanceof Error ? error.message : String(error), log: this.runtime.log }
       throw error
     }
   }
 
   async stop(): Promise<StudioPreviewRuntime> {
-    const child = this.child
+    this.startAbort?.abort(new Error('Preview start canceled'))
+    const start = this.startPromise
     this.controlToken = undefined
     this.runtime = { state: 'stopped', log: this.runtime.log }
+    await this.terminateChild()
+    if (start !== undefined) {
+      try {
+        await start
+      } catch {}
+    }
+    this.controlToken = undefined
+    this.runtime = { state: 'stopped', log: this.runtime.log }
+    return this.snapshot()
+  }
+
+  private async terminateChild(): Promise<void> {
+    const child = this.child
     if (child !== undefined && child.exitCode === null) {
       child.kill('SIGTERM')
       if (!await waitForExit(child, this.stopTimeoutMs)) {
@@ -153,7 +192,6 @@ export class StudioPreviewSupervisor {
       }
     }
     if (this.child === child) this.child = undefined
-    return this.snapshot()
   }
 
   async state(): Promise<StudioProjectState> {
@@ -184,41 +222,61 @@ export class StudioPreviewSupervisor {
     await this.stop()
   }
 
-  private async waitUntilRunning(child: ChildProcess): Promise<void> {
+  private async waitUntilRunning(child: ChildProcess, signal: AbortSignal): Promise<void> {
     const started = Date.now()
     while (this.child === child && this.runtime.state === 'starting' && Date.now() - started < START_TIMEOUT_MS) {
-      await new Promise(resolve => setTimeout(resolve, 50))
+      await this.delay(50, signal)
     }
+    signal.throwIfAborted()
     if (this.runtime.state !== 'running') throw new Error(this.runtime.error ?? 'Preview Host did not publish its URL before timeout')
   }
 
-  private async waitForWorker(child: ChildProcess): Promise<void> {
+  private async waitForWorker(child: ChildProcess, signal: AbortSignal): Promise<void> {
     const started = Date.now()
     let lastError = 'worker route was not reachable'
     while (this.child === child && Date.now() - started < START_TIMEOUT_MS) {
       try {
-        await this.worker<{ ready: true }>('health', {})
+        const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(1_000)])
+        await this.worker<{ ready: true }>('health', {}, requestSignal)
         return
       } catch (error) {
+        signal.throwIfAborted()
         lastError = error instanceof Error ? error.message : String(error)
-        await new Promise(resolve => setTimeout(resolve, 50))
+        await this.delay(50, signal)
       }
     }
+    signal.throwIfAborted()
     throw new Error(`Preview worker did not become ready before timeout: ${lastError}`)
   }
 
-  private async worker<T>(method: string, payload: unknown): Promise<T> {
+  private async worker<T>(method: string, payload: unknown, signal?: AbortSignal): Promise<T> {
     if (this.runtime.previewUrl === undefined || this.controlToken === undefined) throw new Error('Preview Host is not running')
     const endpoint = new URL(`${STUDIO_PREVIEW_API_PATH}/${method}`, this.runtime.previewUrl)
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: { authorization: `Bearer ${this.controlToken}`, 'content-type': 'application/json' },
       body: JSON.stringify(payload),
+      signal,
     })
     const text = await response.text()
     if (text === '') throw new Error(`Preview worker returned an empty HTTP ${response.status} response`)
     const body = JSON.parse(text) as { ok: true; value: T } | { ok: false; error: string }
     if (!response.ok || !body.ok) throw new Error(body.ok ? `Preview worker failed with HTTP ${response.status}` : body.error)
     return body.value
+  }
+
+  private async delay(milliseconds: number, signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted()
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(done, milliseconds)
+      const aborted = (): void => done(signal.reason)
+      function done(error?: unknown): void {
+        clearTimeout(timeout)
+        signal.removeEventListener('abort', aborted)
+        if (error === undefined) resolve()
+        else reject(error)
+      }
+      signal.addEventListener('abort', aborted, { once: true })
+    })
   }
 }
