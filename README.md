@@ -122,7 +122,7 @@ dsh web
 To exercise the same single-package installation path as a release artifact:
 
 ```sh
-studio_tarball="$(npm pack --silent)"
+studio_tarball="$(npm pack --silent --ignore-scripts)"
 dsh plugin --profile web add "file:$(pwd)/${studio_tarball}" \
   --allow-build=dsh-harmony
 ```

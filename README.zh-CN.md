@@ -116,7 +116,7 @@ dsh web
 如需用发布产物验证相同的单包安装流程：
 
 ```sh
-studio_tarball="$(npm pack --silent)"
+studio_tarball="$(npm pack --silent --ignore-scripts)"
 dsh plugin --profile web add "file:$(pwd)/${studio_tarball}" \
   --allow-build=dsh-harmony
 ```
