@@ -55,9 +55,12 @@ function record(root: string): StudioDraftRecord {
   }
 }
 
-function backend(draft: StudioDraftRecord, get = vi.fn(async () => draft)): StudioBackend {
+function backend(
+  draft: StudioDraftRecord,
+  get = vi.fn(async () => draft),
+  harmony = { profileDir: '/home/profiles/web' } as StudioHarmonyService,
+): StudioBackend {
   previewState.project = { name: draft.name, root: draft.root, state: 'preview-pending', graphRev: 'graph-1' }
-  const harmony = { profileDir: '/home/profiles/web' } as StudioHarmonyService
   const agents = { create: vi.fn(async () => ({ dispose: vi.fn(async () => {}) })) } as unknown as AgentRegistry
   const subprocess = {} as SubprocessRuntime
   const registry = {
@@ -76,6 +79,60 @@ function backend(draft: StudioDraftRecord, get = vi.fn(async () => draft)): Stud
 }
 
 describe('StudioBackend', () => {
+  it('reads and transactionally updates the stable Host Harmony profile without a Draft id', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-studio-backend-'))
+    temporaryDirectories.push(root)
+    const profile = {
+      dir: '/home/profiles/web',
+      order: ['dsh-harmony', 'plugin-a'],
+      disabled: [],
+      plugins: [],
+      orderViolations: [],
+      incompatibilities: [],
+    }
+    const harmony = {
+      profileDir: profile.dir,
+      profile: vi.fn(() => profile),
+      updateProfile: vi.fn(async (input: { order?: string[]; disabled?: string[] }) => ({
+        profile: { ...profile, ...input },
+        generation: 2,
+        reload: { state: 'succeeded' },
+        clientGraphRev: 'graph-2',
+      })),
+    } as unknown as StudioHarmonyService
+    const studio = backend(record(root), undefined, harmony)
+
+    const current = await studio.call(request('studio.harmony.profile', {}))
+    const updated = await studio.call(request('studio.harmony.updateProfile', {
+      order: ['dsh-harmony', 'plugin-a'],
+      disabled: ['plugin-a/*'],
+    }))
+
+    expect(current.result).toEqual({ ok: true, value: profile })
+    expect(harmony.updateProfile).toHaveBeenCalledWith({
+      order: ['dsh-harmony', 'plugin-a'],
+      disabled: ['plugin-a/*'],
+    })
+    expect(updated.result).toMatchObject({ ok: true, value: {
+      profile: { disabled: ['plugin-a/*'] }, generation: 2, clientGraphRev: 'graph-2',
+    } })
+  })
+
+  it('rejects malformed Harmony profile updates before calling the service', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-studio-backend-'))
+    temporaryDirectories.push(root)
+    const harmony = {
+      profileDir: '/home/profiles/web',
+      updateProfile: vi.fn(),
+    } as unknown as StudioHarmonyService
+    const response = await backend(record(root), undefined, harmony).call(request('studio.harmony.updateProfile', {
+      disabled: ['plugin-a/*', 1],
+    }))
+
+    expect(response.result).toMatchObject({ ok: false, error: { message: 'disabled must be an array of non-empty strings' } })
+    expect(harmony.updateProfile).not.toHaveBeenCalled()
+  })
+
   it('lists persistent Drafts and starts one isolated Preview runtime', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-studio-backend-'))
     temporaryDirectories.push(root)

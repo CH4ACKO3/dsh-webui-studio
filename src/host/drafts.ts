@@ -198,6 +198,24 @@ async function validateDestinationDirectory(input: unknown, studioRoot: string):
   return target
 }
 
+async function validateProfileDirectory(mode: StudioCreateDraftInput['profileMode'], input: unknown): Promise<string | undefined> {
+  if (mode === 'main-home') {
+    if (input !== undefined) throw new Error('Only custom Draft profiles can specify a profile folder')
+    return undefined
+  }
+  if (typeof input !== 'string' || input.trim() === '') throw new Error('Custom profile folder is required')
+  if (!isAbsolute(input.trim())) throw new Error('Custom profile folder must be an absolute path')
+  try {
+    const directory = await realpath(input.trim())
+    if (!(await lstat(directory)).isDirectory()) throw new Error('Custom profile path must be a directory')
+    const manifest = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8')) as unknown
+    if (typeof manifest !== 'object' || manifest === null || Array.isArray(manifest)) throw new Error('package.json must contain an object')
+    return directory
+  } catch (error) {
+    throw new Error(`Custom profile folder must contain a readable package.json: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
 async function initializeRepository(root: string, name: string, commands: StudioCommandRunner): Promise<void> {
   await mkdir(join(root, 'lib'), { recursive: true })
   await writeFile(join(root, 'package.json'), templateManifest(name))
@@ -248,7 +266,7 @@ export class StudioDraftRegistry {
   }
 
   async create(input: StudioCreateDraftInput): Promise<StudioDraftRecord> {
-    if (input.profileMode === 'custom') throw new Error('Custom Draft profiles are not implemented yet')
+    const profileDirectory = await validateProfileDirectory(input.profileMode, input.profileDirectory)
     const id = randomUUID()
     const repositoryDir = join(this.repositoriesDir, id)
     const worktreeDir = join(this.worktreesDir, id)
@@ -312,6 +330,7 @@ export class StudioDraftRegistry {
         root,
         runtimeHome,
         profileMode: input.profileMode,
+        ...(profileDirectory === undefined ? {} : { profileDirectory }),
         createdAt: new Date().toISOString(),
       }
       await writeFile(join(this.recordsDir, `${id}.json`), `${JSON.stringify(record, null, 2)}\n`, { flag: 'wx' })

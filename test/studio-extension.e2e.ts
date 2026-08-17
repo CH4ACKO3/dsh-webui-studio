@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -9,6 +9,8 @@ import type {
   StudioBuildResult,
   StudioDraftView,
   StudioHarmonyInspection,
+  StudioHarmonyProfile,
+  StudioHarmonyProfileUpdateResult,
   StudioProjectFile,
   StudioProjectState,
   StudioServerResponse,
@@ -162,6 +164,23 @@ try {
     return envelope.result.value
   }
 
+  const stableProfile = await call<StudioHarmonyProfile>('studio.harmony.profile', {})
+  assert.equal(stableProfile.order[0], 'dsh-harmony')
+  assert.ok(stableProfile.order.length >= 3)
+  const reordered = [stableProfile.order[0]!, stableProfile.order[2]!, stableProfile.order[1]!, ...stableProfile.order.slice(3)]
+  const reorderedProfile = await call<StudioHarmonyProfileUpdateResult>('studio.harmony.updateProfile', {
+    order: reordered,
+    disabled: stableProfile.disabled,
+  })
+  assert.equal(reorderedProfile.reload.state, 'succeeded')
+  assert.deepEqual(reorderedProfile.profile.order, reordered)
+  const restoredProfile = await call<StudioHarmonyProfileUpdateResult>('studio.harmony.updateProfile', {
+    order: stableProfile.order,
+    disabled: stableProfile.disabled,
+  })
+  assert.equal(restoredProfile.reload.state, 'succeeded')
+  assert.deepEqual(restoredProfile.profile.disabled, stableProfile.disabled)
+
   assert.deepEqual(await call<StudioWorkspaceState>('studio.workspace.get', {}), { openDraftIds: [] })
 
   const destination = join(root, 'saved-new-plugin')
@@ -214,8 +233,10 @@ try {
   assert.notEqual(previewOrigin, origin)
   const secondCreated = await call<StudioDraftView>('studio.drafts.create', {
     source: { kind: 'existing', directory: draftRoot },
-    profileMode: 'main-home',
+    profileMode: 'custom',
+    profileDirectory: join(home, 'profiles', 'web'),
   })
+  assert.equal(secondCreated.profileDirectory, realpathSync(join(home, 'profiles', 'web')))
   const secondStarted = await call<StudioDraftView>('studio.drafts.start', { draftId: secondCreated.id })
   const secondPreviewUrl = secondStarted.runtime.previewUrl
   assert.ok(secondPreviewUrl)

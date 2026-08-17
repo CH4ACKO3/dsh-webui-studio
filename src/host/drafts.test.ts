@@ -241,14 +241,41 @@ describe('StudioDraftRegistry', () => {
     expect(second.label).toBe('新插件_2')
   })
 
-  it('keeps custom profile creation as an explicit placeholder', async () => {
+  it('persists the canonical source folder for a custom profile', async () => {
     const home = await mkdtemp(join(tmpdir(), 'dsh-studio-registry-'))
-    roots.push(home)
+    const profile = await mkdtemp(join(tmpdir(), 'dsh-studio-profile-'))
+    roots.push(home, profile)
+    await writeFile(join(profile, 'package.json'), JSON.stringify({ name: 'custom-web-profile' }))
     const registry = new StudioDraftRegistry(home)
+
+    const draft = await registry.create({
+      source: { kind: 'new', packageName: 'dsh-test-draft' },
+      profileMode: 'custom',
+      profileDirectory: profile,
+    })
+
+    expect(draft.profileMode).toBe('custom')
+    expect(draft.profileDirectory).toBe(await realpath(profile))
+    await expect(registry.get(draft.id)).resolves.toEqual(draft)
+  })
+
+  it('rejects an invalid custom profile before creating managed artifacts', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-studio-registry-'))
+    const profile = await mkdtemp(join(tmpdir(), 'dsh-studio-profile-'))
+    roots.push(home, profile)
+    const registry = new StudioDraftRegistry(home)
+
     await expect(registry.create({
       source: { kind: 'new', packageName: 'dsh-test-draft' },
       profileMode: 'custom',
-    })).rejects.toThrow('not implemented')
+      profileDirectory: 'relative/profile',
+    })).rejects.toThrow('absolute path')
+    await expect(registry.create({
+      source: { kind: 'new', packageName: 'dsh-test-draft' },
+      profileMode: 'custom',
+      profileDirectory: profile,
+    })).rejects.toThrow('readable package.json')
+    await expect(lstat(join(home, 'studio'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('cleans managed artifacts when Draft creation fails before the record commits', async () => {

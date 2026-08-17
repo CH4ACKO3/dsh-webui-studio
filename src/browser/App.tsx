@@ -66,6 +66,7 @@ import {
   Textarea,
 } from './ui'
 import { CreateDraftDialog } from './CreateDraftDialog'
+import { PluginManagement } from './PluginManagement'
 import { SettingsDialog, SettingsIcon } from './SettingsDialog'
 import {
   boundedBridgeText,
@@ -94,7 +95,7 @@ interface ConversationRow {
   text: string
 }
 
-const panels = ['elements', 'selection', 'source', 'build', 'readiness', 'agent'] as const
+const panels = ['elements', 'selection', 'source', 'build', 'agent'] as const
 type Panel = typeof panels[number]
 const leftPanels = ['instance', 'plugins'] as const
 type LeftPanel = typeof leftPanels[number]
@@ -1781,14 +1782,13 @@ export function App(): JSX.Element {
           </IconButton>
         </div>
         <div className="project-body sidebar-content">
-        {drafts.length === 0
-          ? <EmptyState title={t('createFirstDraft')} description={t('createFirstDraftDescription')}
-              action={<Button size="small" variant="primary" onClick={() => setCreateDialogOpen(true)}>{t('draftNew')}</Button>} />
-          : <>
-              <Tabs id="left-sidebar" className="left-sidebar-tabs" label={t('controlPages')} value={leftPanel}
-                onChange={(value: LeftPanel) => setLeftPanel(value)}
-                options={[{ value: 'instance', label: t('instanceStatus') }, { value: 'plugins', label: t('pluginManagement') }]} />
-              {leftPanel === 'instance' && selectedDraft === undefined
+          <Tabs id="left-sidebar" className="left-sidebar-tabs" label={t('controlPages')} value={leftPanel}
+            onChange={(value: LeftPanel) => setLeftPanel(value)}
+            options={[{ value: 'instance', label: t('instanceStatus') }, { value: 'plugins', label: t('pluginManagement') }]} />
+          {leftPanel === 'instance' && drafts.length === 0
+            ? <EmptyState title={t('createFirstDraft')} description={t('createFirstDraftDescription')}
+                action={<Button size="small" variant="primary" onClick={() => setCreateDialogOpen(true)}>{t('draftNew')}</Button>} />
+            : leftPanel === 'instance' && selectedDraft === undefined
                 ? <EmptyState title={t('noActiveDraft')} description={t('noActiveDraftDescription')}
                     action={<Button size="small" onClick={() => setLeftPanel('plugins')}>{t('openPluginManagement')}</Button>} />
                 : leftPanel === 'instance' && selectedDraft !== undefined && <section id="left-sidebar-panel-instance" role="tabpanel"
@@ -1839,18 +1839,10 @@ export function App(): JSX.Element {
                 {selectedDraft.runtime.error !== undefined && <Notice tone="danger">{selectedDraft.runtime.error}</Notice>}
               </section>}
 
-              {leftPanel === 'plugins' && <section id="left-sidebar-panel-plugins" role="tabpanel"
-                aria-labelledby="left-sidebar-tab-plugins" className="left-sidebar-page plugin-management-page">
-                <div className="persistent-draft-list" aria-label={t('persistedDrafts')}>
-                  {drafts.map(draft => <article key={draft.id} data-open={openDraftIds.includes(draft.id) || undefined}>
-                    <div><strong>{draft.label}</strong><code>{draft.name}</code></div>
-                    <Button size="small" variant="ghost" disabled={openDraftIds.includes(draft.id)}
-                      onClick={() => openDraft(draft.id)}>{openDraftIds.includes(draft.id) ? t('alreadyOpen') : t('open')}</Button>
-                  </article>)}
-                </div>
-                <p>{t('persistedDraftsDescription')}</p>
-              </section>}
-            </>}
+          <section id="left-sidebar-panel-plugins" role="tabpanel" hidden={leftPanel !== 'plugins'}
+            aria-labelledby="left-sidebar-tab-plugins" className="left-sidebar-page plugin-management-page">
+            <PluginManagement drafts={drafts} />
+          </section>
         </div>
         {!terminalExpanded && terminal}
         {!leftSidebarCollapsed && <span className="sidebar-resizer" data-side="left" role="separator" tabIndex={0}
@@ -1993,7 +1985,7 @@ export function App(): JSX.Element {
             <Tabs id="studio" label={t('studioTools')} value={panel} onChange={(value: Panel) => setPanel(value)} options={panels.map(item => ({
               value: item,
               label: item === 'elements' ? t('panelElements') : item === 'selection' ? t('panelSelect') : item === 'source' ? t('panelSource')
-                : item === 'build' ? t('panelBuild') : item === 'readiness' ? t('panelReady') : t('panelAgent'),
+                : item === 'build' ? t('panelBuild') : t('panelAgent'),
             }))} />
           </div>
 
@@ -2172,18 +2164,15 @@ export function App(): JSX.Element {
             {(selectedBuildOutput.stdout !== '' || selectedBuildOutput.stderr !== '')
               && <pre className="selection-code">{[selectedBuildOutput.stdout, selectedBuildOutput.stderr].filter(Boolean).join('\n')}</pre>}
           </section>}
-        </PanelBody>}
-
-        {panel === 'readiness' && <PanelBody id="studio-panel-readiness" aria-labelledby="studio-tab-readiness"
-          className="panel-content readiness-panel" role="tabpanel">
-          <div className="panel-heading readiness-heading">
-            <div><h2>{t('readinessTitle')}</h2><p>{t('readinessDescription')}</p></div>
-            <Button size="small" onClick={() => void runPack()} loading={packingDraftId === selectedDraftId} loadingLabel={t('checking')}
-              disabled={project === undefined}>{t('packDryRun')}</Button>
-          </div>
-          {project === undefined
-            ? <EmptyState title={t('openDraftFirst')} description={t('readinessEmptyDescription')} />
-            : <>
+          <section className="readiness-section" aria-labelledby="studio-readiness-title">
+            <div className="panel-heading readiness-heading">
+              <div><h3 id="studio-readiness-title">{t('readinessTitle')}</h3><p>{t('readinessDescription')}</p></div>
+              <Button size="small" onClick={() => void runPack()} loading={packingDraftId === selectedDraftId} loadingLabel={t('checking')}
+                disabled={project === undefined}>{t('packDryRun')}</Button>
+            </div>
+            {project === undefined
+              ? <EmptyState title={t('openDraftFirst')} description={t('readinessEmptyDescription')} />
+              : <>
                 <div className="readiness-summary" aria-label={t('readinessSummary')}>
                   {(['error', 'warning', 'info'] as StudioReadinessLevel[]).map(level => <div key={level} data-level={level}>
                     <strong>{readiness.findings.filter(item => item.level === level).length}</strong>
@@ -2207,6 +2196,7 @@ export function App(): JSX.Element {
                     <pre className="selection-code">{[readiness.pack.stdout, readiness.pack.stderr].filter(Boolean).join('\n')}</pre></details>}
                 </section>}
               </>}
+          </section>
         </PanelBody>}
 
         {panel === 'agent' && <PanelBody id="studio-panel-agent" aria-labelledby="studio-tab-agent" className="agent-panel" role="tabpanel">

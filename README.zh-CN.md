@@ -38,7 +38,7 @@ WebUI Studio 不是模拟页面生成器。它运行在官方 DSH WebUI 和真�
 
 Studio 是 [`dsh-harmony`](https://github.com/CH4ACKO3/dsh-harmony)
 的独立下游应用。它通过公共 package exports 使用 Harmony 的 Host extension、runtime、
-Patch engine 与 Draft API，并使用
+Patch engine 与 service API，并使用
 [`dsh-harmony-react`](https://github.com/CH4ACKO3/dsh-harmony/tree/main/packages/react)
 提供的通用 React 注册 API。依赖始终保持单向：Studio 依赖 Harmony，Harmony 不依赖 Studio。
 
@@ -53,7 +53,8 @@ Patch engine 与 Draft API，并使用
 - [x] 运行带显式 Studio tools 的 Draft 级 DSH Agent
 - [x] 检查 package exports、构建产物、Patch 状态、顺序、依赖和 pack 输出
 - [x] 同时运行多个相互隔离的 Draft Preview Host
-- [ ] 在 UI 中配置自定义 Draft profile
+- [x] 将当前 WebUI profile 或其它本地 profile 复制到每个 Draft 的隔离运行环境
+- [x] 通过一次事务热重载调整插件顺序并启停 Harmony Provider
 
 ## 工作原理
 
@@ -97,17 +98,21 @@ Studio 只接受本机绝对文件夹路径；验证 Web Client manifest 后，�
 `node_modules`，将快照复制到 Studio 自有 Git repository。符号链接会被拒绝，原插件
 文件夹始终保持只读且不会被修改。
 
+每个 Draft 可以使用稳定 Host 当前的 `web` profile，也可以通过绝对文件夹路径选择
+另一个本地 DSH profile。Studio 会将其清单与配置复制到 Draft 的隔离运行环境，并以
+所选源文件夹为基准解析相对 `link:` 依赖；源 profile 始终不会被修改。
+
 Draft 显示名与 npm package identity 相互独立，可在实例面板中重命名。Studio 会在
 `workspace.json` 中保存标签顺序与当前 Draft；关闭标签只会将其移出当前工作区，不会
-停止或删除 Draft。所有持久化 Draft 都可以从插件管理页重新打开。Source 存在未保存
+停止或删除 Draft。Source 存在未保存
 修改时，必须先按 `Ctrl+S` 或 `Command+S` 保存，才能切换或关闭标签。
 
 ## 快速开始
 
 > [!IMPORTANT]
 > Studio 依赖 [`docs/harmony-api-requirements.md`](docs/harmony-api-requirements.md)
-> 中列出的 Harmony 公共 extension 与 Draft API，最低兼容版本为
-> `dsh-harmony@0.1.3`。
+> 中列出的 Harmony 公共 extension 与 service API，最低兼容版本为
+> `dsh-harmony@0.3.2`。
 
 ```sh
 dsh plugin --profile web add dsh-webui-studio --allow-build=dsh-harmony
@@ -188,7 +193,7 @@ DSH WebUI 已经提供了许多 Slot 点位，但 Studio 不满足于此。我�
 
 ## 相关项目
 
-- [`dsh-harmony`](https://github.com/CH4ACKO3/dsh-harmony) - runtime patch、Host extension 挂载、Draft 生命周期与 Patch 检查
+- [`dsh-harmony`](https://github.com/CH4ACKO3/dsh-harmony) - runtime patch、Host extension 挂载、插件重载与 Patch 检查
 - [`dsh-harmony-react`](https://github.com/CH4ACKO3/dsh-harmony/tree/main/packages/react) - React-aware Patch 工厂与 Studio element/variable 注册
 
 ## 许可证

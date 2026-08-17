@@ -86,20 +86,24 @@ export async function materializeDraftProfile(
   signal?: AbortSignal,
 ): Promise<string> {
   signal?.throwIfAborted()
-  if (draft.profileMode !== 'main-home') throw new Error('Custom Draft profiles are not implemented yet')
+  let sourceProfileDir = mainProfileDir
+  if (draft.profileMode === 'custom') {
+    if (draft.profileDirectory === undefined) throw new Error('Custom Draft profile folder is missing')
+    sourceProfileDir = draft.profileDirectory
+  }
   const profileDir = join(draft.runtimeHome, 'profiles', 'web')
   await rm(profileDir, { recursive: true, force: true })
   await mkdir(profileDir, { recursive: true })
-  const manifest = JSON.parse(await readFile(join(mainProfileDir, 'package.json'), 'utf8')) as ProfileManifest
+  const manifest = JSON.parse(await readFile(join(sourceProfileDir, 'package.json'), 'utf8')) as ProfileManifest
   const dependencies = Object.fromEntries(
-    Object.entries(manifest.dependencies ?? {}).map(([name, spec]) => [name, absoluteLink(spec, mainProfileDir)]),
+    Object.entries(manifest.dependencies ?? {}).map(([name, spec]) => [name, absoluteLink(spec, sourceProfileDir)]),
   )
   dependencies[draft.name] = `link:${draft.root}`
   dependencies['dsh-webui-studio'] = `link:${studioPackageRoot}`
   await writeFile(join(profileDir, 'package.json'), `${JSON.stringify({ ...manifest, dependencies }, null, 2)}\n`)
   for (const file of PROFILE_FILES) {
     try {
-      await cp(join(mainProfileDir, file), join(profileDir, file))
+      await cp(join(sourceProfileDir, file), join(profileDir, file))
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }

@@ -52,6 +52,50 @@ it('snapshots main profile declarations and links the Draft worktree', async () 
   expect(run).toHaveBeenCalledTimes(2)
 })
 
+it('snapshots a selected custom profile and resolves its relative links from that folder', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-studio-custom-profile-'))
+  roots.push(root)
+  const mainProfile = join(root, 'main', 'profiles', 'web')
+  const customProfile = join(root, 'profiles', 'custom-web')
+  const linkedPlugin = join(root, 'profiles', 'plugin')
+  const draftRoot = join(root, 'worktree')
+  const studioRoot = join(root, 'studio-package')
+  await Promise.all([
+    mkdir(mainProfile, { recursive: true }),
+    mkdir(customProfile, { recursive: true }),
+    mkdir(linkedPlugin, { recursive: true }),
+    mkdir(draftRoot),
+    mkdir(studioRoot),
+  ])
+  await writeFile(join(mainProfile, 'package.json'), JSON.stringify({
+    name: 'main-web-profile',
+    dependencies: { 'main-only': '1.0.0' },
+  }))
+  await writeFile(join(mainProfile, 'cordis.yml'), 'main: true\n')
+  await writeFile(join(customProfile, 'package.json'), JSON.stringify({
+    name: 'custom-web-profile',
+    dependencies: { 'custom-only': 'link:../plugin' },
+  }))
+  await writeFile(join(customProfile, 'cordis.yml'), 'custom: true\n')
+  const draft: StudioDraftRecord = {
+    id: 'id', name: 'draft-plugin', label: 'Draft plugin', source: { kind: 'new', packageName: 'draft-plugin' },
+    repositoryDir: root, worktreeDir: draftRoot, root: draftRoot,
+    runtimeHome: join(root, 'runtime-home'), profileMode: 'custom', profileDirectory: customProfile, createdAt: 'now',
+  }
+  const run = vi.fn(async () => {})
+
+  const profile = await materializeDraftProfile(draft, mainProfile, studioRoot, { run })
+  const manifest = JSON.parse(await readFile(join(profile, 'package.json'), 'utf8'))
+
+  expect(manifest.name).toBe('custom-web-profile')
+  expect(manifest.dependencies).toEqual({
+    'custom-only': `link:${linkedPlugin}`,
+    'draft-plugin': `link:${draftRoot}`,
+    'dsh-webui-studio': `link:${studioRoot}`,
+  })
+  expect(await readFile(join(profile, 'cordis.yml'), 'utf8')).toBe('custom: true\n')
+})
+
 it('runs the bundled pnpm without relying on the Host PATH', async () => {
   const [command, args] = bundledPnpmCommand(['--version'])
   const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => name.toUpperCase() !== 'PATH'))

@@ -9,7 +9,8 @@ import '@deepseek-ai/dsh-host-webserver'
 import '@deepseek-ai/dsh-system-prompt'
 import '@deepseek-ai/dsh-subprocess'
 import '@deepseek-ai/dsh-tools'
-import { STUDIO_PATH, type StudioHarmonyService } from './contracts.js'
+import 'dsh-harmony'
+import { STUDIO_PATH } from './contracts.js'
 import { StudioBackend } from './host/backend.js'
 import { dshHomeFromProfile, StudioDraftRegistry, studioCommands } from './host/drafts.js'
 import { applyPreviewWorker } from './host/preview-worker.js'
@@ -25,7 +26,7 @@ export function apply(ctx: Context): void {
       ctx.logger.warn('harmony-studio: Studio is disabled because dsh web is not bound to 127.0.0.1')
       return () => {}
     }
-    const harmony = (ctx as Context & { harmony: StudioHarmonyService }).harmony
+    const harmony = ctx.harmony
     const assets = {
       script: readFileSync(new URL('../dist/studio.js', import.meta.url)),
       style: readFileSync(new URL('../dist/studio.css', import.meta.url)),

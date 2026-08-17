@@ -24,6 +24,7 @@ export function CreateDraftDialog({
   const [pluginDirectory, setPluginDirectory] = useState('')
   const [destinationDirectory, setDestinationDirectory] = useState('')
   const [profileMode, setProfileMode] = useState<StudioDraftProfileMode>('main-home')
+  const [profileDirectory, setProfileDirectory] = useState('')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string>()
 
@@ -36,6 +37,7 @@ export function CreateDraftDialog({
       setPluginDirectory('')
       setDestinationDirectory('')
       setProfileMode('main-home')
+      setProfileDirectory('')
       setError(undefined)
       if (!dialog.open) {
         dialog.showModal()
@@ -61,6 +63,7 @@ export function CreateDraftDialog({
       await onCreate({
         source,
         profileMode,
+        ...(profileMode === 'custom' ? { profileDirectory: profileDirectory.trim() } : {}),
         ...(sourceKind === 'new' && destinationDirectory.trim() !== ''
           ? { destinationDirectory: destinationDirectory.trim() }
           : {}),
@@ -128,13 +131,17 @@ export function CreateDraftDialog({
             <p>{t('draftCreateProfileDescription')}</p>
           </div>
           <div className="create-dialog-fields">
-            <FormField id="draft-profile" label={t('profile')}
-              description={profileMode === 'custom' ? t('profileCustomUnavailable') : undefined}>
+            <FormField id="draft-profile" label={t('profile')}>
               <Select value={profileMode} onChange={event => setProfileMode(event.target.value as StudioDraftProfileMode)}>
                 <option value="main-home">{t('profileMain')}</option>
                 <option value="custom">{t('profileCustom')}</option>
               </Select>
             </FormField>
+            {profileMode === 'custom' && <FormField id="draft-profile-directory" label={t('profileDirectory')} required
+              description={t('profileDirectoryDescription')}>
+              <Input required value={profileDirectory} onChange={event => setProfileDirectory(event.target.value)}
+                placeholder="/Users/me/.dsh/profiles/web" maxLength={4096} />
+            </FormField>}
           </div>
         </section>
         {error !== undefined && <Notice className="create-dialog-error" tone="danger">{error}</Notice>}
@@ -142,7 +149,7 @@ export function CreateDraftDialog({
       <footer className="create-dialog-actions">
         <Button type="button" variant="ghost" disabled={creating} onClick={close}>{t('draftCreateCancel')}</Button>
         <Button type="submit" variant="primary" loading={creating} loadingLabel={t('creating')}
-          disabled={sourceMissing || profileMode === 'custom'}>{t('createDraft')}</Button>
+          disabled={sourceMissing || (profileMode === 'custom' && profileDirectory.trim() === '')}>{t('createDraft')}</Button>
       </footer>
     </form>
   </dialog>

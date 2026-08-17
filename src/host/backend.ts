@@ -7,6 +7,7 @@ import type {
   StudioDraftRecord,
   StudioDraftView,
   StudioHarmonyInspection,
+  StudioHarmonyProfileUpdateResult,
   StudioHarmonyService,
   StudioPreviewStatus,
   StudioPreviewUpdate,
@@ -43,6 +44,14 @@ function draftId(payload: unknown): string {
   const id = objectPayload(payload).draftId
   if (typeof id !== 'string') throw new Error('draftId is required')
   return id
+}
+
+function optionalStringList(value: unknown, field: string): string[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.some(item => typeof item !== 'string' || item.length === 0)) {
+    throw new Error(`${field} must be an array of non-empty strings`)
+  }
+  return value
 }
 
 class StudioDraftController implements StudioAgentWorkspace {
@@ -224,6 +233,17 @@ export class StudioBackend {
           records.map(record => record.id),
         ))
       }
+      if (method === 'studio.harmony.profile') return success(rpcId, this.harmony.profile())
+      if (method === 'studio.harmony.updateProfile') {
+        const input = objectPayload(payload)
+        const order = optionalStringList(input.order, 'order')
+        const disabled = optionalStringList(input.disabled, 'disabled')
+        const update: { order?: string[]; disabled?: string[] } = {
+          ...(order === undefined ? {} : { order }),
+          ...(disabled === undefined ? {} : { disabled }),
+        }
+        return success<StudioHarmonyProfileUpdateResult>(rpcId, await this.harmony.updateProfile(update))
+      }
       const controller = await this.controller(draftId(payload))
       if (method === 'studio.drafts.rename') {
         const label = objectPayload(payload).label
@@ -312,6 +332,7 @@ export class StudioBackend {
     if ((candidate.profileMode !== 'main-home' && candidate.profileMode !== 'custom')
       || typeof candidate.source !== 'object' || candidate.source === null
       || (candidate.source.kind !== 'new' && candidate.source.kind !== 'existing')
+      || (candidate.profileDirectory !== undefined && typeof candidate.profileDirectory !== 'string')
       || (candidate.destinationDirectory !== undefined && typeof candidate.destinationDirectory !== 'string')) {
       throw new Error('Draft source and profileMode are invalid')
     }

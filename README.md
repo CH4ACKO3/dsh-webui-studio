@@ -39,7 +39,7 @@ distributable plugin-owned artifacts.
 
 Studio is an independent downstream application of
 [`dsh-harmony`](https://github.com/CH4ACKO3/dsh-harmony). It uses Harmony's
-public Host extension, runtime, Patch engine, and Draft APIs together with the
+public Host extension, runtime, Patch engine, and service APIs together with the
 generic React registration API from
 [`dsh-harmony-react`](https://github.com/CH4ACKO3/dsh-harmony/tree/main/packages/react).
 The dependency direction stays one-way: Studio depends on Harmony; Harmony does
@@ -56,7 +56,8 @@ not depend on Studio.
 - [x] Run Draft-scoped DSH Agents with explicit Studio tools
 - [x] Check package exports, artifacts, Patch state, ordering, dependencies, and pack output
 - [x] Run multiple isolated Draft Preview Hosts at the same time
-- [ ] Configure custom Draft profiles in the UI
+- [x] Snapshot the current WebUI profile or another local profile into each isolated Draft runtime
+- [x] Reorder plugins and enable or disable Harmony Providers through one transactional hot reload
 
 ## How it works
 
@@ -104,19 +105,24 @@ its Web Client manifest, then copies an isolated snapshot without `.git` or
 `node_modules` into a Studio-owned Git repository. Symbolic links are rejected,
 and the original folder is never modified.
 
+Each Draft can start from the stable Host's current `web` profile or from
+another local DSH profile selected by absolute folder path. Studio copies that
+profile's manifest and configuration into the isolated runtime and resolves
+relative `link:` dependencies against the selected source folder. The source
+profile remains untouched.
+
 Draft display names are independent from npm package identities and can be
 renamed in the instance panel. Studio persists the ordered open tabs and active
 Draft in `workspace.json`; closing a tab only removes it from the current
-workspace and never stops or deletes the Draft. Plugin Management can reopen
-any persisted Draft. Unsaved Source changes must be saved with `Ctrl+S` or
+workspace and never stops or deletes the Draft. Unsaved Source changes must be saved with `Ctrl+S` or
 `Command+S` before switching or closing tabs.
 
 ## Getting started
 
 > [!IMPORTANT]
-> Studio requires the public Harmony extension and Draft APIs documented in
+> Studio requires the public Harmony extension and service APIs documented in
 > [`docs/harmony-api-requirements.md`](docs/harmony-api-requirements.md).
-> `dsh-harmony@0.1.3` is the minimum compatible release.
+> `dsh-harmony@0.3.2` is the minimum compatible release.
 
 ```sh
 dsh plugin --profile web add dsh-webui-studio --allow-build=dsh-harmony
@@ -205,7 +211,7 @@ patching and extension model that makes this possible.
 
 ## Related projects
 
-- [`dsh-harmony`](https://github.com/CH4ACKO3/dsh-harmony) - runtime patching, Host extension mounting, Draft lifecycle, and Patch inspection
+- [`dsh-harmony`](https://github.com/CH4ACKO3/dsh-harmony) - runtime patching, Host extension mounting, plugin reloads, and Patch inspection
 - [`dsh-harmony-react`](https://github.com/CH4ACKO3/dsh-harmony/tree/main/packages/react) - React-aware Patch factories and Studio element/variable registration
 
 ## License

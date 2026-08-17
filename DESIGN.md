@@ -58,6 +58,7 @@ rounded:
   sm: "6px"
   md: "9px"
   lg: "13px"
+  pill: "999px"
 components:
   settings-trigger:
     backgroundColor: "{colors.neutral-control}"
@@ -173,7 +174,7 @@ The modal is the only lifted settings surface. A theme-provided panel shadow and
 
 ## Shapes
 
-The dialog uses the largest existing Studio radius, ordinary controls use the medium radius, and compact navigation or icon controls use the small radius. Two- and three-pixel radii are reserved for hairline indicators and especially dense instance controls; they are not general container radii. Thin borders sharpen boundaries in both themes. Icons are simple stroked geometry with round caps and joins, consistent with the surrounding Studio toolbar.
+The dialog uses the largest existing Studio radius, ordinary controls use the medium radius, and compact navigation or icon controls use the small radius. Two- and three-pixel radii are reserved for hairline indicators and especially dense instance controls; they are not general container radii. The pill radius is reserved for switch tracks and compact capsule states, never panels or ordinary buttons. Thin borders sharpen boundaries in both themes. Icons are simple stroked geometry with round caps and joins, consistent with the surrounding Studio toolbar.
 
 **The Flat Rows Rule.** Settings rows are sections divided by rules, not individually rounded cards.
 

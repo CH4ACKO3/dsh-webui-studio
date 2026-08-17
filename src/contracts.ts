@@ -102,26 +102,9 @@ export interface StudioProjectFile {
   size: number
 }
 
-export interface StudioHarmonyInspection {
-  patches: Array<{
-    key: string
-    owner: string
-    target: { package: string; files: string[]; version?: string }
-    kind: 'source' | 'semantic'
-    state: 'pending' | 'bound' | 'disabled' | 'failed'
-    loaded: boolean
-    declaration: string
-    file?: string
-    error?: string
-  }>
-  targets: Array<{
-    package: string
-    file: string
-    original: string
-    final: string
-    steps: Array<{ key: string; owner: string; matches: number; source: string }>
-  }>
-}
+export type StudioHarmonyInspection = HarmonyInspection
+export type StudioHarmonyProfile = HarmonyProfileView
+export type StudioHarmonyProfileUpdateResult = HarmonyProfileUpdateResult
 
 export type StudioReadinessLevel = 'error' | 'warning' | 'info'
 
@@ -172,6 +155,7 @@ export interface StudioDraftRecord {
   root: string
   runtimeHome: string
   profileMode: StudioDraftProfileMode
+  profileDirectory?: string
   createdAt: string
 }
 
@@ -190,6 +174,7 @@ export interface StudioDraftView extends StudioDraftRecord {
 export interface StudioCreateDraftInput {
   source: StudioDraftSource
   profileMode: StudioDraftProfileMode
+  profileDirectory?: string
   destinationDirectory?: string
 }
 
@@ -210,23 +195,19 @@ export interface StudioBuildResult {
   build: StudioBuildOutput
 }
 
-export interface StudioHarmonyService {
-  readonly binEntry: string
-  readonly profileDir: string
-  inspect(input?: { package?: string; file?: string }): StudioHarmonyInspection
-  inspectDependencies(owner: string): StudioPatchDependency[]
-  reloadPlugin(name: string): Promise<void>
-}
+export type StudioHarmonyService = HarmonyService
 
 export interface StudioPreviewInspection {
   harmony: StudioHarmonyInspection
   dependencies: StudioPatchDependency[]
 }
 
-export interface StudioPatchDependency {
-  patch: string
-  target: { package: string; file: string }
-  providerCandidates: string[]
-  reason: string
-}
+export type StudioPatchDependency = HarmonyPatchDependency
+import type {
+  HarmonyInspection,
+  HarmonyPatchDependency,
+  HarmonyProfileUpdateResult,
+  HarmonyProfileView,
+  HarmonyService,
+} from 'dsh-harmony'
 import type { StudioRegistrySnapshot } from 'dsh-harmony-react/studio'
