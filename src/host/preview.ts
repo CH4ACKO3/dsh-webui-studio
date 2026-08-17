@@ -27,6 +27,13 @@ interface WorkerState {
   project: StudioProjectState
 }
 
+class StudioWorkerResponseError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message)
+    this.name = 'StudioWorkerResponseError'
+  }
+}
+
 function appendLog(current: string, chunk: Buffer | string): string {
   return `${current}${chunk.toString()}`.slice(-LOG_LIMIT)
 }
@@ -241,6 +248,7 @@ export class StudioPreviewSupervisor {
         return
       } catch (error) {
         signal.throwIfAborted()
+        if (error instanceof StudioWorkerResponseError && error.status !== 503) throw error
         lastError = error instanceof Error ? error.message : String(error)
         await this.delay(50, signal)
       }
@@ -261,7 +269,9 @@ export class StudioPreviewSupervisor {
     const text = await response.text()
     if (text === '') throw new Error(`Preview worker returned an empty HTTP ${response.status} response`)
     const body = JSON.parse(text) as { ok: true; value: T } | { ok: false; error: string }
-    if (!response.ok || !body.ok) throw new Error(body.ok ? `Preview worker failed with HTTP ${response.status}` : body.error)
+    if (!response.ok || !body.ok) {
+      throw new StudioWorkerResponseError(response.status, body.ok ? `Preview worker failed with HTTP ${response.status}` : body.error)
+    }
     return body.value
   }
 

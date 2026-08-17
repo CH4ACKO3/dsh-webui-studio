@@ -10,13 +10,12 @@ The Studio production path requires Harmony to provide:
   `dsh.harmony.extension`;
 - `HarmonyService.binEntry` and `HarmonyService.profileDir`;
 - `HarmonyService.inspect()` and `inspectDependencies()`;
-- `HarmonyService.prepareDraft()` with staged, active, preview-pending, and
-  closed Draft transitions;
+- `HarmonyService.reloadPlugin()` for transactionally reloading a built Draft
+  and its Patch declarations; Studio owns the Preview lifecycle transitions;
 - source Patch declaration metadata and optional render trace metadata used by
   Preview inspection.
 
-These APIs are public in `dsh-harmony@0.1.3`, which is the minimum compatible
-registry release for Studio Host integration.
+Studio and Harmony releases must keep this service contract aligned.
 
 `dsh-harmony-react@0.1.0` exposes the generic `./studio` React element and
 variable registration API used by the browser and Preview bridge. Studio uses

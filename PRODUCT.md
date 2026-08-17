@@ -66,7 +66,7 @@ Studio is a focused developer environment rather than a decorative mod manager. 
 - Preserve the stable DSH environment: unfinished Draft code belongs in isolated Preview Hosts.
 - Express changes as distributable plugin and Harmony artifacts, not arbitrary edits to installed WebUI sources.
 - Preview the real system: retain DSH origin, plugin graph, data, and interaction semantics during testing.
-- Make state transitions explicit: distinguish staged, built, preview-pending, active, stopped, and preserved Draft state.
+- Make state transitions explicit: distinguish built, preview-pending, active, stopped, and preserved Draft state.
 - Keep the development loop layered and direct: inspect, edit, build, activate, and verify without hiding the underlying files or Patch behavior.
 
 ## Accessibility & Inclusion

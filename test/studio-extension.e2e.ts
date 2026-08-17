@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import type {
   StudioBuildResult,
   StudioDraftView,
+  StudioHarmonyInspection,
   StudioProjectFile,
   StudioProjectState,
   StudioServerResponse,
@@ -39,10 +40,22 @@ writeFileSync(join(draftRoot, 'package.json'), JSON.stringify({
   exports: { '.': './index.js', './client': './client.js', './package.json': './package.json' },
   scripts: { build: 'node build.mjs' },
   dependencies: { 'studio-build-helper': `file:${draftDependencyRoot}` },
-  dsh: { client: { platform: 'web', immediately: true } },
+  dsh: {
+    client: { platform: 'web', immediately: true },
+    harmony: { patches: ['./preview.patch.cjs'] },
+  },
 }))
 const draftIndexSource = 'import { marker } from "studio-build-helper"\nexport function apply() { return marker }\n'
 writeFileSync(join(draftRoot, 'index.js'), draftIndexSource)
+writeFileSync(join(draftRoot, 'preview.patch.cjs'), `
+module.exports = {
+  id: 'preview-runtime',
+  target: { package: 'studio-draft', files: ['index.js'] },
+  select: 'FunctionDeclaration[name.name="apply"] ReturnStatement',
+  expect: 1,
+  apply({ node, edit }) { edit.overwrite(node.getStart(), node.getEnd(), 'return "patched Preview"') },
+}
+`)
 writeFileSync(join(draftRoot, 'client.js'), `
 window.__ModuleLoader__.load({ id: 'studio-draft', factory: () => ({}) })
 `)
@@ -183,7 +196,12 @@ try {
   const started = await call<StudioDraftView>('studio.drafts.start', { draftId: created.id })
   const opened = started.project
   assert.ok(opened)
-  assert.equal(opened.state, 'staged')
+  assert.equal(opened.state, 'preview-pending')
+  const initialInspection = await call<StudioHarmonyInspection>('studio.harmony.inspect', { draftId: created.id })
+  assert.equal(initialInspection.patches.find(patch => patch.key === 'studio-draft/preview-runtime')?.state, 'bound')
+  const initialPatchedTarget = initialInspection.targets.find(target => target.package === 'studio-draft' && target.file === 'index.js')
+  assert.ok(initialPatchedTarget)
+  assert.match(initialPatchedTarget.final, /return "patched Preview"/)
   assert.equal(started.runtime.state, 'running')
   assert.ok(started.runtime.log.includes(`${join(created.runtimeHome, 'profiles', 'web')}\n$ `), 'Install command prompt did not include its profile directory')
   assert.ok(started.runtime.log.includes(' install --prefer-offline\n'), 'Install command prompt did not include the executed command')
@@ -230,10 +248,24 @@ try {
   const active = await call<StudioProjectState>('studio.project.activate', { ...scoped, graphRev: previewGraphRev })
   assert.equal(active.state, 'active')
 
+  const patchFile = await call<{ content: string }>('studio.project.readFile', { ...scoped, path: 'preview.patch.cjs' })
+  assert.match(patchFile.content, /patched Preview/)
+  await call('studio.project.writeFile', {
+    ...scoped,
+    path: 'preview.patch.cjs',
+    content: patchFile.content.replace('patched Preview', 'patched Build'),
+  })
+
   const built = await call<StudioBuildResult>('studio.project.build', scoped)
   assert.equal(built.project.state, 'preview-pending')
   assert.notEqual(built.project.graphRev, active.graphRev)
   assert.match(built.build.stdout, /studio draft built/)
+  const rebuiltInspection = await call<StudioHarmonyInspection>('studio.harmony.inspect', scoped)
+  assert.equal(rebuiltInspection.patches.find(patch => patch.key === 'studio-draft/preview-runtime')?.state, 'bound')
+  const rebuiltPatchedTarget = rebuiltInspection.targets.find(target => target.package === 'studio-draft' && target.file === 'index.js')
+  assert.ok(rebuiltPatchedTarget)
+  assert.match(rebuiltPatchedTarget.final, /return "patched Build"/)
+  assert.doesNotMatch(rebuiltPatchedTarget.final, /patched Preview/)
   const rebuiltPreview = await fetch(previewUrl)
   assert.equal(new URL(rebuiltPreview.url).origin, previewOrigin)
   const rebuiltHtml = await rebuiltPreview.text()

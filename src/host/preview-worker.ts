@@ -5,9 +5,9 @@ import {
   STUDIO_PATH,
   STUDIO_PREVIEW_API_PATH,
   type StudioHarmonyService,
-  type StudioPreviewDraftHandle,
   type StudioSourceLocation,
 } from '../contracts.js'
+import { StudioPreviewDraft } from './preview-draft.js'
 import { StudioSourceResolver } from './source-resolution.js'
 
 interface PreviewWorkerOptions {
@@ -37,8 +37,16 @@ async function readJson(request: IncomingMessage): Promise<Record<string, unknow
 
 export function applyPreviewWorker(ctx: Context, harmony: StudioHarmonyService, options: PreviewWorkerOptions): void {
   ctx.effect(() => {
-    let handle: StudioPreviewDraftHandle | undefined
-    const ready = harmony.prepareDraft({ root: options.root }).then(value => { handle = value; return value })
+    const draft = new StudioPreviewDraft(ctx, harmony, options.root)
+    let readiness:
+      | { state: 'starting' }
+      | { state: 'ready' }
+      | { state: 'failed'; error: unknown } = { state: 'starting' }
+    const ready = draft.open()
+    void ready.then(
+      () => { readiness = { state: 'ready' } },
+      error => { readiness = { state: 'failed', error } },
+    )
     const sources = new StudioSourceResolver(options.root, harmony.profileDir)
     const worker: WebRoute = {
       kind: 'prefix',
@@ -51,15 +59,26 @@ export function applyPreviewWorker(ctx: Context, harmony: StudioHarmonyService, 
         try {
           const payload = await readJson(request)
           const method = new URL(request.url ?? '/', 'http://localhost').pathname.slice(`${STUDIO_PREVIEW_API_PATH}/`.length)
-          if (method === 'health') return json(response, 200, { ok: true, value: { ready: true } })
-          const draft = await ready
-          if (method === 'state') return json(response, 200, { ok: true, value: { project: draft.snapshot() } })
+          if (method === 'health') {
+            if (readiness.state === 'starting') {
+              return json(response, 503, { ok: false, error: 'Preview worker is still preparing the Draft' })
+            }
+            if (readiness.state === 'failed') {
+              return json(response, 500, {
+                ok: false,
+                error: readiness.error instanceof Error ? readiness.error.message : String(readiness.error),
+              })
+            }
+            return json(response, 200, { ok: true, value: { ready: true } })
+          }
+          const opened = await ready
+          if (method === 'state') return json(response, 200, { ok: true, value: { project: opened.snapshot() } })
           if (method === 'activate') {
             if (typeof payload.graphRev !== 'string') throw new Error('graphRev is required')
-            return json(response, 200, { ok: true, value: { project: await draft.activateAfterPreviewReady(payload.graphRev) } })
+            return json(response, 200, { ok: true, value: { project: opened.activate(payload.graphRev) } })
           }
           if (method === 'apply-build') {
-            return json(response, 200, { ok: true, value: { project: await draft.applyBuild() } })
+            return json(response, 200, { ok: true, value: { project: await opened.applyBuild() } })
           }
           if (method === 'inspect') {
             const packageName = typeof payload.package === 'string' ? payload.package : undefined
@@ -68,7 +87,7 @@ export function applyPreviewWorker(ctx: Context, harmony: StudioHarmonyService, 
               ok: true,
               value: {
                 harmony: harmony.inspect({ ...(packageName === undefined ? {} : { package: packageName }), ...(file === undefined ? {} : { file }) }),
-                dependencies: harmony.inspectDependencies(draft.snapshot().name),
+                dependencies: harmony.inspectDependencies(opened.snapshot().name),
               },
             })
           }
@@ -115,8 +134,7 @@ export function applyPreviewWorker(ctx: Context, harmony: StudioHarmonyService, 
     })]
     return async () => {
       for (const stop of dispose.reverse()) stop()
-      await ready.catch(() => undefined)
-      await handle?.deactivate()
+      await ready.then(opened => opened.close(), () => undefined)
     }
   }, 'harmony-studio: Preview worker')
 }

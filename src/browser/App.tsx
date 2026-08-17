@@ -976,7 +976,7 @@ export function App(): JSX.Element {
   }
 
   const confirmPreview = async (graphRev: string): Promise<void> => {
-    if (selectedDraftId === undefined || (project?.state !== 'staged' && project?.state !== 'preview-pending') || confirming) return
+    if (selectedDraftId === undefined || project?.state !== 'preview-pending' || confirming) return
     setConfirming(true)
     setError(undefined)
     try {

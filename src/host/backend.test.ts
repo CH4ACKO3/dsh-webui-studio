@@ -10,7 +10,7 @@ import type { StudioCommandRunner, StudioDraftRegistry } from './drafts.js'
 import type { StudioWorkspaceStore } from './workspace.js'
 
 const previewState = vi.hoisted(() => ({
-  project: { name: 'draft-plugin', root: '', state: 'staged' as const, graphRev: 'graph-1' },
+  project: { name: 'draft-plugin', root: '', state: 'preview-pending' as const, graphRev: 'graph-1' },
 }))
 
 vi.mock('./preview.js', () => ({
@@ -56,7 +56,7 @@ function record(root: string): StudioDraftRecord {
 }
 
 function backend(draft: StudioDraftRecord, get = vi.fn(async () => draft)): StudioBackend {
-  previewState.project = { name: draft.name, root: draft.root, state: 'staged', graphRev: 'graph-1' }
+  previewState.project = { name: draft.name, root: draft.root, state: 'preview-pending', graphRev: 'graph-1' }
   const harmony = { profileDir: '/home/profiles/web' } as StudioHarmonyService
   const agents = { create: vi.fn(async () => ({ dispose: vi.fn(async () => {}) })) } as unknown as AgentRegistry
   const subprocess = {} as SubprocessRuntime
@@ -87,7 +87,7 @@ describe('StudioBackend', () => {
     expect(listed.result).toMatchObject({ ok: true, value: [{ runtime: { state: 'stopped' } }] })
     expect(started.result).toMatchObject({ ok: true, value: {
       runtime: { state: 'running', previewUrl: 'http://127.0.0.1:4000/' },
-      project: { state: 'staged', graphRev: 'graph-1' },
+      project: { state: 'preview-pending', graphRev: 'graph-1' },
     } })
   })
 

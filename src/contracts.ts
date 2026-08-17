@@ -150,7 +150,7 @@ export interface StudioReadinessReport {
 export interface StudioProjectState {
   name: string
   root: string
-  state: 'staged' | 'active' | 'preview-pending' | 'closed'
+  state: 'active' | 'preview-pending' | 'closed'
   graphRev: string
 }
 
@@ -215,14 +215,7 @@ export interface StudioHarmonyService {
   readonly profileDir: string
   inspect(input?: { package?: string; file?: string }): StudioHarmonyInspection
   inspectDependencies(owner: string): StudioPatchDependency[]
-  prepareDraft(input: { root: string }): Promise<StudioPreviewDraftHandle>
-}
-
-export interface StudioPreviewDraftHandle {
-  snapshot(): StudioProjectState
-  activateAfterPreviewReady(graphRev: string): Promise<StudioProjectState>
-  applyBuild(): Promise<StudioProjectState>
-  deactivate(): Promise<void>
+  reloadPlugin(name: string): Promise<void>
 }
 
 export interface StudioPreviewInspection {
