@@ -31,7 +31,7 @@ beforeEach(() => {
   sourceResolver.readDependencyTarget.mockReset()
 })
 
-function workerRoute(): WebRoute {
+function workerRoute(harmony: StudioHarmonyService = { profileDir: '/profile' } as StudioHarmonyService): WebRoute {
   let route: WebRoute | undefined
   const ctx = {
     effect(start: () => unknown) { start() },
@@ -43,7 +43,7 @@ function workerRoute(): WebRoute {
       tapIndex() { return () => {} },
     },
   } as unknown as Context
-  applyPreviewWorker(ctx, { profileDir: '/profile' } as StudioHarmonyService, {
+  applyPreviewWorker(ctx, harmony, {
     root: '/draft',
     packageDirs: [],
     controlToken: 'secret',
@@ -126,4 +126,24 @@ it('returns installed dependency source and version for automatic Patch analysis
   })).resolves.toEqual({ status: 200, body: { ok: true, value: {
     package: 'target-plugin', file: 'lib/client.js', version: '1.2.3', source: 'const title = "Original";\n',
   } } })
+})
+
+it('reads and transactionally updates the active Preview Harmony profile', async () => {
+  previewDraft.open.mockResolvedValue({ snapshot: () => ({ name: 'draft-plugin' }), async close() {} })
+  const profile = {
+    dir: '/draft/profile', order: ['dsh-harmony', 'draft-plugin'], patchOrder: ['draft-plugin/one'], disabled: [],
+    plugins: [], orderViolations: [], patchOrderViolations: [], incompatibilities: [],
+  }
+  const updateProfile = vi.fn(async (input: { disabled?: string[] }) => ({
+    profile: { ...profile, ...input }, generation: 3, reload: { state: 'succeeded' as const }, clientGraphRev: 'graph-3',
+  }))
+  const route = workerRoute({ profileDir: profile.dir, profile: () => profile, updateProfile } as unknown as StudioHarmonyService)
+
+  await expect(workerRequest(route, 'profile', {})).resolves.toEqual({
+    status: 200, body: { ok: true, value: profile },
+  })
+  await expect(workerRequest(route, 'update-profile', { disabled: ['draft-plugin/one'] })).resolves.toMatchObject({
+    status: 200, body: { ok: true, value: { generation: 3, profile: { disabled: ['draft-plugin/one'] } } },
+  })
+  expect(updateProfile).toHaveBeenCalledWith({ disabled: ['draft-plugin/one'] })
 })

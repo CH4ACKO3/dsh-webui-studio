@@ -45,7 +45,7 @@ function templateManifest(name: string): string {
     dependencies: { 'dsh-harmony-react': '^0.2.1' },
     peerDependencies: { '@deepseek-ai/dsh-client-runtime': '0.1.0-rc.7', react: '^18.3.1' },
     devDependencies: {
-      '@deepseek-ai/dsh-client-runtime': '0.1.0-rc.7', '@types/react': '~18.3.1', react: '^18.3.1',
+      '@deepseek-ai/dsh-client-runtime': '0.1.0-rc.7', '@tsdown/css': '0.22.14', '@types/react': '~18.3.1', react: '^18.3.1',
       tsdown: '0.22.14', typescript: '^6.0.3', unrun: '0.3.1',
     },
   }, null, 2)}\n`

@@ -86,6 +86,20 @@ function validateCssRequest(request: Extract<StudioAutomaticPatchRequest, { kind
   }
 }
 
+function validateContentRequest(request: Extract<StudioAutomaticPatchRequest, { kind: 'replace-string' }>): void {
+  if (!/\.(?:[cm]?[jt]sx?)$/.test(request.clientFile)) throw new Error('automatic content Patch client source must be a JavaScript or TypeScript file')
+  compileElementStyleSelector(request.selector, '[data-dsh-studio-root]')
+  if (request.boundary.surfaceId === '' || request.boundary.path.length === 0 || request.boundary.path.some(item => item === '')) {
+    throw new Error('automatic content Patch boundary is invalid')
+  }
+  if (request.targetSelector !== undefined
+    && (request.targetSelector.trim() === '' || request.targetSelector.length > 2_000 || /[{};]/.test(request.targetSelector))) {
+    throw new Error('automatic content Patch target selector is invalid')
+  }
+  if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(request.elementId)) throw new Error('automatic content Patch element id is invalid')
+  if (request.elementLabel.trim() === '') throw new Error('automatic content Patch element label must not be empty')
+}
+
 function analyzeTarget(
   request: StudioAutomaticPatchRequest,
   target: AutomaticPatchSource,
@@ -127,7 +141,7 @@ function stringPatch(request: Extract<StudioAutomaticPatchRequest, { kind: 'repl
     select: ${JSON.stringify(`StringLiteral[text=${JSON.stringify(request.text)}]`)},
     expect: ${target.matches.length},
     apply({ node, sourceFile, edit }) {
-      edit.overwrite(node.getStart(sourceFile), node.getEnd(), ${JSON.stringify(request.replacement)})
+      edit.overwrite(node.getStart(sourceFile), node.getEnd(), JSON.stringify(AUTO_CONTENT))
     },
   }`
 }
@@ -147,7 +161,7 @@ function cssPatch(
   })`
 }
 
-function clientSource(request: Extract<StudioAutomaticPatchRequest, { kind: 'css-style' }>, owner: string, id: string, file: string, exportName: string): string {
+function cssClientSource(request: Extract<StudioAutomaticPatchRequest, { kind: 'css-style' }>, owner: string, id: string, file: string, exportName: string): string {
   const definitions = request.variables.map(variable => `{
       kind: 'variable', id: ${JSON.stringify(variable.id)}, label: ${JSON.stringify(variable.label)}, control: ${JSON.stringify(variable.control)},
       ${variable.options === undefined ? '' : `options: ${JSON.stringify(variable.options)},`}
@@ -158,8 +172,7 @@ function clientSource(request: Extract<StudioAutomaticPatchRequest, { kind: 'css
   const properties = JSON.stringify(request.variables.map(item => ({ id: item.id, property: item.property })))
   const root = `[data-ui-surface=${JSON.stringify(request.boundary.surfaceId)}][data-ui-surface-path=${JSON.stringify(JSON.stringify(request.boundary.path))}]`
   const selector = compileElementStyleSelector(request.selector, root)
-  return `import * as React from 'react'
-import { registerStudioElement } from 'dsh-harmony-react/studio'
+  return `import { registerStudioElement } from 'dsh-harmony-react/studio'
 
 const targetSelector = ${request.targetSelector === undefined ? 'undefined' : JSON.stringify(request.targetSelector)}
 const boundarySurface = ${JSON.stringify(request.boundary.surfaceId)}
@@ -168,11 +181,8 @@ const values = {
 ${defaults}
 }
 const declarations = ${properties}
-let mounts = 0
-let disposeRegistration
 let styleElement
 let targetObserver
-const markedTargets = new Set()
 
 function markTargets() {
   if (targetSelector === undefined) return
@@ -180,7 +190,6 @@ function markTargets() {
     if (element.hasAttribute('data-ui-surface') || element.hasAttribute('data-ui-surface-path')) continue
     element.setAttribute('data-ui-surface', boundarySurface)
     element.setAttribute('data-ui-surface-path', boundaryPath)
-    markedTargets.add(element)
   }
 }
 
@@ -207,58 +216,106 @@ const bindings = Object.fromEntries(declarations.map(declaration => [declaration
   set: value => { values[declaration.id] = value; applyStyles() },
 }]))
 
-function acquire() {
-  mounts += 1
-  if (mounts === 1) {
-    disposeRegistration = registerStudioElement({
-      owner: ${JSON.stringify(owner)},
-      element: {
-        id: ${JSON.stringify(request.elementId)}, label: ${JSON.stringify(request.elementLabel)},
-        boundary: ${JSON.stringify(request.boundary)}, source: { file: ${JSON.stringify(file)} },
-        variables: [{ kind: 'group', id: 'css', label: 'CSS', children: [
+registerStudioElement({
+  owner: ${JSON.stringify(owner)},
+  element: {
+    id: ${JSON.stringify(request.elementId)}, label: ${JSON.stringify(request.elementLabel)},
+    boundary: ${JSON.stringify(request.boundary)}, source: { file: ${JSON.stringify(file)} },
+    variables: [{ kind: 'group', id: 'css', label: 'CSS', children: [
 ${definitions}
-        ] }],
-      },
-      bindings,
-    })
-    applyStyles()
-    if (targetSelector !== undefined) {
-      targetObserver = new MutationObserver(markTargets)
-      targetObserver.observe(document.body, { childList: true, subtree: true })
-    }
-  }
-  return () => {
-    mounts -= 1
-    if (mounts !== 0) return
-    disposeRegistration?.()
-    disposeRegistration = undefined
-    targetObserver?.disconnect()
-    targetObserver = undefined
-    for (const element of markedTargets) {
-      if (element.getAttribute('data-ui-surface') === boundarySurface
-        && element.getAttribute('data-ui-surface-path') === boundaryPath) {
-        element.removeAttribute('data-ui-surface')
-        element.removeAttribute('data-ui-surface-path')
-      }
-    }
-    markedTargets.clear()
-    styleElement?.remove()
-    styleElement = undefined
-  }
+    ] }],
+  },
+  bindings,
+})
+applyStyles()
+if (targetSelector !== undefined) {
+  targetObserver = new MutationObserver(markTargets)
+  targetObserver.observe(document.documentElement, { childList: true, subtree: true })
 }
 
 export function ${exportName}(Original) {
-  function StudioDecoratedComponent(props) {
-    React.useEffect(acquire, [])
-    return React.createElement(Original, props)
-  }
-  StudioDecoratedComponent.displayName = \`Studio(${request.component})\`
-  return StudioDecoratedComponent
+  return Original
 }
 `
 }
 
-function providerSource(request: StudioAutomaticPatchRequest, targets: StudioAutomaticPatchTargetAnalysis[], owner: string): { source: string; patchIds: string[] } {
+function contentClientSource(
+  request: Extract<StudioAutomaticPatchRequest, { kind: 'replace-string' }>,
+  owner: string,
+  id: string,
+  providerFile: string,
+  file: string,
+  exportName: string,
+): string {
+  const root = `[data-ui-surface=${JSON.stringify(request.boundary.surfaceId)}][data-ui-surface-path=${JSON.stringify(JSON.stringify(request.boundary.path))}]`
+  const selector = compileElementStyleSelector(request.selector, root)
+  const variableId = `text_${id.slice('auto-content-'.length)}`
+  const groupId = `content_${id.slice('auto-content-'.length)}`
+  const sourceFile = request.elementSourceFile ?? file
+  return `import { registerStudioElement } from 'dsh-harmony-react/studio'
+
+const targetSelector = ${request.targetSelector === undefined ? 'undefined' : JSON.stringify(request.targetSelector)}
+const boundarySurface = ${JSON.stringify(request.boundary.surfaceId)}
+const boundaryPath = ${JSON.stringify(JSON.stringify(request.boundary.path))}
+let value = ${JSON.stringify(request.replacement)}
+let initialized = false
+const listeners = new Set()
+
+function notify() {
+  for (const listener of listeners) listener()
+}
+
+function markTargets() {
+  if (targetSelector === undefined) return
+  for (const element of document.querySelectorAll(targetSelector)) {
+    if (element.hasAttribute('data-ui-surface') || element.hasAttribute('data-ui-surface-path')) continue
+    element.setAttribute('data-ui-surface', boundarySurface)
+    element.setAttribute('data-ui-surface-path', boundaryPath)
+  }
+}
+
+function syncText() {
+  if (typeof document === 'undefined') return
+  markTargets()
+  const elements = [...document.querySelectorAll(${JSON.stringify(selector)})]
+  if (!initialized && elements[0] !== undefined) {
+    value = elements[0].textContent ?? value
+    initialized = true
+    notify()
+  }
+  for (const element of elements) if (element.textContent !== value) element.textContent = value
+}
+
+registerStudioElement({
+  owner: ${JSON.stringify(owner)},
+  element: {
+    id: ${JSON.stringify(request.elementId)}, label: ${JSON.stringify(request.elementLabel)},
+    boundary: ${JSON.stringify(request.boundary)}, source: { file: ${JSON.stringify(sourceFile)} },
+    variables: [{ kind: 'group', id: ${JSON.stringify(groupId)}, label: 'Content', children: [{
+      kind: 'variable', id: ${JSON.stringify(variableId)}, label: 'Text', control: 'string',
+      defaultSource: { file: ${JSON.stringify(providerFile)}, before: ${JSON.stringify(`const AUTO_CONTENT = /* dsh-studio-default:${id}:text */ `)}, after: ${JSON.stringify(';\n')} },
+    }] }],
+  },
+  bindings: { ${JSON.stringify(variableId)}: {
+    get: () => value,
+    set: next => { value = String(next); initialized = true; syncText(); notify() },
+    subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener) },
+  } },
+})
+syncText()
+const observer = new MutationObserver(syncText)
+observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true })
+
+export const ${exportName} = true
+`
+}
+
+function providerSource(
+  request: StudioAutomaticPatchRequest,
+  targets: StudioAutomaticPatchTargetAnalysis[],
+  owner: string,
+  defaultId: string,
+): { source: string; patchIds: string[] } {
   const applicable = targets.filter(target => target.matches.length > 0 && target.matches.every(item => item.applicable))
   const patchIds = applicable.map(target => patchId(request, target))
   const declarations = applicable.map((target, index) => request.kind === 'replace-string'
@@ -266,7 +323,7 @@ function providerSource(request: StudioAutomaticPatchRequest, targets: StudioAut
     : cssPatch(request, target, patchIds[index]!, owner)).join(',\n')
   const prefix = request.kind === 'css-style'
     ? `'use strict'\n\nconst { component } = require('dsh-harmony-react')\nconst AUTO_EXPORT = ${JSON.stringify(`DshStudioAuto${digest(request, 10)}`)}\n\n`
-    : `'use strict'\n\n`
+    : `'use strict'\n\nconst AUTO_CONTENT = /* dsh-studio-default:${defaultId}:text */ ${JSON.stringify(request.replacement)};\n\n`
   return { patchIds, source: `${prefix}module.exports = [\n${declarations}\n]\n` }
 }
 
@@ -279,6 +336,7 @@ export function analyzeAutomaticPatch(
   if (request.targets.length === 0) throw new Error('automatic Patch requires at least one target')
   if (request.targets.length !== sources.length) throw new Error('automatic Patch target sources are incomplete')
   if (request.kind === 'css-style') validateCssRequest(request)
+  else validateContentRequest(request)
   const identities = request.targets.map(target => `${target.package}\0${target.file}`)
   if (new Set(identities).size !== identities.length) throw new Error('automatic Patch targets must be unique')
   for (let index = 0; index < sources.length; index += 1) {
@@ -288,31 +346,39 @@ export function analyzeAutomaticPatch(
   }
   const targets = sources.map(source => analyzeTarget(request, source))
   const file = `patch.auto-${digest({ request, owner, versions: targets.map(target => target.version) })}.cjs`
-  const generated = providerSource(request, targets, owner)
-  if (request.kind === 'replace-string') {
-    return { request, targets, canApply: generated.patchIds.length > 0, provider: { file, source: generated.source, patchIds: generated.patchIds } }
-  }
+  const suffix = digest({ request, owner }, 10)
+  const defaultId = `auto-${request.kind === 'css-style' ? 'css' : 'content'}-${suffix}`
+  const generated = providerSource(request, targets, owner, defaultId)
   const extension = extname(request.clientFile)
   const stem = basename(request.clientFile, extension)
-  const suffix = digest({ request, owner }, 10)
   const generatedFile = posix.join(dirname(request.clientFile).split('\\').join('/'), `${stem}.dsh-studio-auto-${suffix}.js`)
-  const exportName = `DshStudioAuto${digest(request, 10)}`
+  const elementId = request.kind === 'replace-string' && request.elementSourceFile !== undefined
+    ? request.elementId : `${request.elementId}-${suffix}`
+  const client = request.kind === 'css-style'
+    ? {
+        file: generatedFile,
+        source: cssClientSource({ ...request, elementId }, owner, defaultId, generatedFile, `DshStudioAuto${digest(request, 10)}`),
+        export: `DshStudioAuto${digest(request, 10)}`,
+        entryFile: request.clientFile,
+      }
+    : {
+        file: generatedFile,
+        source: contentClientSource({ ...request, elementId }, owner, defaultId, file, generatedFile, `DshStudioContent${digest(request, 10)}`),
+        export: `DshStudioContent${digest(request, 10)}`,
+        entryFile: request.clientFile,
+      }
   return {
     request,
     targets,
     canApply: generated.patchIds.length > 0,
     provider: { file, source: generated.source, patchIds: generated.patchIds },
-    client: {
-      file: generatedFile,
-      source: clientSource(request, owner, `auto-css-${suffix}`, generatedFile, exportName),
-      export: exportName,
-      entryFile: request.clientFile,
-    },
+    client,
   }
 }
 
 interface DraftManifest {
   dependencies?: Record<string, string>
+  devDependencies?: Record<string, string>
   dsh?: { client?: Record<string, unknown>; harmony?: { patches?: unknown }; [key: string]: unknown }
   [key: string]: unknown
 }
@@ -347,6 +413,10 @@ export async function writeAutomaticPatch(root: string, plan: StudioAutomaticPat
   const nextManifest: DraftManifest = {
     ...manifest,
     dependencies: plan.client === undefined ? manifest.dependencies : { ...manifest.dependencies, 'dsh-harmony-react': '^0.2.1' },
+    devDependencies: plan.request.kind !== 'css-style' || manifest.devDependencies?.tsdown !== '0.22.14'
+      || manifest.dependencies?.['@tsdown/css'] !== undefined || manifest.devDependencies['@tsdown/css'] !== undefined
+      ? manifest.devDependencies
+      : { ...manifest.devDependencies, '@tsdown/css': manifest.devDependencies.tsdown },
     dsh: {
       ...manifest.dsh,
       ...(plan.client === undefined ? {} : { client: { ...manifest.dsh?.client, immediately: true } }),

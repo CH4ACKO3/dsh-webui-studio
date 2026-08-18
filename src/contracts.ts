@@ -182,19 +182,6 @@ export type StudioHarmonyInspection = HarmonyInspection
 export type StudioHarmonyProfile = HarmonyProfileView
 export type StudioHarmonyProfileUpdateResult = HarmonyProfileUpdateResult
 
-export type StudioPluginFiberPhase = 'pending' | 'loading' | 'active' | 'failed' | 'unloading' | null
-
-export interface StudioPluginInventoryEntry {
-  entryId: string
-  moduleName: string
-  enabled: boolean
-  fiberPhase: StudioPluginFiberPhase
-}
-
-export interface StudioPluginInventorySnapshot {
-  entries: StudioPluginInventoryEntry[]
-}
-
 export type StudioReadinessLevel = 'error' | 'warning' | 'info'
 
 export interface StudioReadinessFinding {
@@ -305,6 +292,13 @@ export type StudioAutomaticPatchRequest =
     targets: StudioAutomaticPatchTarget[]
     text: string
     replacement: string
+    clientFile: string
+    boundary: StudioSurfaceBoundary
+    targetSelector?: string
+    selector: string
+    elementId: string
+    elementLabel: string
+    elementSourceFile?: string
   }
   | {
     kind: 'css-style'

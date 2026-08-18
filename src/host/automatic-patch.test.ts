@@ -14,7 +14,10 @@ afterEach(async () => {
 })
 
 function request(targets: StudioAutomaticPatchRequest['targets']): StudioAutomaticPatchRequest {
-  return { kind: 'replace-string', targets, text: 'Original', replacement: 'Changed' }
+  return {
+    kind: 'replace-string', targets, text: 'Original', replacement: 'Changed', clientFile: 'src/client.tsx',
+    boundary: { surfaceId: 'home', path: ['hero'] }, selector: '&', elementId: 'hero', elementLabel: 'Hero',
+  }
 }
 
 function source(packageName: string, file: string, value: string): AutomaticPatchSource {
@@ -57,6 +60,19 @@ test('analyzes every string-literal match and generates one exact-count Patch pe
   expect(plan.provider.source).toContain('files: ["lib/client.js"]')
   expect(plan.provider.source).toContain('files: ["dist/web.js"]')
   expect(plan.provider.source).not.toContain('lib/unused.js')
+  expect(ts.createSourceFile('content-client.js', plan.client!.source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS).parseDiagnostics).toEqual([])
+  const generated: { exports: Array<{ apply(context: {
+    node: { getStart(): number; getEnd(): number }
+    sourceFile: object
+    edit: { overwrite(start: number, end: number, value: string): void }
+  }): void }> } = { exports: [] }
+  Function('module', 'exports', plan.provider.source)(generated, generated.exports)
+  let replacement = ''
+  generated.exports[0]!.apply({
+    node: { getStart: () => 4, getEnd: () => 14 }, sourceFile: {},
+    edit: { overwrite: (_start, _end, value) => { replacement = value } },
+  })
+  expect(replacement).toBe('"Changed"')
 })
 
 test('returns a non-applicable analysis instead of hiding zero-match targets', () => {
@@ -84,8 +100,10 @@ test('generates a CSS Patch that registers the same Element variable contract', 
   expect(plan.provider.source).not.toContain('edit.overwrite')
   expect(plan.provider.source).toContain('expect: 1')
   expect(plan.client?.source).toContain('registerStudioElement')
+  expect(plan.client?.source).toMatch(/id: "hero-[a-f0-9]{10}"/)
   expect(plan.client?.source).toContain('border-radius')
-  expect(plan.client?.source).toContain('return React.createElement(Original, props)')
+  expect(plan.client?.source).toContain('return Original')
+  expect(plan.client?.source).not.toContain('React.createElement')
   expect(plan.client?.source).toContain('dsh-studio-default:')
   const generatedClient = ts.createSourceFile('generated.js', plan.client!.source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS)
   expect(generatedClient.parseDiagnostics).toEqual([])
@@ -113,14 +131,43 @@ test('generates a CSS Patch that registers the same Element variable contract', 
   const root = await mkdtemp(join(tmpdir(), 'dsh-studio-auto-css-'))
   roots.push(root)
   await mkdir(join(root, 'src'))
-  await writeFile(join(root, 'package.json'), JSON.stringify({ name: 'draft-plugin', dsh: { harmony: { patches: [] } } }))
+  await writeFile(join(root, 'package.json'), JSON.stringify({
+    name: 'draft-plugin',
+    devDependencies: { tsdown: '0.22.14' },
+    dsh: { harmony: { patches: [] } },
+  }))
   await writeFile(join(root, 'src/client.tsx'), "export const Existing = () => null\n")
   await writeAutomaticPatch(root, plan)
-  await expect(readFile(join(root, plan.client!.file), 'utf8')).resolves.toContain('React.createElement(Original, props)')
+  await expect(readFile(join(root, plan.client!.file), 'utf8')).resolves.toContain('return Original')
   await expect(readFile(join(root, 'src/client.tsx'), 'utf8')).resolves.toContain(`export { ${plan.client!.export} }`)
-  const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8')) as { dependencies: Record<string, string>; dsh: { client: { immediately: boolean } } }
+  const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8')) as {
+    dependencies: Record<string, string>
+    devDependencies: Record<string, string>
+    dsh: { client: { immediately: boolean } }
+  }
   expect(manifest.dependencies['dsh-harmony-react']).toBe('^0.2.1')
+  expect(manifest.devDependencies['@tsdown/css']).toBe('0.22.14')
   expect(manifest.dsh.client.immediately).toBe(true)
+})
+
+test('gives separate CSS Patches unique Element registrations', () => {
+  const targets = [{ package: 'plugin-a', file: 'lib/client.js' }]
+  const firstRequest = cssRequest(targets)
+  const secondRequest = cssRequest(targets)
+  secondRequest.component = 'Footer'
+  secondRequest.elementId = 'footer'
+  secondRequest.elementLabel = 'Footer'
+  secondRequest.boundary = { surfaceId: 'footer', path: ['root'] }
+  secondRequest.selector = '&:hover'
+  secondRequest.variables = [{ id: 'opacity', label: 'Opacity', property: 'opacity', control: 'number', value: 0.8 }]
+  const target = source('plugin-a', 'lib/client.js', 'const Hero = () => null\n')
+  const first = analyzeAutomaticPatch(firstRequest, [target], 'draft-plugin')
+  const second = analyzeAutomaticPatch(secondRequest, [target], 'draft-plugin')
+  const elementId = (value: string): string => value.match(/element: \{\s*id: "([^"]+)"/)?.[1] ?? ''
+
+  expect(elementId(first.client!.source)).toMatch(/^hero-[a-f0-9]{10}$/)
+  expect(elementId(second.client!.source)).toMatch(/^footer-[a-f0-9]{10}$/)
+  expect(elementId(first.client!.source)).not.toBe(elementId(second.client!.source))
 })
 
 test('generates a component-owned boundary for a selected element without a host Surface', () => {
@@ -138,7 +185,7 @@ test('generates a component-owned boundary for a selected element without a host
   expect(plan.client?.source).toContain('new MutationObserver(markTargets)')
   expect(plan.client?.source).not.toContain('new MutationObserver(applyStyles)')
   expect(plan.client?.source).toContain('while (sheet.cssRules.length > 0) sheet.deleteRule(0)')
-  expect(plan.client?.source).toContain('return React.createElement(Original, props)')
+  expect(plan.client?.source).toContain('return Original')
 })
 
 test('keeps invalid component declarations visible instead of hiding them', () => {
@@ -161,6 +208,7 @@ test('writes the provider and manifest declaration as ordinary Draft source', as
     name: 'draft-plugin',
     dsh: { client: { platform: 'web' }, harmony: { patches: ['./existing.cjs'] } },
   }, null, 2)}\n`)
+  await writeFile(join(root, 'src/client.tsx'), 'export function apply(): void {}\n')
   const targets = [{ package: 'plugin-a', file: 'lib/client.js' }]
   const plan = analyzeAutomaticPatch(request(targets), [
     source('plugin-a', 'lib/client.js', 'export const title = "Original";\n'),
@@ -172,9 +220,11 @@ test('writes the provider and manifest declaration as ordinary Draft source', as
   }
   const patches = require(join(root, plan.provider.file)) as Array<{ id: string; expect: number }>
 
-  expect(result.files).toEqual([plan.provider.file, 'package.json'])
+  expect(result.files).toEqual([plan.provider.file, plan.client!.file, 'src/client.tsx', 'package.json'])
   expect(manifest.dsh.harmony.patches).toEqual(['./existing.cjs', `./${plan.provider.file}`])
   expect(patches).toMatchObject([{ id: plan.provider.patchIds[0], expect: 1 }])
+  await expect(readFile(join(root, plan.client!.file), 'utf8')).resolves.toContain('registerStudioElement')
+  await expect(readFile(join(root, 'src/client.tsx'), 'utf8')).resolves.toContain(plan.client!.export)
   await expect(writeAutomaticPatch(root, plan)).rejects.toThrow('already exists')
 })
 

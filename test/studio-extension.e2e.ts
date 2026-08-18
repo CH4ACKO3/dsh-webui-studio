@@ -217,29 +217,6 @@ try {
     return envelope.result.value
   }
 
-  const stableProfile = await call<StudioHarmonyProfile>('studio.harmony.profile', {})
-  assert.equal(stableProfile.order[0], 'dsh-harmony')
-  assert.ok(stableProfile.order.length >= 3)
-  assert.ok(Array.isArray(stableProfile.patchOrder))
-  const stableInspection = await call<StudioHarmonyInspection>('studio.harmony.inspectStable', {})
-  assert.ok(stableInspection.patches.every(patch => stableProfile.patchOrder.includes(patch.key)))
-  const reordered = [stableProfile.order[0]!, stableProfile.order[2]!, stableProfile.order[1]!, ...stableProfile.order.slice(3)]
-  const reorderedProfile = await call<StudioHarmonyProfileUpdateResult>('studio.harmony.updateProfile', {
-    order: reordered,
-    patchOrder: stableProfile.patchOrder,
-    disabled: stableProfile.disabled,
-  })
-  assert.equal(reorderedProfile.reload.state, 'succeeded')
-  assert.deepEqual(reorderedProfile.profile.order, reordered)
-  assert.deepEqual(reorderedProfile.profile.patchOrder, stableProfile.patchOrder)
-  const restoredProfile = await call<StudioHarmonyProfileUpdateResult>('studio.harmony.updateProfile', {
-    order: stableProfile.order,
-    patchOrder: stableProfile.patchOrder,
-    disabled: stableProfile.disabled,
-  })
-  assert.equal(restoredProfile.reload.state, 'succeeded')
-  assert.deepEqual(restoredProfile.profile.disabled, stableProfile.disabled)
-
   assert.deepEqual(await call<StudioWorkspaceState>('studio.workspace.get', {}), { openDraftIds: [] })
 
   const destination = join(root, 'saved-new-plugin')
@@ -275,6 +252,31 @@ try {
   const opened = started.project
   assert.ok(opened)
   assert.equal(opened.state, 'preview-pending')
+  const draftProfile = await call<StudioHarmonyProfile>('studio.drafts.harmony.profile', { draftId: created.id })
+  assert.equal(draftProfile.order[0], 'dsh-harmony')
+  assert.ok(draftProfile.order.includes(created.name))
+  assert.ok(Array.isArray(draftProfile.patchOrder))
+  const draftProfileInspection = await call<StudioHarmonyInspection>('studio.drafts.harmony.inspect', { draftId: created.id })
+  assert.ok(draftProfileInspection.patches.every(patch => draftProfile.patchOrder.includes(patch.key)))
+  const movable = draftProfile.order.slice(1)
+  assert.ok(movable.length >= 2)
+  const reordered = [draftProfile.order[0]!, movable[1]!, movable[0]!, ...movable.slice(2)]
+  const reorderedProfile = await call<StudioHarmonyProfileUpdateResult>('studio.drafts.harmony.updateProfile', {
+    draftId: created.id,
+    order: reordered,
+    patchOrder: draftProfile.patchOrder,
+    disabled: draftProfile.disabled,
+  })
+  assert.equal(reorderedProfile.reload.state, 'succeeded')
+  assert.deepEqual(reorderedProfile.profile.order, reordered)
+  const restoredProfile = await call<StudioHarmonyProfileUpdateResult>('studio.drafts.harmony.updateProfile', {
+    draftId: created.id,
+    order: draftProfile.order,
+    patchOrder: draftProfile.patchOrder,
+    disabled: draftProfile.disabled,
+  })
+  assert.equal(restoredProfile.reload.state, 'succeeded')
+  assert.deepEqual(restoredProfile.profile, draftProfile)
   const initialInspection = await call<StudioHarmonyInspection>('studio.harmony.inspect', { draftId: created.id })
   assert.equal(initialInspection.patches.find(patch => patch.key === 'studio-draft/preview-runtime')?.state, 'bound')
   const initialPatchedTarget = initialInspection.targets.find(target => target.package === 'studio-draft' && target.file === 'index.js')

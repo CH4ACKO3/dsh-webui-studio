@@ -23,6 +23,11 @@ interface RegistrationRecord<T> {
   subscriptions: Array<() => void>
 }
 
+interface ElementRegistrationGroup {
+  boundaryKey: string
+  records: Array<RegistrationRecord<StudioElementRegistration>>
+}
+
 function text(value: string, name: string): void {
   if (!value.trim()) throw new Error(`${name} must not be empty`)
 }
@@ -157,7 +162,7 @@ function subscribe(
 }
 
 export class StudioPreviewRegistry implements StudioBrowserRuntime {
-  readonly #elements = new Map<string, RegistrationRecord<StudioElementRegistration>>()
+  readonly #elements = new Map<string, ElementRegistrationGroup>()
   readonly #boundaries = new Map<string, string>()
   readonly #globals = new Map<string, RegistrationRecord<StudioVariablesRegistration>>()
   readonly #sets = new Map<string, Promise<void>>()
@@ -174,22 +179,38 @@ export class StudioPreviewRegistry implements StudioBrowserRuntime {
     for (const segment of input.element.boundary.path) text(segment, 'Studio surface path segment')
     variables(input.element.variables ?? [], input.bindings)
     const key = `${input.owner}\0${input.element.id}`
-    if (this.#elements.has(key)) throw new Error(`Studio element already registered: ${input.owner}/${input.element.id}`)
     const boundaryKey = `${input.element.boundary.surfaceId}\0${JSON.stringify(input.element.boundary.path)}`
     const boundaryOwner = this.#boundaries.get(boundaryKey)
-    if (boundaryOwner !== undefined) throw new Error(`Studio boundary already registered by ${boundaryOwner}`)
+    if (boundaryOwner !== undefined && boundaryOwner !== key) throw new Error(`Studio boundary already registered by ${boundaryOwner}`)
+    const group = this.#elements.get(key)
+    if (group !== undefined) {
+      const element = group.records[0]!.registration.element
+      if (group.boundaryKey !== boundaryKey || element.label !== input.element.label
+        || element.source.file !== input.element.source.file) {
+        throw new Error(`Studio element contribution does not match ${input.owner}/${input.element.id}`)
+      }
+      variables(
+        [...group.records.flatMap(item => item.registration.element.variables ?? []), ...(input.element.variables ?? [])],
+        Object.assign({}, ...group.records.map(item => item.registration.bindings), input.bindings),
+      )
+    }
     const registration = structuredClone({ owner: input.owner, element: input.element }) as Omit<StudioElementRegistration, 'bindings'>
     const record: RegistrationRecord<StudioElementRegistration> = {
       registration: { ...registration, bindings: input.bindings },
       subscriptions: subscribe(input.bindings, this.changed),
     }
-    this.#elements.set(key, record)
-    this.#boundaries.set(boundaryKey, `${input.owner}/${input.element.id}`)
+    const active = group ?? { boundaryKey, records: [] }
+    active.records.push(record)
+    this.#elements.set(key, active)
+    this.#boundaries.set(boundaryKey, key)
     this.changed()
     return () => {
-      if (this.#elements.get(key) !== record) return
-      this.#elements.delete(key)
-      this.#boundaries.delete(boundaryKey)
+      if (this.#elements.get(key) !== active || !active.records.includes(record)) return
+      active.records.splice(active.records.indexOf(record), 1)
+      if (active.records.length === 0) {
+        this.#elements.delete(key)
+        this.#boundaries.delete(boundaryKey)
+      }
       for (const stop of record.subscriptions) stop()
       this.changed()
     }
@@ -215,11 +236,16 @@ export class StudioPreviewRegistry implements StudioBrowserRuntime {
   }
 
   snapshot(): StudioRegistrySnapshot {
-    const elements: StudioElementSnapshot[] = [...this.#elements.values()].map(({ registration }) => ({
-      owner: registration.owner,
-      element: registration.element,
-      values: values(registration.element.variables ?? [], registration.bindings),
-    }))
+    const elements: StudioElementSnapshot[] = [...this.#elements.values()].map(group => {
+      const first = group.records[0]!.registration
+      const nodes = group.records.flatMap(record => record.registration.element.variables ?? [])
+      const bindings = Object.assign({}, ...group.records.map(record => record.registration.bindings))
+      return {
+        owner: first.owner,
+        element: { ...first.element, variables: nodes },
+        values: values(nodes, bindings),
+      }
+    })
     const globals: StudioVariablesSnapshot[] = [...this.#globals.values()].map(({ registration }) => ({
       owner: registration.owner,
       variables: registration.variables,
@@ -248,16 +274,22 @@ export class StudioPreviewRegistry implements StudioBrowserRuntime {
 
   async #applySet(
     target: StudioVariableTarget,
-    record: RegistrationRecord<StudioElementRegistration> | RegistrationRecord<StudioVariablesRegistration>,
+    record: ElementRegistrationGroup | RegistrationRecord<StudioVariablesRegistration>,
   ): Promise<void> {
     const current = target.scope === 'element'
       ? this.#elements.get(`${target.owner}\0${target.elementId}`)
       : this.#globals.get(target.owner)
     if (current !== record) throw new Error('Studio variable registration is no longer active')
+    const elementRecord = target.scope === 'element'
+      ? (record as ElementRegistrationGroup).records.find(item => flattenVariableTree(item.registration.element.variables ?? [])
+        .some(definition => definition.id === target.variableId))
+      : undefined
     const nodes = target.scope === 'element'
-      ? (record.registration as StudioElementRegistration).element.variables ?? []
-      : (record.registration as StudioVariablesRegistration).variables
-    const bindings = record.registration.bindings
+      ? elementRecord?.registration.element.variables ?? []
+      : (record as RegistrationRecord<StudioVariablesRegistration>).registration.variables
+    const bindings = target.scope === 'element'
+      ? elementRecord?.registration.bindings ?? {}
+      : (record as RegistrationRecord<StudioVariablesRegistration>).registration.bindings
     const definition = flattenVariableTree(nodes).find(item => item.id === target.variableId)
     if (definition === undefined) throw new Error(`Unknown Studio variable ${target.variableId}`)
     variableValue(definition, target.value)
@@ -267,7 +299,8 @@ export class StudioPreviewRegistry implements StudioBrowserRuntime {
   }
 
   dispose(): void {
-    for (const record of [...this.#elements.values(), ...this.#globals.values()]) {
+    const records = [...this.#elements.values()].flatMap(group => group.records)
+    for (const record of [...records, ...this.#globals.values()]) {
       for (const stop of record.subscriptions) stop()
     }
     this.#elements.clear()

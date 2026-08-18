@@ -11,6 +11,17 @@ import type { StudioWorkspaceStore } from './workspace.js'
 
 const previewState = vi.hoisted(() => ({
   project: { name: 'draft-plugin', root: '', state: 'preview-pending' as const, graphRev: 'graph-1' },
+  profile: {
+    dir: '/draft/profiles/web',
+    order: ['dsh-harmony', 'draft-plugin'],
+    patchOrder: ['draft-plugin/one'],
+    disabled: [] as string[],
+    plugins: [],
+    orderViolations: [],
+    patchOrderViolations: [],
+    incompatibilities: [],
+  },
+  updateProfile: vi.fn(),
 }))
 
 vi.mock('./preview.js', () => ({
@@ -26,6 +37,12 @@ vi.mock('./preview.js', () => ({
     async activate(graphRev: string) { return { ...previewState.project, state: 'active', graphRev } }
     async applyBuild() { return { ...previewState.project, state: 'preview-pending', graphRev: 'graph-2' } }
     async inspect() { return { harmony: { patches: [], targets: [] }, dependencies: [] } }
+    async profile() { return previewState.profile }
+    async updateProfile(input: { order?: string[]; patchOrder?: string[]; disabled?: string[] }) {
+      previewState.updateProfile(input)
+      previewState.profile = { ...previewState.profile, ...input }
+      return { profile: previewState.profile, generation: 2, reload: { state: 'succeeded' }, clientGraphRev: 'graph-2' }
+    }
     async readPatchTarget(packageName: string, file: string) {
       return { package: packageName, file, version: '1.2.3', source: 'const first = "Original";\nconst second = "Original";\n' }
     }
@@ -82,85 +99,50 @@ function backend(
 }
 
 describe('StudioBackend', () => {
-  it('reads and transactionally updates the stable Host Harmony profile without a Draft id', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'dsh-studio-backend-'))
-    temporaryDirectories.push(root)
-    const profile = {
-      dir: '/home/profiles/web',
-      order: ['dsh-harmony', 'plugin-a'],
-      patchOrder: ['plugin-a/one'],
-      disabled: [],
-      plugins: [],
-      orderViolations: [],
-      patchOrderViolations: [],
-      incompatibilities: [],
-    }
-    const harmony = {
-      profileDir: profile.dir,
-      profile: vi.fn(() => profile),
-      inspect: vi.fn(() => ({ patches: [], targets: [] })),
-      updateProfile: vi.fn(async (input: { order?: string[]; patchOrder?: string[]; disabled?: string[] }) => ({
-        profile: { ...profile, ...input },
-        generation: 2,
-        reload: { state: 'succeeded' },
-        clientGraphRev: 'graph-2',
-      })),
-    } as unknown as StudioHarmonyService
-    const studio = backend(record(root), undefined, harmony)
-
-    const current = await studio.call(request('studio.harmony.profile', {}))
-    const updated = await studio.call(request('studio.harmony.updateProfile', {
-      order: ['dsh-harmony', 'plugin-a'],
-      patchOrder: ['plugin-a/one'],
-      disabled: ['plugin-a/*'],
-    }))
-
-    expect(current.result).toEqual({ ok: true, value: profile })
-    expect(harmony.updateProfile).toHaveBeenCalledWith({
-      order: ['dsh-harmony', 'plugin-a'],
-      patchOrder: ['plugin-a/one'],
-      disabled: ['plugin-a/*'],
-    })
-    expect(updated.result).toMatchObject({ ok: true, value: {
-      profile: { disabled: ['plugin-a/*'] }, generation: 2, clientGraphRev: 'graph-2',
-    } })
-  })
-
-  it('returns the stable Host Loader inventory without a Draft id', async () => {
+  it('reads and transactionally updates the active Draft Preview Harmony profile', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-studio-backend-'))
     temporaryDirectories.push(root)
     const draft = record(root)
-    const inventory = { entries: [{
-      entryId: 'webserver', moduleName: '@deepseek-ai/dsh-host-webserver', enabled: true, fiberPhase: 'active' as const,
-    }] }
-    const agents = { create: vi.fn(async () => ({ dispose: vi.fn(async () => {}) })) } as unknown as AgentRegistry
-    const studio = new StudioBackend(
-      { profileDir: '/home/profiles/web' } as StudioHarmonyService,
-      agents,
-      {} as SubprocessRuntime,
-      { list: vi.fn(async () => [draft]) } as unknown as StudioDraftRegistry,
-      { read: vi.fn(), write: vi.fn() } as unknown as StudioWorkspaceStore,
-      { run: vi.fn() } as unknown as StudioCommandRunner,
-      'http://127.0.0.1:3081',
-      () => inventory,
-    )
+    previewState.profile = {
+      ...previewState.profile,
+      order: ['dsh-harmony', draft.name],
+      patchOrder: [`${draft.name}/one`],
+      disabled: [],
+    }
+    previewState.updateProfile.mockClear()
+    const studio = backend(draft)
 
-    expect((await studio.call(request('studio.plugins.list', {}))).result).toEqual({ ok: true, value: inventory })
+    const current = await studio.call(request('studio.drafts.harmony.profile', { draftId: draft.id }))
+    const updated = await studio.call(request('studio.drafts.harmony.updateProfile', {
+      draftId: draft.id,
+      order: ['dsh-harmony', draft.name],
+      patchOrder: [`${draft.name}/one`],
+      disabled: [`${draft.name}/*`],
+    }))
+
+    expect(current.result).toMatchObject({ ok: true, value: { dir: '/draft/profiles/web', disabled: [] } })
+    expect(previewState.updateProfile).toHaveBeenCalledWith({
+      order: ['dsh-harmony', draft.name],
+      patchOrder: [`${draft.name}/one`],
+      disabled: [`${draft.name}/*`],
+    })
+    expect(updated.result).toMatchObject({ ok: true, value: {
+      profile: { disabled: [`${draft.name}/*`] }, generation: 2, clientGraphRev: 'graph-2',
+    } })
   })
 
-  it('rejects malformed Harmony profile updates before calling the service', async () => {
+  it('rejects malformed Draft Preview profile updates before calling the worker', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-studio-backend-'))
     temporaryDirectories.push(root)
-    const harmony = {
-      profileDir: '/home/profiles/web',
-      updateProfile: vi.fn(),
-    } as unknown as StudioHarmonyService
-    const response = await backend(record(root), undefined, harmony).call(request('studio.harmony.updateProfile', {
+    const draft = record(root)
+    previewState.updateProfile.mockClear()
+    const response = await backend(draft).call(request('studio.drafts.harmony.updateProfile', {
+      draftId: draft.id,
       disabled: ['plugin-a/*', 1],
     }))
 
     expect(response.result).toMatchObject({ ok: false, error: { message: 'disabled must be an array of non-empty strings' } })
-    expect(harmony.updateProfile).not.toHaveBeenCalled()
+    expect(previewState.updateProfile).not.toHaveBeenCalled()
   })
 
   it('lists persistent Drafts and starts one isolated Preview runtime', async () => {
@@ -344,8 +326,10 @@ describe('StudioBackend', () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-studio-backend-'))
     temporaryDirectories.push(root)
     await writeFile(join(root, 'package.json'), `${JSON.stringify({
-      name: 'draft-plugin', dsh: { client: { platform: 'web' }, harmony: { patches: [] } },
+      name: 'draft-plugin', packageManager: 'npm@11', dsh: { client: { platform: 'web' }, harmony: { patches: [] } },
     })}\n`)
+    await mkdir(join(root, 'src'))
+    await writeFile(join(root, 'src/client.tsx'), 'export function apply(): void {}\n')
     const draft = record(root)
     const studio = backend(draft)
     const payload = {
@@ -354,6 +338,11 @@ describe('StudioBackend', () => {
       targets: [{ package: 'target-plugin', file: 'lib/client.js' }],
       text: 'Original',
       replacement: 'Changed',
+      clientFile: 'src/client.tsx',
+      boundary: { surfaceId: 'home', path: ['hero'] },
+      selector: '&',
+      elementId: 'hero',
+      elementLabel: 'Hero',
     }
 
     const analyzed = await studio.call(request('studio.patches.analyzeAutomatic', payload))
@@ -365,7 +354,9 @@ describe('StudioBackend', () => {
     await expect(readFile(join(root, 'package.json'), 'utf8')).resolves.not.toContain('patch.auto-')
 
     const created = await studio.call(request('studio.patches.createAutomatic', payload))
-    expect(created.result).toMatchObject({ ok: true, value: { files: [expect.stringMatching(/^patch\.auto-/), 'package.json'] } })
+    expect(created.result).toMatchObject({ ok: true, value: { files: [
+      expect.stringMatching(/^patch\.auto-/), expect.stringMatching(/^src\/client\.dsh-studio-auto-/), 'src/client.tsx', 'package.json',
+    ] } })
     await expect(readFile(join(root, 'package.json'), 'utf8')).resolves.toContain('patch.auto-')
   })
 

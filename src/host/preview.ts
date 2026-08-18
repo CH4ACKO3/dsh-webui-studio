@@ -5,6 +5,8 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type {
   StudioDraftRecord,
+  StudioHarmonyProfile,
+  StudioHarmonyProfileUpdateResult,
   StudioPreviewInspection,
   StudioProjectState,
   StudioSourceCandidate,
@@ -243,6 +245,14 @@ export class StudioPreviewSupervisor {
 
   async inspect(input: { package?: string; file?: string } = {}): Promise<StudioPreviewInspection> {
     return this.worker<StudioPreviewInspection>('inspect', input)
+  }
+
+  async profile(): Promise<StudioHarmonyProfile> {
+    return this.worker<StudioHarmonyProfile>('profile', {})
+  }
+
+  async updateProfile(input: { order?: string[]; patchOrder?: string[]; disabled?: string[] }): Promise<StudioHarmonyProfileUpdateResult> {
+    return this.worker<StudioHarmonyProfileUpdateResult>('update-profile', input)
   }
 
   async resolveSource(source: StudioSourceLocation): Promise<StudioSourceCandidate> {

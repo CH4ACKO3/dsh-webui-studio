@@ -12,12 +12,12 @@ import type {
   StudioDraftRecord,
   StudioDraftView,
   StudioHarmonyInspection,
+  StudioHarmonyProfile,
   StudioHarmonyProfileUpdateResult,
   StudioHarmonyService,
   StudioElementStyleSource,
   StudioPreviewStatus,
   StudioPreviewUpdate,
-  StudioPluginInventorySnapshot,
   StudioProjectFile,
   StudioProjectState,
   StudioReadinessReport,
@@ -77,8 +77,28 @@ function automaticPatchRequest(payload: unknown): StudioAutomaticPatchRequest {
     return { package: target.package, file: target.file }
   })
   if (input.kind === 'replace-string') {
-    if (typeof input.text !== 'string' || typeof input.replacement !== 'string') throw new Error('automatic string Patch requires text and replacement strings')
-    return { kind: input.kind, targets, text: input.text, replacement: input.replacement }
+    if (typeof input.text !== 'string' || typeof input.replacement !== 'string' || typeof input.clientFile !== 'string'
+      || typeof input.selector !== 'string' || typeof input.elementId !== 'string' || typeof input.elementLabel !== 'string'
+      || typeof input.boundary !== 'object' || input.boundary === null || !Array.isArray((input.boundary as Record<string, unknown>).path)) {
+      throw new Error('automatic content Patch requires text, replacement, client source, boundary, selector, and element identity')
+    }
+    const boundary = input.boundary as Record<string, unknown>
+    if (typeof boundary.surfaceId !== 'string' || !(boundary.path as unknown[]).every(item => typeof item === 'string')) {
+      throw new Error('automatic content Patch boundary is invalid')
+    }
+    if (input.targetSelector !== undefined && (typeof input.targetSelector !== 'string' || input.targetSelector === '')) {
+      throw new Error('automatic content Patch target selector is invalid')
+    }
+    if (input.elementSourceFile !== undefined && (typeof input.elementSourceFile !== 'string' || input.elementSourceFile === '')) {
+      throw new Error('automatic content Patch Element source is invalid')
+    }
+    return {
+      kind: input.kind, targets, text: input.text, replacement: input.replacement, clientFile: input.clientFile,
+      boundary: { surfaceId: boundary.surfaceId, path: boundary.path as string[] },
+      ...(input.targetSelector === undefined ? {} : { targetSelector: input.targetSelector as string }),
+      selector: input.selector, elementId: input.elementId, elementLabel: input.elementLabel,
+      ...(input.elementSourceFile === undefined ? {} : { elementSourceFile: input.elementSourceFile as string }),
+    }
   }
   if (input.kind !== 'css-style' || typeof input.component !== 'string' || typeof input.clientFile !== 'string'
     || typeof input.selector !== 'string' || typeof input.elementId !== 'string' || typeof input.elementLabel !== 'string'
@@ -252,6 +272,14 @@ class StudioDraftController implements StudioAgentWorkspace {
     return (await this.preview.inspect(input)).harmony
   }
 
+  profile(): Promise<StudioHarmonyProfile> {
+    return this.preview.profile()
+  }
+
+  updateProfile(input: { order?: string[]; patchOrder?: string[]; disabled?: string[] }): Promise<StudioHarmonyProfileUpdateResult> {
+    return this.preview.updateProfile(input)
+  }
+
   async readiness(): Promise<StudioReadinessReport> {
     const inspection = await this.preview.inspect()
     return inspectReadiness(
@@ -342,7 +370,6 @@ export class StudioBackend {
     private readonly workspace: StudioWorkspaceStore,
     private readonly commands: StudioCommandRunner,
     private readonly parentOrigin: string,
-    private readonly pluginInventory: () => StudioPluginInventorySnapshot = () => ({ entries: [] }),
   ) {}
 
   async call(message: StudioClientRequest): Promise<StudioServerResponse> {
@@ -361,10 +388,10 @@ export class StudioBackend {
           records.map(record => record.id),
         ))
       }
-      if (method === 'studio.plugins.list') return success(rpcId, this.pluginInventory())
-      if (method === 'studio.harmony.profile') return success(rpcId, this.harmony.profile())
-      if (method === 'studio.harmony.inspectStable') return success(rpcId, this.harmony.inspect())
-      if (method === 'studio.harmony.updateProfile') {
+      const controller = await this.controller(draftId(payload))
+      if (method === 'studio.drafts.harmony.profile') return success(rpcId, await controller.profile())
+      if (method === 'studio.drafts.harmony.inspect') return success(rpcId, await controller.inspectHarmony({}))
+      if (method === 'studio.drafts.harmony.updateProfile') {
         const input = objectPayload(payload)
         const order = optionalStringList(input.order, 'order')
         const patchOrder = optionalStringList(input.patchOrder, 'patchOrder')
@@ -374,9 +401,8 @@ export class StudioBackend {
           ...(patchOrder === undefined ? {} : { patchOrder }),
           ...(disabled === undefined ? {} : { disabled }),
         }
-        return success<StudioHarmonyProfileUpdateResult>(rpcId, await this.harmony.updateProfile(update))
+        return success<StudioHarmonyProfileUpdateResult>(rpcId, await controller.updateProfile(update))
       }
-      const controller = await this.controller(draftId(payload))
       if (method === 'studio.drafts.rename') {
         const label = objectPayload(payload).label
         if (typeof label !== 'string') throw new Error('Draft name is required')

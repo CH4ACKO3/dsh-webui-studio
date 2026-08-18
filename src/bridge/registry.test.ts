@@ -48,7 +48,7 @@ describe('StudioPreviewRegistry', () => {
       bindings: { density: { get: () => density, set: (value: string | number | boolean) => { density = Number(value) } } },
     }
     registry.registerElement(registration)
-    expect(() => registry.registerElement(registration)).toThrow('already registered')
+    expect(() => registry.registerElement(registration)).toThrow('Duplicate Studio variable node id density')
     expect(() => registry.registerElement({
       ...registration,
       element: { ...registration.element, id: 'other' },
@@ -59,6 +59,34 @@ describe('StudioPreviewRegistry', () => {
       .rejects.toThrow('above its maximum')
     await registry.set({ scope: 'element', owner: 'draft', elementId: 'toolbar', variableId: 'density', value: 2 })
     expect(density).toBe(2)
+  })
+
+  it('merges independent variable groups contributed to the same Element', async () => {
+    let color = '#235be6'
+    let text = 'Explore'
+    const registry = new StudioPreviewRegistry(() => {})
+    const identity = {
+      id: 'hero', label: 'Hero', boundary: { surfaceId: 'home', path: ['hero'] }, source: { file: 'src/hero.ts' },
+    }
+    const removeAppearance = registry.registerElement({
+      owner: 'draft', element: { ...identity, variables: [{ kind: 'group', id: 'appearance', label: 'Appearance', children: [
+        { kind: 'variable', id: 'color', label: 'Color', control: 'color' },
+      ] }] }, bindings: { color: { get: () => color, set: value => { color = String(value) } } },
+    })
+    registry.registerElement({
+      owner: 'draft', element: { ...identity, variables: [{ kind: 'group', id: 'content', label: 'Content', children: [
+        { kind: 'variable', id: 'text', label: 'Text', control: 'string' },
+      ] }] }, bindings: { text: { get: () => text, set: value => { text = String(value) } } },
+    })
+
+    expect(registry.snapshot().elements).toMatchObject([{
+      element: { id: 'hero', variables: [{ id: 'appearance' }, { id: 'content' }] },
+      values: { color: '#235be6', text: 'Explore' },
+    }])
+    await registry.set({ scope: 'element', owner: 'draft', elementId: 'hero', variableId: 'text', value: 'Discover' })
+    expect(text).toBe('Discover')
+    removeAppearance()
+    expect(registry.snapshot().elements[0]).toMatchObject({ element: { variables: [{ id: 'content' }] }, values: { text: 'Discover' } })
   })
 
   it('rejects duplicate node ids across variable-tree branches', () => {

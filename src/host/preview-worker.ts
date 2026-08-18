@@ -4,6 +4,7 @@ import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import {
   STUDIO_PATH,
   STUDIO_PREVIEW_API_PATH,
+  type StudioHarmonyProfileUpdateResult,
   type StudioHarmonyService,
   type StudioSourceLocation,
 } from '../contracts.js'
@@ -94,6 +95,27 @@ export function applyPreviewWorker(
                 dependencies: harmony.inspectDependencies(opened.snapshot().name),
               },
             })
+          }
+          if (method === 'profile') {
+            return json(response, 200, { ok: true, value: harmony.profile() })
+          }
+          if (method === 'update-profile') {
+            const order = payload.order
+            const patchOrder = payload.patchOrder
+            const disabled = payload.disabled
+            const validList = (value: unknown): value is string[] => Array.isArray(value)
+              && value.every(item => typeof item === 'string' && item.length > 0)
+            if ((order !== undefined && !validList(order))
+              || (patchOrder !== undefined && !validList(patchOrder))
+              || (disabled !== undefined && !validList(disabled))) {
+              throw new Error('Harmony profile order, patchOrder, and disabled must contain non-empty strings')
+            }
+            const value: StudioHarmonyProfileUpdateResult = await harmony.updateProfile({
+              ...(order === undefined ? {} : { order }),
+              ...(patchOrder === undefined ? {} : { patchOrder }),
+              ...(disabled === undefined ? {} : { disabled }),
+            })
+            return json(response, 200, { ok: true, value })
           }
           if (method === 'resolve-source') {
             const source = payload.source as Partial<StudioSourceLocation> | undefined

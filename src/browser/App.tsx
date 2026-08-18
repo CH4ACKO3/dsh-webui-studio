@@ -1021,22 +1021,24 @@ export function App(): JSX.Element {
   useEffect(() => {
     if (selectedDraftId === undefined || draftElements.length === 0) return
     const draftId = selectedDraftId
-    void callStudio<StudioElementStyleSource[]>('studio.elements.styles', { draftId }).then(sources => {
-      if (draftIdRef.current !== draftId) return
-      setElementStyles(current => {
-        const next = { ...current }
-        for (const element of draftElements) {
-          const key = `${draftId}\0${element.owner}\0${element.element.id}`
-          if (elementStyleBaselines.current.has(key)) continue
-          const rules = sources.find(item => item.elementId === element.element.id)?.rules ?? []
-          next[key] = rules
-          elementStyleBaselines.current.set(key, JSON.stringify(rules))
-        }
-        return next
+    void previewUpdateQueue.current
+      .then(() => callStudio<StudioElementStyleSource[]>('studio.elements.styles', { draftId }))
+      .then(sources => {
+        if (draftIdRef.current !== draftId) return
+        setElementStyles(current => {
+          const next = { ...current }
+          for (const element of draftElements) {
+            const key = `${draftId}\0${element.owner}\0${element.element.id}`
+            if (elementStyleBaselines.current.has(key)) continue
+            const rules = sources.find(item => item.elementId === element.element.id)?.rules ?? []
+            next[key] = rules
+            elementStyleBaselines.current.set(key, JSON.stringify(rules))
+          }
+          return next
+        })
+      }).catch(cause => {
+        if (draftIdRef.current === draftId) setError(cause instanceof StudioRpcError ? cause.message : String(cause))
       })
-    }).catch(cause => {
-      if (draftIdRef.current === draftId) setError(cause instanceof StudioRpcError ? cause.message : String(cause))
-    })
   }, [draftElementIdentity, selectedDraftId])
 
   useEffect(() => {
@@ -1326,8 +1328,10 @@ export function App(): JSX.Element {
 
   const applyDraftBuild = async (draftId: string, preserveElementState = false): Promise<StudioBuildResult> => {
     const result = await callStudio<StudioBuildResult>('studio.project.build', { draftId })
+    const nextInspection = await callStudio<StudioHarmonyInspection>('studio.harmony.inspect', { draftId })
     setBuildOutputs(current => ({ ...current, [draftId]: result.build }))
     updateDraftProject(draftId, result.project)
+    if (draftIdRef.current === draftId) setInspection(nextInspection)
     if (!preserveElementState) clearElementModifications(draftId)
     reloadPreview(draftId)
     return result
@@ -2461,7 +2465,8 @@ export function App(): JSX.Element {
                 </section>
               </section>}
 
-          <PluginManagement drafts={drafts} view={leftPanel === 'instance' ? undefined : leftPanel} />
+          <PluginManagement selectedDraft={selectedDraft}
+            view={leftPanel === 'instance' ? undefined : leftPanel} />
         </div>
         {!terminalExpanded && terminal}
         {!leftSidebarCollapsed && <span className="sidebar-resizer" data-side="left" role="separator" tabIndex={0}
@@ -2649,9 +2654,9 @@ export function App(): JSX.Element {
                   </dd></div>}
                 </dl>
                 <div className="selection-actions">
-                  <Button size="small" variant="primary" disabled={selection.react?.component === undefined
-                    || selection.react.source?.resolved?.package === undefined || automaticPatchScope(selection) === undefined
-                    || selectedDraftId === undefined}
+                  <Button size="small" variant="primary" disabled={selection.react?.source?.resolved?.package === undefined
+                    || selectedDraftId === undefined || ((selection.text.trim() === '') && (matchedElement !== undefined
+                      || selection.react.component === undefined || automaticPatchScope(selection) === undefined))}
                     onClick={() => setAutomaticPatchOpen(true)}>{t('automaticPatchAction')}</Button>
                 </div>
                 {selection.react !== undefined && Object.keys(selection.react.props).length > 0 && <details>
@@ -2783,10 +2788,13 @@ export function App(): JSX.Element {
     {terminalExpanded && terminal !== null && createPortal(terminal, document.body)}
     <CreateDraftDialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} onCreate={createDraft} />
     <AutomaticPatchDialog open={automaticPatchOpen} draftId={selectedDraftId} selection={selection} files={files}
+      existingElement={matchedElement} allowCss={matchedElement === undefined}
       onClose={() => setAutomaticPatchOpen(false)} onCreated={async result => {
         if (selectedDraftId === undefined) return
         await applyDraftBuild(selectedDraftId)
         setFiles(await callStudio<StudioProjectFile[]>('studio.project.files', { draftId: selectedDraftId }))
+        setRightSidebarCollapsed(false)
+        setPanel('elements')
         setElementSourceMessage(t('automaticPatchCreated', { count: result.provider.patchIds.length }))
       }} onAgent={nextPrompt => {
         setAutomaticPatchOpen(false)

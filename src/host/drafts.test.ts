@@ -39,6 +39,7 @@ describe('StudioDraftRegistry', () => {
       name: 'dsh-test-draft',
       scripts: { 'build:client': 'tsdown --config-loader unrun' },
       dependencies: { 'dsh-harmony-react': '^0.2.1' },
+      devDependencies: { '@tsdown/css': '0.22.14', tsdown: '0.22.14' },
       dsh: { client: { platform: 'web', immediately: true } },
     })
     await expect(readFile(join(draft.root, 'src/client.tsx'), 'utf8')).resolves.toContain('export function apply')
