@@ -1,0 +1,15 @@
+FROM node:24.11.1-bookworm-slim
+
+WORKDIR /workspace
+COPY package.json package-lock.json ./
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates git \
+  && rm -rf /var/lib/apt/lists/* \
+  && npm install --global "@deepseek-ai/dsh@$(node -p \"require('./package.json').devDependencies['@deepseek-ai/dsh']\")"
+
+RUN npm ci --ignore-scripts
+COPY . .
+RUN npm run build
+
+ENTRYPOINT ["./scripts/remote-dev-entrypoint.sh"]

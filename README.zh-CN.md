@@ -165,6 +165,9 @@ Draft package 必须：
 | `npm run check` | 运行 typecheck、测试、构建和 tarball 全新安装集成验证 |
 | `npm run test:integration` | 将 tarball 安装到全新的 DSH home，再端到端验证 Host、Draft、Preview、构建、激活与停止 |
 
+如需在远程 Docker 主机上运行相互隔离的 Agent 开发环境，请参阅
+[`docs/remote-development.md`](docs/remote-development.md)。
+
 集成测试需要 Harmony build 已公开兼容性说明中列出的 API。
 
 ## 设计边界

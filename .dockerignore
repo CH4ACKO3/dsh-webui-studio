@@ -1,0 +1,10 @@
+.git
+.codex
+.impeccable
+coverage
+dist
+lib
+node_modules
+outputs
+work
+*.log

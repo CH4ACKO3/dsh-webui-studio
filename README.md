@@ -178,6 +178,9 @@ A Draft package must:
 | `npm run check` | Run typecheck, tests, build, and packed fresh-install integration |
 | `npm run test:integration` | Pack and install the tarball in a fresh DSH home, then exercise Host, Draft, Preview, build, activation, and shutdown end to end |
 
+For isolated Agent environments on a remote Docker host, see
+[`docs/remote-development.md`](docs/remote-development.md).
+
 The integration test requires a Harmony build that exposes the APIs described
 in the compatibility note above.
 

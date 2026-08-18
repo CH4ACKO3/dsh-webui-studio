@@ -1,0 +1,23 @@
+services:
+  studio:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    init: true
+    network_mode: host
+    environment:
+      DSH_HOME: /var/lib/dsh
+      DSH_STUDIO_PREVIEW_PORT_RANGE: ${PREVIEW_PORT_RANGE:-13100-13115}
+      NPM_CONFIG_CACHE: /var/cache/npm
+      npm_config_store_dir: /var/cache/pnpm
+      STUDIO_PORT: ${STUDIO_PORT:-13081}
+    volumes:
+      - dsh-home:/var/lib/dsh
+      - npm-cache:/var/cache/npm
+      - pnpm-store:/var/cache/pnpm
+    stop_grace_period: 15s
+
+volumes:
+  dsh-home:
+  npm-cache:
+  pnpm-store:

@@ -58,6 +58,7 @@
     "test": "vitest run",
     "test:integration": "npm run build && node test/studio-extension.e2e.ts",
     "check": "npm run typecheck && npm test && npm run test:integration",
+    "remote": "node scripts/remote-studio.ts",
     "prepublishOnly": "npm run check",
     "prepare": "npm run build"
   },
