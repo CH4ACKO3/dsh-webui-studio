@@ -79,7 +79,7 @@ import { CreateDraftDialog } from './CreateDraftDialog'
 import { HarmonyTargets } from './HarmonyTargets'
 import { PluginManagement } from './PluginManagement'
 import { SettingsDialog, SettingsIcon } from './SettingsDialog'
-import { AutomaticPatchDialog } from './AutomaticPatchDialog'
+import { AutomaticPatchDialog, automaticPatchScope } from './AutomaticPatchDialog'
 import {
   boundedBridgeText,
   isBridgeEnvelope,
@@ -109,7 +109,7 @@ interface ConversationRow {
 
 const panels = ['elements', 'selection', 'source', 'build', 'agent'] as const
 type Panel = typeof panels[number]
-const leftPanels = ['instance', 'plugins'] as const
+const leftPanels = ['instance', 'plugins', 'patches'] as const
 type LeftPanel = typeof leftPanels[number]
 type InstanceOperation = 'start' | 'stop' | 'restart'
 type PreviewConnection = {
@@ -2348,7 +2348,11 @@ export function App(): JSX.Element {
         <div className="project-body sidebar-content">
           <Tabs id="left-sidebar" className="left-sidebar-tabs" label={t('controlPages')} value={leftPanel}
             onChange={(value: LeftPanel) => setLeftPanel(value)}
-            options={[{ value: 'instance', label: t('instanceStatus') }, { value: 'plugins', label: t('pluginManagement') }]} />
+            options={[
+              { value: 'instance', label: t('instanceStatus') },
+              { value: 'plugins', label: t('pluginManagement') },
+              { value: 'patches', label: t('patchManagement') },
+            ]} />
           {leftPanel === 'instance' && drafts.length === 0
             ? <EmptyState title={t('createFirstDraft')} description={t('createFirstDraftDescription')}
                 action={<Button size="small" variant="primary" onClick={() => setCreateDialogOpen(true)}>{t('draftNew')}</Button>} />
@@ -2401,12 +2405,63 @@ export function App(): JSX.Element {
                   <span>{selectedDraft.exportedAt === undefined ? t('draftDestinationPending') : t('draftDestinationSaved')}</span>
                 </div>}
                 {selectedDraft.runtime.error !== undefined && <Notice tone="danger">{selectedDraft.runtime.error}</Notice>}
+                <section className="instance-preview-section" aria-labelledby="instance-preview-heading">
+                  <div id="instance-preview-heading" className="control-section-heading">
+                    <div><strong>{t('livePreview')}</strong><span>{t('previewInteractionCanvas')}</span></div>
+                  </div>
+                  <div className="preview-controls">
+                    <div className="preview-mode-field" data-mode={previewMode} data-disabled={previewUrl === undefined || undefined}>
+                      <div className="preview-mode-heading">
+                        <strong>{t('interactionMode')}</strong>
+                        <span>{previewMode === 'browse' ? t('interactionBrowseDescription') : t('interactionInspectDescription')}</span>
+                      </div>
+                      <SegmentedControl className="preview-mode-control" label={t('previewInteractionMode')} value={previewMode}
+                        options={[
+                          { value: 'browse', label: t('browse'), disabled: previewUrl === undefined },
+                          { value: 'inspect', label: t('inspect'), disabled: previewUrl === undefined },
+                        ]} onChange={changePreviewMode} />
+                    </div>
+                    <div className="preview-resolution-line">
+                      <label><span>W</span><Input type="number" min={1} value={previewViewport.width}
+                        aria-label={t('viewportWidth')} onChange={event => changePreviewDimension('width', event.target.valueAsNumber)} /></label>
+                      <label><span>H</span><Input type="number" min={1} value={previewViewport.height}
+                        aria-label={t('viewportHeight')} onChange={event => changePreviewDimension('height', event.target.valueAsNumber)} /></label>
+                    </div>
+                    <div className="preview-canvas-line">
+                      <div className="preview-zoom-control" aria-label={t('previewZoom')}>
+                        <Button size="small" className="preview-zoom-step" onClick={() => changePreviewScale(previewScale / 1.25)}
+                          aria-label={t('zoomOut')}>-</Button>
+                        <span onWheel={event => {
+                          event.preventDefault()
+                          zoomPreviewByWheel(event.deltaY, event.deltaMode)
+                        }}>{Math.round(previewScale * 100)}%</span>
+                        <Button size="small" className="preview-zoom-step" onClick={() => changePreviewScale(previewScale * 1.25)}
+                          aria-label={t('zoomIn')}>+</Button>
+                      </div>
+                      <Select className="preview-aspect-select" value={previewAspectRatio} aria-label={t('artboardRatio')}
+                        onChange={event => changePreviewAspectRatio(event.target.value as PreviewAspectRatio)}>
+                        {previewAspectRatios.map(ratio => <option key={ratio} value={ratio}>{ratio}</option>)}
+                        {previewAspectRatio === 'custom' && <option value="custom">{t('custom')}</option>}
+                      </Select>
+                      <IconButton className="preview-aspect-lock" size="small" variant="secondary"
+                        aria-pressed={previewAspectLocked} onClick={togglePreviewAspectLock}
+                        label={previewAspectLocked ? t('unlockAspectRatio') : t('lockAspectRatio')}>
+                        <AspectRatioLockIcon locked={previewAspectLocked} />
+                      </IconButton>
+                    </div>
+                    <div className="control-action-row">
+                      <Button size="small" className="sidebar-action-button preview-fit-button"
+                        onClick={() => fitPreviewToStage()}>{t('fitCanvas')}</Button>
+                      <Button size="small" className="sidebar-action-button preview-fullscreen-button" disabled={previewUrl === undefined}
+                        onClick={togglePreviewFullscreen}>
+                        <FullscreenIcon active={previewFullscreen} />{previewFullscreen ? t('exitFullscreen') : t('fullscreen')}
+                      </Button>
+                    </div>
+                  </div>
+                </section>
               </section>}
 
-          <section id="left-sidebar-panel-plugins" role="tabpanel" hidden={leftPanel !== 'plugins'}
-            aria-labelledby="left-sidebar-tab-plugins" className="left-sidebar-page plugin-management-page">
-            <PluginManagement drafts={drafts} />
-          </section>
+          <PluginManagement drafts={drafts} view={leftPanel === 'instance' ? undefined : leftPanel} />
         </div>
         {!terminalExpanded && terminal}
         {!leftSidebarCollapsed && <span className="sidebar-resizer" data-side="left" role="separator" tabIndex={0}
@@ -2490,74 +2545,18 @@ export function App(): JSX.Element {
             event.preventDefault()
             changeSidebarWidthByKeyboard('right', event.key === 'ArrowLeft' ? -12 : 12)
           }} />}
-        <Panel className="preview-inspector studio-inspector-block">
-          <div className="preview-inspector-heading">
-            {!rightSidebarCollapsed && <div className="control-section-heading"><div><strong>{t('livePreview')}</strong><span>{t('previewInteractionCanvas')}</span></div></div>}
-          <IconButton size="small" variant="ghost" aria-expanded={!rightSidebarCollapsed}
-            aria-controls="draft-control-sidebar" onClick={() => setRightSidebarCollapsed(value => !value)}
-            label={rightSidebarCollapsed ? t('inspectorExpand') : t('inspectorCollapse')}>
-            <SidebarToggleIcon side="right" collapsed={rightSidebarCollapsed} />
-          </IconButton>
-          </div>
-
-        {!rightSidebarCollapsed && <section className="preview-controls" aria-label={t('livePreview')}>
-          <div className="preview-mode-field" data-mode={previewMode} data-disabled={previewUrl === undefined || undefined}>
-            <div className="preview-mode-heading">
-              <strong>{t('interactionMode')}</strong>
-              <span>{previewMode === 'browse' ? t('interactionBrowseDescription') : t('interactionInspectDescription')}</span>
-            </div>
-            <SegmentedControl className="preview-mode-control" label={t('previewInteractionMode')} value={previewMode}
-              options={[
-                { value: 'browse', label: t('browse'), disabled: previewUrl === undefined },
-                { value: 'inspect', label: t('inspect'), disabled: previewUrl === undefined },
-              ]} onChange={changePreviewMode} />
-          </div>
-          <div className="preview-resolution-line">
-            <label><span>W</span><Input type="number" min={1} value={previewViewport.width}
-              aria-label={t('viewportWidth')} onChange={event => changePreviewDimension('width', event.target.valueAsNumber)} /></label>
-            <label><span>H</span><Input type="number" min={1} value={previewViewport.height}
-              aria-label={t('viewportHeight')} onChange={event => changePreviewDimension('height', event.target.valueAsNumber)} /></label>
-          </div>
-          <div className="preview-canvas-line">
-            <div className="preview-zoom-control" aria-label={t('previewZoom')}>
-              <Button size="small" className="preview-zoom-step" onClick={() => changePreviewScale(previewScale / 1.25)}
-                aria-label={t('zoomOut')}>-</Button>
-              <span onWheel={event => {
-                event.preventDefault()
-                zoomPreviewByWheel(event.deltaY, event.deltaMode)
-              }}>{Math.round(previewScale * 100)}%</span>
-              <Button size="small" className="preview-zoom-step" onClick={() => changePreviewScale(previewScale * 1.25)}
-                aria-label={t('zoomIn')}>+</Button>
-            </div>
-            <Select className="preview-aspect-select" value={previewAspectRatio} aria-label={t('artboardRatio')}
-              onChange={event => changePreviewAspectRatio(event.target.value as PreviewAspectRatio)}>
-              {previewAspectRatios.map(ratio => <option key={ratio} value={ratio}>{ratio}</option>)}
-              {previewAspectRatio === 'custom' && <option value="custom">{t('custom')}</option>}
-            </Select>
-            <IconButton className="preview-aspect-lock" size="small" variant="secondary"
-              aria-pressed={previewAspectLocked} onClick={togglePreviewAspectLock}
-              label={previewAspectLocked ? t('unlockAspectRatio') : t('lockAspectRatio')}>
-              <AspectRatioLockIcon locked={previewAspectLocked} />
-            </IconButton>
-          </div>
-          <div className="control-action-row">
-            <Button size="small" className="sidebar-action-button preview-fit-button"
-              onClick={() => fitPreviewToStage()}>{t('fitCanvas')}</Button>
-            <Button size="small" className="sidebar-action-button preview-fullscreen-button" disabled={previewUrl === undefined}
-              onClick={togglePreviewFullscreen}>
-              <FullscreenIcon active={previewFullscreen} />{previewFullscreen ? t('exitFullscreen') : t('fullscreen')}
-            </Button>
-          </div>
-        </section>}
-        </Panel>
-
         <Panel className="studio-inspector studio-inspector-block">
           <div className="inspector-nav">
-            <Tabs id="studio" label={t('studioTools')} value={panel} onChange={(value: Panel) => setPanel(value)} options={panels.map(item => ({
-              value: item,
-              label: item === 'elements' ? t('panelElements') : item === 'selection' ? t('panelSelect') : item === 'source' ? t('panelSource')
-                : item === 'build' ? t('panelBuild') : t('panelAgent'),
-            }))} />
+            {!rightSidebarCollapsed && <Tabs id="studio" label={t('studioTools')} value={panel} onChange={(value: Panel) => setPanel(value)} options={panels.map(item => ({
+                value: item,
+                label: item === 'elements' ? t('panelElements') : item === 'selection' ? t('panelSelect') : item === 'source' ? t('panelSource')
+                  : item === 'build' ? t('panelBuild') : t('panelAgent'),
+              }))} />}
+            <IconButton size="small" variant="ghost" aria-expanded={!rightSidebarCollapsed}
+              aria-controls="draft-control-sidebar" onClick={() => setRightSidebarCollapsed(value => !value)}
+              label={rightSidebarCollapsed ? t('inspectorExpand') : t('inspectorCollapse')}>
+              <SidebarToggleIcon side="right" collapsed={rightSidebarCollapsed} />
+            </IconButton>
           </div>
 
         {error !== undefined && <Notice className="panel-error" tone="danger">{error}</Notice>}
@@ -2651,7 +2650,8 @@ export function App(): JSX.Element {
                 </dl>
                 <div className="selection-actions">
                   <Button size="small" variant="primary" disabled={selection.react?.component === undefined
-                    || selection.react.source?.resolved?.package === undefined || selection.boundaries.length === 0 || selectedDraftId === undefined}
+                    || selection.react.source?.resolved?.package === undefined || automaticPatchScope(selection) === undefined
+                    || selectedDraftId === undefined}
                     onClick={() => setAutomaticPatchOpen(true)}>{t('automaticPatchAction')}</Button>
                 </div>
                 {selection.react !== undefined && Object.keys(selection.react.props).length > 0 && <details>

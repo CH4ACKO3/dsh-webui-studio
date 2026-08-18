@@ -19,8 +19,23 @@ function identifier(value: string): string {
   return result === '' ? 'element' : result
 }
 
+export function automaticPatchScope(selection?: StudioDomSelection): {
+  boundary: { surfaceId: string; path: string[] }
+  targetSelector?: string
+} | undefined {
+  if (selection === undefined) return undefined
+  const boundary = selection.boundaries[0]
+  if (boundary !== undefined) return { boundary }
+  const targetSelector = selection.id !== undefined ? `[id=${JSON.stringify(selection.id)}]`
+    : selection.classes[0] !== undefined ? `${selection.tag}[class~=${JSON.stringify(selection.classes[0])}]`
+      : selection.selector?.trim()
+  if (targetSelector === undefined || targetSelector === '') return undefined
+  return { boundary: { surfaceId: 'dsh-studio-auto', path: [targetSelector] }, targetSelector }
+}
+
 function initialSelector(selection: StudioDomSelection): string {
   const boundary = selection.boundaries[0]
+  if (boundary === undefined) return '&'
   if (boundary !== undefined && selection.attributes['data-ui-surface'] === boundary.surfaceId
     && selection.attributes['data-ui-surface-path'] === JSON.stringify(boundary.path)) return '&'
   const name = selection.id === undefined
@@ -42,7 +57,7 @@ export function AutomaticPatchDialog({ open, draftId, selection, files, onClose,
   const dialogRef = useRef<HTMLDialogElement>(null)
   const component = selection?.react?.component ?? ''
   const target = selection?.react?.source?.resolved
-  const boundary = selection?.boundaries[0]
+  const scope = automaticPatchScope(selection)
   const clientFiles = useMemo(() => files.map(item => item.path).filter(path => /\.(?:[cm]?[jt]sx?)$/.test(path)
     && !path.includes('/node_modules/') && !path.startsWith('lib/')).sort((left, right) => {
       const leftClient = /(?:^|\/)client\.[^.]+$/.test(left) ? 0 : 1
@@ -72,7 +87,7 @@ export function AutomaticPatchDialog({ open, draftId, selection, files, onClose,
   }, [open, selection])
 
   const request = (): StudioAutomaticPatchRequest => {
-    if (draftId === undefined || target?.package === undefined || boundary === undefined || component === '' || clientFile === '') {
+    if (draftId === undefined || target?.package === undefined || scope === undefined || component === '' || clientFile === '') {
       throw new Error(t('automaticPatchUnavailable'))
     }
     return {
@@ -80,7 +95,8 @@ export function AutomaticPatchDialog({ open, draftId, selection, files, onClose,
       targets: [{ package: target.package, file: target.file }],
       component,
       clientFile,
-      boundary,
+      boundary: scope.boundary,
+      ...(scope.targetSelector === undefined ? {} : { targetSelector: scope.targetSelector }),
       selector: selector.trim(),
       elementId: `auto-${identifier(component)}`,
       elementLabel: component,

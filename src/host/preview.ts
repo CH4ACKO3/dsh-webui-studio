@@ -1,5 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { spawn, type ChildProcess } from 'node:child_process'
+import { createRequire } from 'node:module'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type {
   StudioDraftRecord,
@@ -41,6 +43,14 @@ function appendLog(current: string, chunk: Buffer | string): string {
 
 function studioPackageRoot(): string {
   return fileURLToPath(new URL('../../', import.meta.url))
+}
+
+function dshPackageModules(harmonyBinEntry: string): string {
+  const configured = process.env.DSH_HARMONY_DSH_ENTRY
+  const dshEntry = configured === undefined
+    ? createRequire(harmonyBinEntry).resolve('@deepseek-ai/dsh/lib/bin.js')
+    : resolve(configured)
+  return join(dirname(dirname(dshEntry)), 'node_modules')
 }
 
 function waitForExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
@@ -137,6 +147,7 @@ export class StudioPreviewSupervisor {
           DSH_STUDIO_PREVIEW_CONTROL_TOKEN: controlToken,
           DSH_STUDIO_PREVIEW_PARENT_ORIGIN: this.parentOrigin,
           DSH_STUDIO_PREVIEW_BRIDGE_CAPABILITY: bridgeCapability,
+          DSH_STUDIO_PREVIEW_PACKAGE_DIRS: JSON.stringify([dshPackageModules(this.harmonyBinEntry)]),
           DSH_HARMONY_REACT_TRACE: '1',
         },
         stdio: ['ignore', 'pipe', 'pipe'],

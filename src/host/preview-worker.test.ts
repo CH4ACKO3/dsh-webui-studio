@@ -45,6 +45,7 @@ function workerRoute(): WebRoute {
   } as unknown as Context
   applyPreviewWorker(ctx, { profileDir: '/profile' } as StudioHarmonyService, {
     root: '/draft',
+    packageDirs: [],
     controlToken: 'secret',
     parentOrigin: 'http://127.0.0.1:3081',
     bridgeCapability: 'bridge',

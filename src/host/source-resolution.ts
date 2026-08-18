@@ -1,4 +1,4 @@
-import { lstat, readFile, realpath } from 'node:fs/promises'
+import { lstat, readFile, readdir, realpath } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { StudioSourceCandidate, StudioSourceLocation } from '../contracts.js'
@@ -7,6 +7,7 @@ interface PackageRoot {
   name: string
   root: string
   kind: 'draft' | 'dependency'
+  client?: string
 }
 
 interface SourceReference {
@@ -16,9 +17,9 @@ interface SourceReference {
   generated: boolean
 }
 
-interface ProfileManifest {
-  dependencies?: Record<string, string>
-  dsh?: { profile?: { bundles?: string[] } }
+interface PackageManifest {
+  name?: unknown
+  exports?: unknown
 }
 
 const MAX_SOURCE_BYTES = 1024 * 1024
@@ -38,6 +39,16 @@ function relativeSource(path: string): string | undefined {
     return undefined
   }
   return normalized
+}
+
+function clientExport(manifest: PackageManifest): string | undefined {
+  if (typeof manifest.exports !== 'object' || manifest.exports === null) return undefined
+  const entry = (manifest.exports as Record<string, unknown>)['./client']
+  const target = typeof entry === 'string' ? entry
+    : typeof entry === 'object' && entry !== null && typeof (entry as Record<string, unknown>).default === 'string'
+      ? (entry as Record<string, string>).default
+      : undefined
+  return target === undefined ? undefined : relativeSource(target)
 }
 
 function sourceReference(file: string): SourceReference {
@@ -73,32 +84,42 @@ function sourceReference(file: string): SourceReference {
 async function packageRoot(path: string, expectedName: string): Promise<PackageRoot | undefined> {
   try {
     const root = await realpath(path)
-    const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8')) as { name?: unknown }
-    return manifest.name === expectedName ? { name: expectedName, root, kind: 'dependency' } : undefined
+    const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8')) as PackageManifest
+    const client = clientExport(manifest)
+    return manifest.name === expectedName
+      ? { name: expectedName, root, kind: 'dependency', ...(client === undefined ? {} : { client }) }
+      : undefined
   } catch {
     return undefined
   }
 }
 
-async function packageRoots(draftRoot: string, profileDir: string): Promise<PackageRoot[]> {
+async function installedPackageNames(nodeModules: string): Promise<string[]> {
+  const entries = (await readdir(nodeModules)).filter(name => !name.startsWith('.'))
+  const names = await Promise.all(entries.map(async name => name.startsWith('@')
+    ? readdir(join(nodeModules, name)).then(packages => packages.filter(item => !item.startsWith('.')).map(item => `${name}/${item}`))
+    : [name]))
+  return names.flat()
+}
+
+async function packageRoots(draftRoot: string, nodeModulesDirs: string[]): Promise<PackageRoot[]> {
   const draft = await realpath(draftRoot)
-  const manifest = JSON.parse(await readFile(join(profileDir, 'package.json'), 'utf8')) as ProfileManifest
-  const dependencies = Object.keys(manifest.dependencies ?? {})
-  const bundles = manifest.dsh?.profile?.bundles ?? []
+  const draftManifest = JSON.parse(await readFile(join(draft, 'package.json'), 'utf8')) as PackageManifest
+  const draftClient = clientExport(draftManifest)
   const roots: PackageRoot[] = [{
-    name: JSON.parse(await readFile(join(draft, 'package.json'), 'utf8')).name as string,
+    name: draftManifest.name as string,
     root: draft,
     kind: 'draft',
+    ...(draftClient === undefined ? {} : { client: draftClient }),
   }]
-  for (const name of dependencies) {
-    const installed = await packageRoot(join(profileDir, 'node_modules', ...name.split('/')), name)
-    if (installed !== undefined) roots.push(installed)
+  for (const nodeModules of nodeModulesDirs) {
+    for (const name of await installedPackageNames(nodeModules)) {
+      const installed = await packageRoot(join(nodeModules, ...name.split('/')), name)
+      if (installed !== undefined) roots.push(installed)
+    }
   }
-  for (const name of bundles.filter(name => !dependencies.includes(name))) {
-    const installed = await packageRoot(join(profileDir, 'node_modules', ...name.split('/')), name)
-    if (installed !== undefined) roots.push(installed)
-  }
-  return roots.filter((item, index, all) => all.findIndex(candidate => candidate.root === item.root) === index)
+  return roots.filter((item, index, all) => all.findIndex(candidate => candidate.root === item.root
+    || item.kind === 'dependency' && candidate.kind === 'dependency' && candidate.name === item.name) === index)
 }
 
 function result(
@@ -130,15 +151,25 @@ async function exactMatch(path: string, roots: PackageRoot[]): Promise<{ root: P
   return root === undefined ? undefined : { root, file: posix(relative(root.root, target)) }
 }
 
+async function pluginClientMatch(path: string, roots: PackageRoot[]): Promise<{ root: PackageRoot; file: string } | undefined> {
+  const route = path.trim().replace(/[?#].*$/, '')
+  const root = roots.find(item => route === `/plugins/${item.name}/client.js` && item.client !== undefined)
+  return root?.client === undefined ? undefined : exactMatch(resolve(root.root, root.client), [root])
+}
+
 export class StudioSourceResolver {
   readonly #roots: Promise<PackageRoot[]>
 
-  constructor(draftRoot: string, profileDir: string) {
-    this.#roots = packageRoots(draftRoot, profileDir)
+  constructor(draftRoot: string, profileDir: string, packageDirs: string[] = []) {
+    this.#roots = packageRoots(draftRoot, [join(profileDir, 'node_modules'), ...packageDirs])
   }
 
   async resolve(source: StudioSourceLocation): Promise<StudioSourceCandidate> {
     const roots = await this.#roots
+    const pluginClient = await pluginClientMatch(source.file, roots)
+    if (pluginClient !== undefined) {
+      return result(source, pluginClient.file, pluginClient.root.kind, 'exact', pluginClient.root.name)
+    }
     const reference = sourceReference(source.file)
     if (reference.absolute !== undefined) {
       const match = await exactMatch(reference.absolute, roots)

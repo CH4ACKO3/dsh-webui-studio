@@ -17,6 +17,7 @@ import type {
   StudioElementStyleSource,
   StudioPreviewStatus,
   StudioPreviewUpdate,
+  StudioPluginInventorySnapshot,
   StudioProjectFile,
   StudioProjectState,
   StudioReadinessReport,
@@ -87,12 +88,16 @@ function automaticPatchRequest(payload: unknown): StudioAutomaticPatchRequest {
   if (typeof boundary.surfaceId !== 'string' || !(boundary.path as unknown[]).every(item => typeof item === 'string')) {
     throw new Error('automatic CSS Patch boundary is invalid')
   }
+  if (input.targetSelector !== undefined && (typeof input.targetSelector !== 'string' || input.targetSelector === '')) {
+    throw new Error('automatic CSS Patch target selector is invalid')
+  }
   return {
     kind: input.kind,
     targets,
     component: input.component,
     clientFile: input.clientFile,
     boundary: { surfaceId: boundary.surfaceId, path: boundary.path as string[] },
+    ...(input.targetSelector === undefined ? {} : { targetSelector: input.targetSelector as string }),
     selector: input.selector,
     elementId: input.elementId,
     elementLabel: input.elementLabel,
@@ -337,6 +342,7 @@ export class StudioBackend {
     private readonly workspace: StudioWorkspaceStore,
     private readonly commands: StudioCommandRunner,
     private readonly parentOrigin: string,
+    private readonly pluginInventory: () => StudioPluginInventorySnapshot = () => ({ entries: [] }),
   ) {}
 
   async call(message: StudioClientRequest): Promise<StudioServerResponse> {
@@ -355,6 +361,7 @@ export class StudioBackend {
           records.map(record => record.id),
         ))
       }
+      if (method === 'studio.plugins.list') return success(rpcId, this.pluginInventory())
       if (method === 'studio.harmony.profile') return success(rpcId, this.harmony.profile())
       if (method === 'studio.harmony.inspectStable') return success(rpcId, this.harmony.inspect())
       if (method === 'studio.harmony.updateProfile') {

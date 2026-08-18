@@ -27,11 +27,12 @@ async function fixture(): Promise<{ root: string; draft: string; profile: string
     await writeFile(join(profile, 'node_modules', name, 'package.json'), JSON.stringify({ name, version: '1.0.0' }))
     await writeFile(join(profile, 'node_modules', name, 'src', 'Button.tsx'), 'export const Button = () => null\n')
   }
-  await writeFile(join(profile, 'node_modules', 'package-c', 'package.json'), JSON.stringify({ name: 'package-c', version: '2.0.0' }))
+  await writeFile(join(profile, 'node_modules', 'package-c', 'package.json'), JSON.stringify({
+    name: 'package-c', version: '2.0.0', exports: { './client': { default: './lib/client.js' } },
+  }))
   await writeFile(join(profile, 'node_modules', 'package-c', 'lib', 'client.js'), 'export const bundle = true\n')
   await writeFile(join(profile, 'package.json'), JSON.stringify({
     dependencies: { 'package-a': '1.0.0', 'package-b': '1.0.0' },
-    dsh: { profile: { bundles: ['package-c'] } },
   }))
   return { root, draft, profile }
 }
@@ -75,11 +76,29 @@ test('resolves an exact dependency build and degrades without source maps', asyn
   })
 })
 
-test('resolves profile-only bundles and reads only installed dependency files', async () => {
-  const { draft, profile } = await fixture()
-  const resolver = new StudioSourceResolver(draft, profile)
+test('resolves installed transitive packages and reads only installed dependency files', async () => {
+  const { root, draft, profile } = await fixture()
+  const dshPackages = join(root, 'dsh-node-modules')
+  const conversation = join(dshPackages, '@deepseek-ai', 'conversation', 'lib')
+  const shadowedProfilePackage = join(dshPackages, 'package-c', 'lib')
+  await Promise.all([mkdir(conversation, { recursive: true }), mkdir(shadowedProfilePackage, { recursive: true })])
+  await writeFile(join(conversation, '..', 'package.json'), JSON.stringify({
+    name: '@deepseek-ai/conversation', version: '3.0.0', exports: { './client': './lib/client.js' },
+  }))
+  await writeFile(join(conversation, 'client.js'), 'export const Conversation = true\n')
+  await writeFile(join(shadowedProfilePackage, '..', 'package.json'), JSON.stringify({
+    name: 'package-c', version: '9.0.0', exports: { './client': './lib/client.js' },
+  }))
+  await writeFile(join(shadowedProfilePackage, 'client.js'), 'export const shadowed = true\n')
+  const resolver = new StudioSourceResolver(draft, profile, [dshPackages])
   await expect(resolver.resolve({ file: join(profile, 'node_modules', 'package-c', 'lib', 'client.js') })).resolves.toMatchObject({
     package: 'package-c', file: 'lib/client.js', kind: 'dependency', confidence: 'exact',
+  })
+  await expect(resolver.resolve({ file: '/plugins/package-c/client.js?rev=1', line: 12, column: 4 })).resolves.toEqual({
+    package: 'package-c', file: 'lib/client.js', line: 12, column: 4, kind: 'dependency', confidence: 'exact',
+  })
+  await expect(resolver.resolve({ file: '/plugins/@deepseek-ai/conversation/client.js', line: 18 })).resolves.toEqual({
+    package: '@deepseek-ai/conversation', file: 'lib/client.js', line: 18, kind: 'dependency', confidence: 'exact',
   })
   await expect(resolver.readDependency('package-c', 'lib/client.js')).resolves.toBe('export const bundle = true\n')
   await expect(resolver.readDependencyTarget('package-c', 'lib/client.js')).resolves.toEqual({

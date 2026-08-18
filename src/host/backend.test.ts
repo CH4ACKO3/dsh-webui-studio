@@ -126,6 +126,28 @@ describe('StudioBackend', () => {
     } })
   })
 
+  it('returns the stable Host Loader inventory without a Draft id', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-studio-backend-'))
+    temporaryDirectories.push(root)
+    const draft = record(root)
+    const inventory = { entries: [{
+      entryId: 'webserver', moduleName: '@deepseek-ai/dsh-host-webserver', enabled: true, fiberPhase: 'active' as const,
+    }] }
+    const agents = { create: vi.fn(async () => ({ dispose: vi.fn(async () => {}) })) } as unknown as AgentRegistry
+    const studio = new StudioBackend(
+      { profileDir: '/home/profiles/web' } as StudioHarmonyService,
+      agents,
+      {} as SubprocessRuntime,
+      { list: vi.fn(async () => [draft]) } as unknown as StudioDraftRegistry,
+      { read: vi.fn(), write: vi.fn() } as unknown as StudioWorkspaceStore,
+      { run: vi.fn() } as unknown as StudioCommandRunner,
+      'http://127.0.0.1:3081',
+      () => inventory,
+    )
+
+    expect((await studio.call(request('studio.plugins.list', {}))).result).toEqual({ ok: true, value: inventory })
+  })
+
   it('rejects malformed Harmony profile updates before calling the service', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-studio-backend-'))
     temporaryDirectories.push(root)

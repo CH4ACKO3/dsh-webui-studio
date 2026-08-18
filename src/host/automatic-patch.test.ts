@@ -123,6 +123,24 @@ test('generates a CSS Patch that registers the same Element variable contract', 
   expect(manifest.dsh.client.immediately).toBe(true)
 })
 
+test('generates a component-owned boundary for a selected element without a host Surface', () => {
+  const targets = [{ package: 'plugin-a', file: 'lib/client.js' }]
+  const request = cssRequest(targets)
+  request.boundary = { surfaceId: 'dsh-studio-auto', path: ['h1[class~="hero"]'] }
+  request.targetSelector = 'h1[class~="hero"]'
+  request.selector = '&'
+  const plan = analyzeAutomaticPatch(request, [
+    source('plugin-a', 'lib/client.js', 'function Hero() { return null }\n'),
+  ], 'draft-plugin')
+
+  expect(plan.client?.source).toContain('document.querySelectorAll(targetSelector)')
+  expect(plan.client?.source).toContain("element.setAttribute('data-ui-surface', boundarySurface)")
+  expect(plan.client?.source).toContain('new MutationObserver(markTargets)')
+  expect(plan.client?.source).not.toContain('new MutationObserver(applyStyles)')
+  expect(plan.client?.source).toContain('while (sheet.cssRules.length > 0) sheet.deleteRule(0)')
+  expect(plan.client?.source).toContain('return React.createElement(Original, props)')
+})
+
 test('keeps invalid component declarations visible instead of hiding them', () => {
   const targets = [{ package: 'plugin-a', file: 'lib/client.js' }]
   const plan = analyzeAutomaticPatch(cssRequest(targets), [

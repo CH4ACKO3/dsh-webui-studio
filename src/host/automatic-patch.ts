@@ -68,6 +68,10 @@ function validateCssRequest(request: Extract<StudioAutomaticPatchRequest, { kind
   if (request.boundary.surfaceId === '' || request.boundary.path.length === 0 || request.boundary.path.some(item => item === '')) {
     throw new Error('automatic CSS Patch boundary is invalid')
   }
+  if (request.targetSelector !== undefined
+    && (request.targetSelector.trim() === '' || request.targetSelector.length > 2_000 || /[{};]/.test(request.targetSelector))) {
+    throw new Error('automatic CSS Patch target selector is invalid')
+  }
   if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(request.elementId)) throw new Error('automatic CSS Patch element id is invalid')
   if (request.elementLabel.trim() === '') throw new Error('automatic CSS Patch element label must not be empty')
   if (request.variables.length === 0) throw new Error('automatic CSS Patch requires at least one variable')
@@ -157,6 +161,9 @@ function clientSource(request: Extract<StudioAutomaticPatchRequest, { kind: 'css
   return `import * as React from 'react'
 import { registerStudioElement } from 'dsh-harmony-react/studio'
 
+const targetSelector = ${request.targetSelector === undefined ? 'undefined' : JSON.stringify(request.targetSelector)}
+const boundarySurface = ${JSON.stringify(request.boundary.surfaceId)}
+const boundaryPath = ${JSON.stringify(JSON.stringify(request.boundary.path))}
 const values = {
 ${defaults}
 }
@@ -164,9 +171,22 @@ const declarations = ${properties}
 let mounts = 0
 let disposeRegistration
 let styleElement
+let targetObserver
+const markedTargets = new Set()
+
+function markTargets() {
+  if (targetSelector === undefined) return
+  for (const element of document.querySelectorAll(targetSelector)) {
+    if (element.hasAttribute('data-ui-surface') || element.hasAttribute('data-ui-surface-path')) continue
+    element.setAttribute('data-ui-surface', boundarySurface)
+    element.setAttribute('data-ui-surface-path', boundaryPath)
+    markedTargets.add(element)
+  }
+}
 
 function applyStyles() {
   if (typeof document === 'undefined') return
+  markTargets()
   if (styleElement === undefined) {
     styleElement = document.createElement('style')
     styleElement.dataset.plugin = ${JSON.stringify(owner)}
@@ -175,6 +195,7 @@ function applyStyles() {
   styleElement.textContent = ''
   const sheet = styleElement.sheet
   if (sheet === null) return
+  while (sheet.cssRules.length > 0) sheet.deleteRule(0)
   const index = sheet.insertRule(${JSON.stringify(`${selector} {}`)}, 0)
   const rule = sheet.cssRules[index]
   if (!(rule instanceof CSSStyleRule)) return
@@ -201,12 +222,26 @@ ${definitions}
       bindings,
     })
     applyStyles()
+    if (targetSelector !== undefined) {
+      targetObserver = new MutationObserver(markTargets)
+      targetObserver.observe(document.body, { childList: true, subtree: true })
+    }
   }
   return () => {
     mounts -= 1
     if (mounts !== 0) return
     disposeRegistration?.()
     disposeRegistration = undefined
+    targetObserver?.disconnect()
+    targetObserver = undefined
+    for (const element of markedTargets) {
+      if (element.getAttribute('data-ui-surface') === boundarySurface
+        && element.getAttribute('data-ui-surface-path') === boundaryPath) {
+        element.removeAttribute('data-ui-surface')
+        element.removeAttribute('data-ui-surface-path')
+      }
+    }
+    markedTargets.clear()
     styleElement?.remove()
     styleElement = undefined
   }

@@ -12,6 +12,7 @@ import { StudioSourceResolver } from './source-resolution.js'
 
 interface PreviewWorkerOptions {
   root: string
+  packageDirs: string[]
   controlToken: string
   parentOrigin: string
   bridgeCapability: string
@@ -50,7 +51,7 @@ export function applyPreviewWorker(
       () => { readiness = { state: 'ready' } },
       error => { readiness = { state: 'failed', error } },
     )
-    const sources = new StudioSourceResolver(options.root, harmony.profileDir)
+    const sources = new StudioSourceResolver(options.root, harmony.profileDir, options.packageDirs)
     const worker: WebRoute = {
       kind: 'prefix',
       path: STUDIO_PREVIEW_API_PATH,

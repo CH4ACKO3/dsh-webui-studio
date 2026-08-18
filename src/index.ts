@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import type { Context } from '@deepseek-ai/cordis'
+import { FiberState, type Context } from '@deepseek-ai/cordis'
 import '@deepseek-ai/cordis-plugin-loader'
 import '@deepseek-ai/dsh-client-modules'
 import '@deepseek-ai/dsh-agent'
@@ -10,7 +10,7 @@ import '@deepseek-ai/dsh-system-prompt'
 import '@deepseek-ai/dsh-subprocess'
 import '@deepseek-ai/dsh-tools'
 import 'dsh-harmony'
-import { STUDIO_PATH } from './contracts.js'
+import { STUDIO_PATH, type StudioPluginFiberPhase } from './contracts.js'
 import { StudioBackend } from './host/backend.js'
 import { dshHomeFromProfile, StudioDraftRegistry, studioCommands } from './host/drafts.js'
 import { applyPreviewWorker } from './host/preview-worker.js'
@@ -19,6 +19,15 @@ import { StudioWorkspaceStore } from './host/workspace.js'
 
 export const name = 'harmony-studio'
 export const inject = ['harmony', 'agents', 'tools', 'systemPrompt', 'webServer', 'subprocess', 'loader', 'clientModules']
+
+function fiberPhase(state: FiberState | undefined): StudioPluginFiberPhase {
+  if (state === undefined || state === FiberState.DISPOSED) return null
+  if (state === FiberState.PENDING) return 'pending'
+  if (state === FiberState.LOADING) return 'loading'
+  if (state === FiberState.ACTIVE) return 'active'
+  if (state === FiberState.FAILED) return 'failed'
+  return 'unloading'
+}
 
 export function apply(ctx: Context): void {
   ctx.effect(() => {
@@ -39,11 +48,17 @@ export function apply(ctx: Context): void {
       const controlToken = process.env.DSH_STUDIO_PREVIEW_CONTROL_TOKEN
       const parentOrigin = process.env.DSH_STUDIO_PREVIEW_PARENT_ORIGIN
       const bridgeCapability = process.env.DSH_STUDIO_PREVIEW_BRIDGE_CAPABILITY
-      if (controlToken === undefined || parentOrigin === undefined || bridgeCapability === undefined) {
+      const packageDirsSource = process.env.DSH_STUDIO_PREVIEW_PACKAGE_DIRS
+      if (controlToken === undefined || parentOrigin === undefined || bridgeCapability === undefined || packageDirsSource === undefined) {
         throw new Error('harmony-studio: Preview worker environment is incomplete')
+      }
+      const packageDirs = JSON.parse(packageDirsSource) as unknown
+      if (!Array.isArray(packageDirs) || !packageDirs.every(item => typeof item === 'string')) {
+        throw new Error('harmony-studio: Preview package directories are invalid')
       }
       applyPreviewWorker(ctx, harmony, {
         root: previewRoot,
+        packageDirs,
         controlToken,
         parentOrigin,
         bridgeCapability,
@@ -62,6 +77,14 @@ export function apply(ctx: Context): void {
       new StudioWorkspaceStore(dshHome),
       studioCommands,
       `http://${host}`,
+      () => ({
+        entries: [...ctx.loader.entries()].flatMap(entry => entry.options.group ? [] : [{
+          entryId: entry.id,
+          moduleName: entry.options.name,
+          enabled: !entry.disabled,
+          fiberPhase: fiberPhase(entry.fiber?.state),
+        }]),
+      }),
     )
     const dispose = [
       ...createStudioRoutes(backend, assets, { token, host, origin: `http://${host}` }).map(route => ctx.webServer.register(route)),
