@@ -5,10 +5,12 @@ import type {
   StudioRegistrySnapshot,
   StudioVariableBinding,
   StudioVariableDefinition,
+  StudioVariableNode,
   StudioVariablesRegistration,
   StudioVariablesSnapshot,
   StudioVariableValue,
 } from 'dsh-harmony-react/studio'
+import { flattenVariableTree } from '../variable-tree.js'
 
 export type StudioVariableTarget =
   | { scope: 'element'; owner: string; elementId: string; variableId: string; value: StudioVariableValue }
@@ -24,6 +26,8 @@ function text(value: string, name: string): void {
 }
 
 const CONTROLS = new Set(['color', 'length', 'number', 'boolean', 'enum', 'string'])
+const MAX_VARIABLE_TREE_DEPTH = 8
+const MAX_VARIABLE_TREE_NODES = 500
 
 function sourceLocation(file: string, line?: number, column?: number): void {
   text(file, 'Studio element source file')
@@ -59,16 +63,36 @@ function variableValue(definition: StudioVariableDefinition, value: StudioVariab
 }
 
 function variables(
-  definitions: readonly StudioVariableDefinition[],
+  nodes: readonly StudioVariableNode[],
   bindings: Readonly<Record<string, StudioVariableBinding>>,
 ): void {
   const ids = new Set<string>()
+  const variableIds = new Set<string>()
+  let nodeCount = 0
+  const definitions: StudioVariableDefinition[] = []
+  const visit = (items: readonly StudioVariableNode[], depth: number): void => {
+    if (depth > MAX_VARIABLE_TREE_DEPTH) throw new Error('Studio variable tree exceeds its maximum depth')
+    for (const item of items) {
+      nodeCount += 1
+      if (nodeCount > MAX_VARIABLE_TREE_NODES) throw new Error('Studio variable tree has too many nodes')
+      text(item.id, 'Studio variable node id')
+      text(item.label, 'Studio variable node label')
+      if (ids.has(item.id)) throw new Error(`Duplicate Studio variable node id ${item.id}`)
+      ids.add(item.id)
+      if (item.kind === 'group') {
+        if (item.children.length === 0) throw new Error(`Studio variable group ${item.id} must not be empty`)
+        visit(item.children, depth + 1)
+      } else if (item.kind === 'variable') {
+        definitions.push(item)
+        variableIds.add(item.id)
+      } else {
+        throw new Error('Studio variable node has an invalid kind')
+      }
+    }
+  }
+  visit(nodes, 1)
   for (const definition of definitions) {
-    text(definition.id, 'Studio variable id')
-    text(definition.label, 'Studio variable label')
-    if (ids.has(definition.id)) throw new Error(`Duplicate Studio variable id ${definition.id}`)
     if (!CONTROLS.has(definition.control)) throw new Error(`Studio variable ${definition.id} has an invalid control`)
-    ids.add(definition.id)
     const binding = bindings[definition.id]
     if (binding === undefined) throw new Error(`Studio variable ${definition.id} has no binding`)
     if (definition.control === 'enum' && (definition.options === undefined || definition.options.length === 0)) {
@@ -95,14 +119,15 @@ function variables(
     variableValue(definition, binding.get())
   }
   for (const id of Object.keys(bindings)) {
-    if (!ids.has(id)) throw new Error(`Studio variable binding ${id} has no definition`)
+    if (!variableIds.has(id)) throw new Error(`Studio variable binding ${id} has no definition`)
   }
 }
 
 function values(
-  definitions: readonly StudioVariableDefinition[],
+  nodes: readonly StudioVariableNode[],
   bindings: Readonly<Record<string, StudioVariableBinding>>,
 ): Record<string, StudioVariableValue> {
+  const definitions = flattenVariableTree(nodes)
   return Object.fromEntries(definitions.map(definition => {
     const value = bindings[definition.id]!.get()
     variableValue(definition, value)
@@ -227,11 +252,11 @@ export class StudioPreviewRegistry implements StudioBrowserRuntime {
       ? this.#elements.get(`${target.owner}\0${target.elementId}`)
       : this.#globals.get(target.owner)
     if (current !== record) throw new Error('Studio variable registration is no longer active')
-    const definitions = target.scope === 'element'
+    const nodes = target.scope === 'element'
       ? (record.registration as StudioElementRegistration).element.variables ?? []
       : (record.registration as StudioVariablesRegistration).variables
     const bindings = record.registration.bindings
-    const definition = definitions.find(item => item.id === target.variableId)
+    const definition = flattenVariableTree(nodes).find(item => item.id === target.variableId)
     if (definition === undefined) throw new Error(`Unknown Studio variable ${target.variableId}`)
     variableValue(definition, target.value)
     await bindings[target.variableId]!.set(target.value)

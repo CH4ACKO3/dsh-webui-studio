@@ -22,7 +22,7 @@ import type {
 import { StudioAgentController, type StudioAgentWorkspace } from './agent.js'
 import { StudioBuildError, StudioBuildRunner } from './build.js'
 import type { StudioCommandRunner, StudioDraftRegistry } from './drafts.js'
-import { saveElementDefaults as saveElementDefaultsToProject } from './element-source.js'
+import { saveElementsDefaults as saveElementsDefaultsToProject } from './element-source.js'
 import { StudioPreviewSupervisor } from './preview.js'
 import { applyProjectPatch, listProjectFiles, readProjectFile, writeProjectFile } from './project-files.js'
 import { inspectReadiness, StudioPackRunner } from './readiness.js'
@@ -216,12 +216,10 @@ class StudioDraftController implements StudioAgentWorkspace {
     return applyProjectPatch(this.record.root, path, before, after)
   }
 
-  async saveElementDefaults(elementId: string): Promise<{ files: string[] }> {
-    const element = this.previewStatus().registry?.elements.find(
-      item => item.owner === this.record.name && item.element.id === elementId,
-    )
-    if (element === undefined) throw new Error('Element is not registered by the active Draft')
-    return saveElementDefaultsToProject(this.record.root, element)
+  async saveElementDefaults(): Promise<{ files: string[] }> {
+    const elements = this.previewStatus().registry?.elements.filter(item => item.owner === this.record.name) ?? []
+    if (elements.length === 0) throw new Error('No Elements are registered by the active Draft')
+    return saveElementsDefaultsToProject(this.record.root, elements)
   }
 
   async build(signal: AbortSignal): Promise<StudioBuildResult> {
@@ -322,9 +320,8 @@ export class StudioBackend {
         return success(rpcId, { path, saved: true })
       }
       if (method === 'studio.elements.saveDefaults') {
-        const elementId = objectPayload(payload).elementId
-        if (typeof elementId !== 'string' || elementId === '') throw new Error('elementId is required')
-        return success(rpcId, await controller.saveElementDefaults(elementId))
+        objectPayload(payload)
+        return success(rpcId, await controller.saveElementDefaults())
       }
       if (method === 'studio.project.build') return success(rpcId, await controller.build(new AbortController().signal))
       if (method === 'studio.project.cancelBuild') return success(rpcId, { canceled: await controller.cancelBuild() })

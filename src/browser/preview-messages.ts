@@ -1,9 +1,15 @@
-import type { StudioRegistrySnapshot, StudioVariableDefinition, StudioVariableValue } from 'dsh-harmony-react/studio'
+import type {
+  StudioRegistrySnapshot,
+  StudioVariableDefinition,
+  StudioVariableNode,
+  StudioVariableValue,
+} from 'dsh-harmony-react/studio'
 import type { StudioDomSelection, StudioPatchTrace, StudioSourceCandidate, StudioSourceLocation } from '../contracts'
 
 const MAX_COLLECTION = 500
 const MAX_NESTED_COLLECTION = 100
 const MAX_STRING = 16_000
+const MAX_VARIABLE_TREE_DEPTH = 8
 
 type UnknownRecord = Record<string, unknown>
 
@@ -84,7 +90,7 @@ function domSelection(value: unknown): value is StudioDomSelection {
 const controls = new Set(['color', 'length', 'number', 'boolean', 'enum', 'string'])
 
 function variableDefinition(value: unknown): value is StudioVariableDefinition {
-  if (!record(value) || !string(value.id, 500) || value.id === '' || !string(value.label, 1_000)
+  if (!record(value) || value.kind !== 'variable' || !string(value.id, 500) || value.id === '' || !string(value.label, 1_000)
     || !controls.has(value.control as string)) return false
   if (value.options !== undefined && !stringArray(value.options)) return false
   if (value.defaultSource !== undefined) {
@@ -101,8 +107,26 @@ function variableDefinition(value: unknown): value is StudioVariableDefinition {
   })
 }
 
+function variableTree(value: unknown): value is readonly StudioVariableNode[] {
+  if (!Array.isArray(value) || value.length > MAX_NESTED_COLLECTION) return false
+  const state = { nodes: 0 }
+  const visit = (items: unknown[], depth: number): boolean => {
+    if (depth > MAX_VARIABLE_TREE_DEPTH) return false
+    return items.every(item => {
+      state.nodes += 1
+      if (state.nodes > MAX_COLLECTION || !record(item)) return false
+      if (item.kind === 'variable') return variableDefinition(item)
+      return item.kind === 'group' && string(item.id, 500) && item.id !== ''
+        && string(item.label, 1_000) && item.label !== ''
+        && Array.isArray(item.children) && item.children.length > 0
+        && item.children.length <= MAX_NESTED_COLLECTION && visit(item.children, depth + 1)
+    })
+  }
+  return visit(value, 1)
+}
+
 function variableValues(value: unknown): value is Readonly<Record<string, StudioVariableValue>> {
-  return record(value) && Object.keys(value).length <= MAX_NESTED_COLLECTION
+  return record(value) && Object.keys(value).length <= MAX_COLLECTION
     && Object.entries(value).every(([key, item]) => string(key, 500)
       && (typeof item === 'boolean' || finite(item) || string(item, 2_000)))
 }
@@ -115,12 +139,10 @@ export function isStudioRegistrySnapshot(value: unknown): value is StudioRegistr
       && record(item.element.boundary) && string(item.element.boundary.surfaceId, 1_000)
       && stringArray(item.element.boundary.path)
       && sourceLocation(item.element.source)
-      && (item.element.variables === undefined || (Array.isArray(item.element.variables)
-        && item.element.variables.length <= MAX_NESTED_COLLECTION && item.element.variables.every(variableDefinition)))
+      && (item.element.variables === undefined || variableTree(item.element.variables))
       && variableValues(item.values))
     && value.variables.every(item => record(item) && string(item.owner, 1_000)
-      && Array.isArray(item.variables) && item.variables.length <= MAX_NESTED_COLLECTION
-      && item.variables.every(variableDefinition) && variableValues(item.values))
+      && variableTree(item.variables) && variableValues(item.values))
 }
 
 export function isStudioDomSelection(value: unknown): value is StudioDomSelection {

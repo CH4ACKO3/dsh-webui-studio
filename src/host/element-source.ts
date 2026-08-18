@@ -4,12 +4,18 @@ import type {
   StudioVariableValue,
 } from 'dsh-harmony-react/studio'
 import { readProjectFile, writeProjectFile } from './project-files.js'
+import { flattenVariableTree } from '../variable-tree.js'
 
 interface Replacement {
   start: number
   end: number
   value: string
   id: string
+}
+
+interface SourceBackedVariable {
+  definition: StudioVariableDefinition
+  value: StudioVariableValue
 }
 
 function count(source: string, needle: string): number {
@@ -55,11 +61,10 @@ function serializeDefault(definition: StudioVariableDefinition, value: StudioVar
 
 function replacementsForFile(
   source: string,
-  definitions: readonly StudioVariableDefinition[],
-  values: Readonly<Record<string, StudioVariableValue>>,
+  variables: readonly SourceBackedVariable[],
 ): Replacement[] {
   const replacements: Replacement[] = []
-  for (const definition of definitions) {
+  for (const { definition, value } of variables) {
     const anchor = definition.defaultSource
     if (anchor === undefined) continue
     const start = source.indexOf(anchor.before)
@@ -79,7 +84,7 @@ function replacementsForFile(
     replacements.push({
       start: literalStart,
       end: literalEnd,
-      value: serializeDefault(definition, values[definition.id]!, current),
+      value: serializeDefault(definition, value, current),
       id: definition.id,
     })
   }
@@ -92,24 +97,26 @@ function replacementsForFile(
   return replacements
 }
 
-export async function saveElementDefaults(
+export async function saveElementsDefaults(
   root: string,
-  element: StudioElementSnapshot,
+  elements: readonly StudioElementSnapshot[],
 ): Promise<{ files: string[] }> {
-  const definitions = element.element.variables ?? []
-  const grouped = new Map<string, StudioVariableDefinition[]>()
-  for (const definition of definitions) {
-    if (definition.defaultSource === undefined) continue
-    const list = grouped.get(definition.defaultSource.file)
-    if (list === undefined) grouped.set(definition.defaultSource.file, [definition])
-    else list.push(definition)
+  const grouped = new Map<string, SourceBackedVariable[]>()
+  for (const element of elements) {
+    for (const definition of flattenVariableTree(element.element.variables ?? [])) {
+      if (definition.defaultSource === undefined) continue
+      const variable = { definition, value: element.values[definition.id]! }
+      const list = grouped.get(definition.defaultSource.file)
+      if (list === undefined) grouped.set(definition.defaultSource.file, [variable])
+      else list.push(variable)
+    }
   }
-  if (grouped.size === 0) throw new Error('This Element has no source-backed defaults')
+  if (grouped.size === 0) throw new Error('This Draft has no source-backed Element defaults')
 
   const updates: Array<{ file: string; original: string; content: string }> = []
-  for (const [file, fileDefinitions] of grouped) {
+  for (const [file, fileVariables] of grouped) {
     const source = await readProjectFile(root, file)
-    const replacements = replacementsForFile(source, fileDefinitions, element.values)
+    const replacements = replacementsForFile(source, fileVariables)
     let content = source
     for (const replacement of [...replacements].reverse()) {
       content = `${content.slice(0, replacement.start)}${replacement.value}${content.slice(replacement.end)}`

@@ -43,10 +43,12 @@ describe('Preview bridge message validation', () => {
         element: {
           id: 'toolbar', label: 'Toolbar', boundary: { surfaceId: 'main', path: ['toolbar'] },
           source: { file: 'src/client.tsx', line: 2 },
-          variables: [{
-            id: 'dense', label: 'Dense', control: 'boolean',
-            defaultSource: { file: 'src/client.tsx', before: 'const dense = ', after: ';' },
-          }],
+          variables: [{ kind: 'group', id: 'layout', label: 'Layout', children: [{
+            kind: 'group', id: 'density', label: 'Density', children: [{
+              kind: 'variable', id: 'dense', label: 'Dense', control: 'boolean',
+              defaultSource: { file: 'src/client.tsx', before: 'const dense = ', after: ';' },
+            }],
+          }] }],
         },
         values: { dense: true },
       }],
@@ -55,6 +57,13 @@ describe('Preview bridge message validation', () => {
     expect(isStudioRegistrySnapshot(registry)).toBe(true)
     expect(isStudioRegistrySnapshot({ elements: [{}], variables: [] })).toBe(false)
     expect(isStudioRegistrySnapshot({ elements: Array.from({ length: 501 }, () => registry.elements[0]), variables: [] })).toBe(false)
+    const tooDeep = Array.from({ length: 9 }).reduceRight<unknown>((children, _, index) => [{
+      kind: 'group', id: `group-${index}`, label: `Group ${index}`, children,
+    }], [{ kind: 'variable', id: 'dense', label: 'Dense', control: 'boolean' }])
+    expect(isStudioRegistrySnapshot({
+      ...registry,
+      elements: [{ ...registry.elements[0], element: { ...registry.elements[0].element, variables: tooDeep } }],
+    })).toBe(false)
   })
 
   it('bounds errors received from the Preview', () => {

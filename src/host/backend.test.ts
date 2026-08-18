@@ -248,11 +248,12 @@ describe('StudioBackend', () => {
     expect(saved.result).toMatchObject({ ok: true, value: { saved: true } })
   })
 
-  it('persists registered Element values only into their source defaults', async () => {
+  it('persists every registered Element value through one Draft-level save', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-studio-backend-'))
     temporaryDirectories.push(root)
     await mkdir(join(root, 'src'))
     await writeFile(join(root, 'src/theme.ts'), "const accent = '#235be6';\nexport { accent };\n")
+    await writeFile(join(root, 'src/layout.ts'), "const density = 1;\nexport { density };\n")
     const draft = record(root)
     const studio = backend(draft)
     await studio.call(request('studio.drafts.start', { draftId: draft.id }))
@@ -269,6 +270,7 @@ describe('StudioBackend', () => {
             boundary: { surfaceId: 'settings', path: ['theme'] },
             source: { file: 'src/theme.ts' },
             variables: [{
+              kind: 'variable',
               id: 'accent',
               label: 'Accent',
               control: 'color',
@@ -276,16 +278,35 @@ describe('StudioBackend', () => {
             }],
           },
           values: { accent: '#ff8800' },
+        }, {
+          owner: draft.name,
+          element: {
+            id: 'layout',
+            label: 'Layout',
+            boundary: { surfaceId: 'settings', path: ['layout'] },
+            source: { file: 'src/layout.ts' },
+            variables: [{
+              kind: 'variable',
+              id: 'density',
+              label: 'Density',
+              control: 'number',
+              defaultSource: { file: 'src/layout.ts', before: 'const density = ', after: ';' },
+            }],
+          },
+          values: { density: 2 },
         }],
         variables: [],
       },
     }))
 
-    const saved = await studio.call(request('studio.elements.saveDefaults', { draftId: draft.id, elementId: 'theme' }))
+    const saved = await studio.call(request('studio.elements.saveDefaults', { draftId: draft.id }))
 
-    expect(saved.result).toEqual({ ok: true, value: { files: ['src/theme.ts'] } })
+    expect(saved.result).toEqual({ ok: true, value: { files: ['src/theme.ts', 'src/layout.ts'] } })
     await expect(readFile(join(root, 'src/theme.ts'), 'utf8')).resolves.toBe(
       "const accent = '#ff8800';\nexport { accent };\n",
+    )
+    await expect(readFile(join(root, 'src/layout.ts'), 'utf8')).resolves.toBe(
+      "const density = 2;\nexport { density };\n",
     )
   })
 

@@ -14,17 +14,19 @@ describe('StudioPreviewRegistry', () => {
         id: 'toolbar', label: 'Toolbar',
         boundary: { surfaceId: 'draft.surface', path: ['root', 'toolbar/one'] },
         source: { file: 'src/Toolbar.tsx' },
-        variables: [{
-          id: 'accent', label: 'Accent', control: 'color',
-          defaultSource: { file: 'src/Toolbar.tsx', before: 'const accent = ', after: ';' },
-        }],
+        variables: [{ kind: 'group', id: 'appearance', label: 'Appearance', children: [{
+          kind: 'group', id: 'color', label: 'Color', children: [{
+            kind: 'variable', id: 'accent', label: 'Accent', control: 'color',
+            defaultSource: { file: 'src/Toolbar.tsx', before: 'const accent = ', after: ';' },
+          }],
+        }] }],
       },
       bindings: { accent: { get: () => accent, set: value => { accent = String(value) }, subscribe: next => { listener = next; return stop } } },
     })
 
     expect(registry.snapshot().elements[0]).toMatchObject({
       owner: 'draft',
-      element: { variables: [{ defaultSource: { file: 'src/Toolbar.tsx' } }] },
+      element: { variables: [{ children: [{ children: [{ defaultSource: { file: 'src/Toolbar.tsx' } }] }] }] },
       values: { accent: '#235be6' },
     })
     listener?.()
@@ -41,7 +43,7 @@ describe('StudioPreviewRegistry', () => {
       owner: 'draft',
       element: {
         id: 'toolbar', label: 'Toolbar', boundary: { surfaceId: 'draft.surface', path: ['toolbar'] },
-        source: { file: 'src/Toolbar.tsx' }, variables: [{ id: 'density', label: 'Density', control: 'number' as const, constraints: { min: 0, max: 2 } }],
+        source: { file: 'src/Toolbar.tsx' }, variables: [{ kind: 'variable' as const, id: 'density', label: 'Density', control: 'number' as const, constraints: { min: 0, max: 2 } }],
       },
       bindings: { density: { get: () => density, set: (value: string | number | boolean) => { density = Number(value) } } },
     }
@@ -51,12 +53,28 @@ describe('StudioPreviewRegistry', () => {
       ...registration,
       element: { ...registration.element, id: 'other' },
     })).toThrow('boundary already registered')
-    expect(() => registry.registerVariables({ owner: 'draft', variables: [{ id: 'accent', label: 'Accent', control: 'color' }], bindings: {} }))
+    expect(() => registry.registerVariables({ owner: 'draft', variables: [{ kind: 'variable', id: 'accent', label: 'Accent', control: 'color' }], bindings: {} }))
       .toThrow('has no binding')
     await expect(registry.set({ scope: 'element', owner: 'draft', elementId: 'toolbar', variableId: 'density', value: 3 }))
       .rejects.toThrow('above its maximum')
     await registry.set({ scope: 'element', owner: 'draft', elementId: 'toolbar', variableId: 'density', value: 2 })
     expect(density).toBe(2)
+  })
+
+  it('rejects duplicate node ids across variable-tree branches', () => {
+    const registry = new StudioPreviewRegistry(() => {})
+    expect(() => registry.registerVariables({
+      owner: 'draft',
+      variables: [
+        { kind: 'group', id: 'content', label: 'Content', children: [
+          { kind: 'variable', id: 'shared', label: 'Title', control: 'string' },
+        ] },
+        { kind: 'group', id: 'appearance', label: 'Appearance', children: [
+          { kind: 'variable', id: 'shared', label: 'Color', control: 'color' },
+        ] },
+      ],
+      bindings: { shared: { get: () => 'value', set: () => undefined } },
+    })).toThrow('Duplicate Studio variable node id shared')
   })
 
   it('serializes writes and never applies an old queued write to a replacement registration', async () => {
@@ -67,7 +85,7 @@ describe('StudioPreviewRegistry', () => {
       owner: 'draft',
       element: {
         id: 'toolbar', label: 'Toolbar', boundary: { surfaceId: 'draft.surface', path: ['toolbar'] },
-        source: { file: 'src/Toolbar.tsx' }, variables: [{ id: 'density', label: 'Density', control: 'number' as const }],
+        source: { file: 'src/Toolbar.tsx' }, variables: [{ kind: 'variable' as const, id: 'density', label: 'Density', control: 'number' as const }],
       },
       bindings: { density: { get: () => value, set: (next: string | number | boolean) => set(Number(next)) } },
     })

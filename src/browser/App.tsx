@@ -16,6 +16,8 @@ import type {
   StudioElementSnapshot,
   StudioRegistrySnapshot,
   StudioVariableDefinition,
+  StudioVariableGroupDefinition,
+  StudioVariableNode,
   StudioVariableValue,
 } from 'dsh-harmony-react/studio'
 import {
@@ -40,6 +42,7 @@ import { apiValue, studioApi, subscribeStudioEvents } from './events'
 import { callStudio, StudioRpcError } from './rpc'
 import { CodeEditor } from './CodeEditor'
 import { useStudioLocale, type StudioTranslate } from './i18n'
+import { flattenVariableTree } from '../variable-tree'
 import {
   clamp,
   constrainRect,
@@ -256,10 +259,12 @@ function VariableControl({
   definition,
   value,
   onChange,
+  depth = 0,
 }: {
   definition: StudioVariableDefinition
   value: StudioVariableValue
   onChange(value: StudioVariableValue): void
+  depth?: number
 }): JSX.Element {
   const id = useId()
   let control: JSX.Element
@@ -277,10 +282,54 @@ function VariableControl({
     control = <Input id={id} type={definition.control === 'color' ? 'color' : 'text'} value={String(value)}
       onChange={event => onChange(event.target.value)} />
   }
-  return <label className="element-variable" htmlFor={id}>
+  return <label className="element-variable" htmlFor={id}
+    style={{ '--variable-tree-depth': Math.min(depth, 4) } as CSSProperties}>
     <span><strong>{definition.label}</strong><code>{definition.id}</code></span>
     {control}
   </label>
+}
+
+function VariableGroup({
+  group,
+  values,
+  onChange,
+  depth,
+}: {
+  group: StudioVariableGroupDefinition
+  values: Readonly<Record<string, StudioVariableValue>>
+  onChange(definition: StudioVariableDefinition, value: StudioVariableValue): void
+  depth: number
+}): JSX.Element {
+  const [open, setOpen] = useState(true)
+  return <details className="variable-group" open={open} onToggle={event => setOpen(event.currentTarget.open)}>
+    <summary className="variable-group-summary"
+      style={{ '--variable-tree-depth': Math.min(depth, 4) } as CSSProperties}>
+      <span><strong>{group.label}</strong><code>{group.id}</code></span>
+      <small>{flattenVariableTree(group.children).length}</small>
+    </summary>
+    <VariableTree nodes={group.children} values={values} onChange={onChange} depth={depth + 1} nested />
+  </details>
+}
+
+function VariableTree({
+  nodes,
+  values,
+  onChange,
+  depth = 0,
+  nested = false,
+}: {
+  nodes: readonly StudioVariableNode[]
+  values: Readonly<Record<string, StudioVariableValue>>
+  onChange(definition: StudioVariableDefinition, value: StudioVariableValue): void
+  depth?: number
+  nested?: boolean
+}): JSX.Element {
+  return <div className={nested ? 'variable-tree-children' : 'variable-tree'}>
+    {nodes.map(node => node.kind === 'group'
+      ? <VariableGroup key={node.id} group={node} values={values} onChange={onChange} depth={depth} />
+      : <VariableControl key={node.id} definition={node} value={values[node.id]!}
+          depth={depth} onChange={value => onChange(node, value)} />)}
+  </div>
 }
 
 function PatchProvenance({
@@ -317,6 +366,56 @@ function PatchProvenance({
           </dl>
         </article>)}</div>}
   </section>
+}
+
+function ElementTreeNode({
+  element,
+  matched,
+  patches,
+  currentOwner,
+  sourceAvailable,
+  initialOpen,
+  onOpenSource,
+  onChange,
+  t,
+}: {
+  element: StudioElementSnapshot
+  matched: boolean
+  patches?: readonly StudioPatchTrace[]
+  currentOwner?: string
+  sourceAvailable: boolean
+  initialOpen: boolean
+  onOpenSource(): void
+  onChange(definition: StudioVariableDefinition, value: StudioVariableValue): void
+  t: StudioTranslate
+}): JSX.Element {
+  const [open, setOpen] = useState(initialOpen)
+  const variables = flattenVariableTree(element.element.variables ?? [])
+  useEffect(() => {
+    if (matched) setOpen(true)
+  }, [matched])
+
+  return <details className="element-tree-node" data-matched={matched || undefined}
+    open={open} onToggle={event => setOpen(event.currentTarget.open)}>
+    <summary className="element-tree-summary">
+      <span><strong>{element.element.label}</strong><code>{element.element.id}</code></span>
+      <small>{matched ? t('previewSelection') : variables.length}</small>
+    </summary>
+    <div className="element-tree-content">
+      <div className="element-tree-source-row">
+        <code>{element.element.source.file}</code>
+        <Button className="source-link" variant="ghost" size="small" disabled={!sourceAvailable}
+          onClick={onOpenSource}>{t('openElementSource')}</Button>
+      </div>
+      {matched && patches !== undefined
+        && <PatchProvenance patches={patches} currentOwner={currentOwner} boundaryMatched t={t} />}
+      {variables.length === 0
+        ? <p className="inspection-empty">{t('elementNoVariables')}</p>
+        : <VariableTree nodes={element.element.variables ?? []} values={element.values} depth={1} onChange={onChange} />}
+      {variables.some(variable => variable.defaultSource === undefined)
+        && <p className="variable-note">{t('elementSourceSaveNote')}</p>}
+    </div>
+  </details>
 }
 
 function textFromContent(value: unknown): string {
@@ -395,7 +494,6 @@ export function App(): JSX.Element {
   const [previewOrigin, setPreviewOrigin] = useState({ x: PREVIEW_GUTTER, y: PREVIEW_GUTTER })
   const [selection, setSelection] = useState<StudioDomSelection>()
   const [registry, setRegistry] = useState<StudioRegistrySnapshot>(EMPTY_REGISTRY)
-  const [focusedElementId, setFocusedElementId] = useState<string>()
   const [panel, setPanel] = useState<Panel>('elements')
   const [previewFullscreen, setPreviewFullscreen] = useState(false)
   const [terminalExpanded, setTerminalExpanded] = useState(false)
@@ -406,7 +504,7 @@ export function App(): JSX.Element {
   const [source, setSource] = useState('')
   const [savedSource, setSavedSource] = useState('')
   const [fileBusy, setFileBusy] = useState(false)
-  const [elementSourceBusyId, setElementSourceBusyId] = useState<string>()
+  const [elementSourceBusy, setElementSourceBusy] = useState(false)
   const [elementSourceMessage, setElementSourceMessage] = useState<string>()
   const [inspection, setInspection] = useState<StudioHarmonyInspection>({ patches: [], targets: [] })
   const [readiness, setReadiness] = useState<StudioReadinessReport>({ findings: [] })
@@ -465,12 +563,9 @@ export function App(): JSX.Element {
     () => elementForSelection(selection, registry, selectedDraft?.name),
     [registry, selectedDraft?.name, selection],
   )
-  const focusedElement = draftElements.find(item => item.element.id === focusedElementId)
-    ?? matchedElement
-    ?? draftElements[0]
-  const focusedElementSourceVariables = focusedElement?.element.variables?.filter(
-    variable => variable.defaultSource !== undefined,
-  ) ?? []
+  const hasElementSourceDefaults = draftElements.some(element => flattenVariableTree(
+    element.element.variables ?? [],
+  ).some(variable => variable.defaultSource !== undefined))
   const previewInsets = previewFullscreen
     ? { left: 0, right: 0 }
     : {
@@ -671,12 +766,8 @@ export function App(): JSX.Element {
   }, [previewScale, previewSession, previewViewport.height, previewViewport.width])
 
   useEffect(() => {
-    if (selection !== undefined && matchedElement !== undefined) setFocusedElementId(matchedElement.element.id)
-  }, [matchedElement?.element.id, selection])
-
-  useEffect(() => {
     setElementSourceMessage(undefined)
-  }, [focusedElement?.element.id, selectedDraftId])
+  }, [selectedDraftId])
 
   useEffect(() => {
     const currentDraft = selectedDraftId
@@ -687,7 +778,6 @@ export function App(): JSX.Element {
     previewNonce.current = crypto.randomUUID()
     selectionResolve.current += 1
     setRegistry(EMPTY_REGISTRY)
-    setFocusedElementId(undefined)
     setSelection(undefined)
     return () => {
       previewPort.current?.close()
@@ -1139,21 +1229,20 @@ export function App(): JSX.Element {
   }
 
   const saveElementDefaults = async (): Promise<void> => {
-    if (selectedDraftId === undefined || focusedElement === undefined) return
+    if (selectedDraftId === undefined || !hasElementSourceDefaults) return
     if (hasUnsavedSource) {
       setPanel('source')
       setError(t('errorUnsavedElementSave'))
       return
     }
     const draftId = selectedDraftId
-    const elementId = focusedElement.element.id
-    setElementSourceBusyId(elementId)
+    setElementSourceBusy(true)
     setElementSourceMessage(undefined)
     setError(undefined)
     try {
       await variableUpdateTail.current
       await previewUpdateQueue.current
-      const result = await callStudio<{ files: string[] }>('studio.elements.saveDefaults', { draftId, elementId })
+      const result = await callStudio<{ files: string[] }>('studio.elements.saveDefaults', { draftId })
       setElementSourceMessage(t('elementSourceSaved', { count: result.files.length }))
       if (filePath !== '' && result.files.includes(filePath)) {
         const file = await callStudio<{ path: string; content: string }>('studio.project.readFile', { draftId, path: filePath })
@@ -1168,7 +1257,7 @@ export function App(): JSX.Element {
     } catch (cause) {
       if (draftIdRef.current === draftId) setError(cause instanceof StudioRpcError ? cause.message : String(cause))
     } finally {
-      setElementSourceBusyId(current => current === elementId ? undefined : current)
+      if (draftIdRef.current === draftId) setElementSourceBusy(false)
     }
   }
 
@@ -1312,7 +1401,6 @@ export function App(): JSX.Element {
     activateDraft(draftId)
     setSelection(undefined)
     setRegistry(EMPTY_REGISTRY)
-    setFocusedElementId(undefined)
     queueWorkspaceUpdate(nextOpenDraftIds, draftId)
     return true
   }
@@ -1340,7 +1428,6 @@ export function App(): JSX.Element {
     activateDraft(nextDraftId)
     setSelection(undefined)
     setRegistry(EMPTY_REGISTRY)
-    setFocusedElementId(undefined)
   }
 
   const moveDraftTabToIndex = (draftId: string, targetIndex: number): void => {
@@ -2047,67 +2134,43 @@ export function App(): JSX.Element {
         {panel === 'elements' && <PanelBody id="studio-panel-elements" aria-labelledby="studio-tab-elements" className="panel-content elements-panel" role="tabpanel">
           <div className="panel-heading">
             <div><h2>{t('elementsTitle')}</h2><p>{t('elementsDescription')}</p></div>
-            <Badge tone="info">{draftElements.length}</Badge>
+            <div className="elements-heading-actions">
+              <Badge tone="info">{draftElements.length}</Badge>
+              <Button variant="primary" size="small" loading={elementSourceBusy}
+                loadingLabel={t('savingElementToSource')}
+                disabled={!hasElementSourceDefaults || elementSourceBusy}
+                onClick={() => void saveElementDefaults()}>{t('saveElementToSource')}</Button>
+            </div>
           </div>
+          {elementSourceMessage !== undefined && <Notice className="element-source-notice" tone="success">{elementSourceMessage}</Notice>}
           {draftElements.length === 0 && draftVariables.length === 0
             ? <EmptyState title={t('elementsEmpty')}
                 description={t('elementsEmptyDescription')} />
             : <>
-                {draftElements.length > 0 && <div className="element-list" aria-label={t('registeredElements')}>
-                  {draftElements.map(item => <button key={item.element.id} type="button"
-                    data-active={focusedElement?.element.id === item.element.id}
-                    data-matched={matchedElement?.element.id === item.element.id}
-                    onClick={() => setFocusedElementId(item.element.id)}>
-                    <span><strong>{item.element.label}</strong><code>{item.element.id}</code></span>
-                    {matchedElement?.element.id === item.element.id && <small>{t('previewSelection')}</small>}
-                  </button>)}
+                {draftElements.length > 0 && <div className="element-tree" aria-label={t('registeredElements')}>
+                  {draftElements.map((element, index) => {
+                    const matched = matchedElement?.element.id === element.element.id
+                    return <ElementTreeNode key={element.element.id} element={element} matched={matched}
+                      patches={matched ? selection?.react?.patches : undefined}
+                      currentOwner={selectedDraft?.name}
+                      sourceAvailable={files.some(file => file.path === element.element.source.file)}
+                      initialOpen={matched || index === 0}
+                      onOpenSource={() => {
+                        setPanel('source')
+                        void openFile(element.element.source.file)
+                      }}
+                      onChange={(definition, value) => setVariable({
+                        scope: 'element', owner: element.owner, elementId: element.element.id,
+                        variableId: definition.id, value,
+                      })}
+                      t={t} />
+                  })}
                 </div>}
 
-                {focusedElement !== undefined && <section className="element-detail" aria-label={t('elementControls', { name: focusedElement.element.label })}>
-                  <div className="element-source-row">
-                    <div><strong>{focusedElement.element.label}</strong><code>{focusedElement.element.source.file}</code></div>
-                    <div className="element-source-actions">
-                      <Button className="source-link" variant="ghost" size="small" disabled={!files.some(file => file.path === focusedElement.element.source.file)}
-                        onClick={() => {
-                          setPanel('source')
-                          void openFile(focusedElement.element.source.file)
-                        }}>{t('openElementSource')}</Button>
-                      {focusedElementSourceVariables.length > 0 && <Button className="source-link" variant="primary" size="small"
-                        loading={elementSourceBusyId === focusedElement.element.id}
-                        loadingLabel={t('savingElementToSource')}
-                        disabled={elementSourceBusyId !== undefined}
-                        onClick={() => void saveElementDefaults()}>{t('saveElementToSource')}</Button>}
-                    </div>
-                  </div>
-                  {elementSourceMessage !== undefined && <Notice tone="success">{elementSourceMessage}</Notice>}
-                  {matchedElement?.element.id === focusedElement.element.id
-                    ? <p className="element-match" data-state="matched">{t('elementMatched')}</p>
-                    : selection !== undefined && <p className="element-match">{t('elementNotMatched')}</p>}
-                  {matchedElement?.element.id === focusedElement.element.id && selection?.react !== undefined
-                    && <PatchProvenance patches={selection.react.patches} currentOwner={selectedDraft?.name} boundaryMatched t={t} />}
-                  {(focusedElement.element.variables ?? []).length === 0
-                    ? <p className="inspection-empty">{t('elementNoVariables')}</p>
-                    : <div className="element-variables">{focusedElement.element.variables?.map(definition => <VariableControl
-                        key={definition.id}
-                        definition={definition}
-                        value={focusedElement.values[definition.id]!}
-                        onChange={value => setVariable({
-                          scope: 'element', owner: focusedElement.owner, elementId: focusedElement.element.id,
-                          variableId: definition.id, value,
-                        })}
-                      />)}</div>}
-                  {focusedElement.element.variables?.some(variable => variable.defaultSource === undefined) === true
-                    && <p className="variable-note">{t('elementSourceSaveNote')}</p>}
-                </section>}
-
                 {draftVariables.map(group => <section className="global-variables" key={group.owner}>
-                  <div className="section-heading"><strong>{t('pluginVariables')}</strong><span>{group.variables.length}</span></div>
-                  <div className="element-variables">{group.variables.map(definition => <VariableControl
-                    key={definition.id}
-                    definition={definition}
-                    value={group.values[definition.id]!}
-                    onChange={value => setVariable({ scope: 'global', owner: group.owner, variableId: definition.id, value })}
-                  />)}</div>
+                  <div className="section-heading"><strong>{t('pluginVariables')}</strong><span>{flattenVariableTree(group.variables).length}</span></div>
+                  <VariableTree nodes={group.variables} values={group.values}
+                    onChange={(definition, value) => setVariable({ scope: 'global', owner: group.owner, variableId: definition.id, value })} />
                 </section>)}
                 <p className="variable-note">{t('variableNote')}</p>
               </>}
