@@ -26,6 +26,9 @@ vi.mock('./preview.js', () => ({
     async activate(graphRev: string) { return { ...previewState.project, state: 'active', graphRev } }
     async applyBuild() { return { ...previewState.project, state: 'preview-pending', graphRev: 'graph-2' } }
     async inspect() { return { harmony: { patches: [], targets: [] }, dependencies: [] } }
+    async readPatchTarget(packageName: string, file: string) {
+      return { package: packageName, file, version: '1.2.3', source: 'const first = "Original";\nconst second = "Original";\n' }
+    }
     async dispose() {}
   },
 }))
@@ -308,6 +311,35 @@ describe('StudioBackend', () => {
     await expect(readFile(join(root, 'src/layout.ts'), 'utf8')).resolves.toBe(
       "const density = 2;\nexport { density };\n",
     )
+  })
+
+  it('analyzes multiple automatic Patch matches before explicitly writing the provider', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-studio-backend-'))
+    temporaryDirectories.push(root)
+    await writeFile(join(root, 'package.json'), `${JSON.stringify({
+      name: 'draft-plugin', dsh: { client: { platform: 'web' }, harmony: { patches: [] } },
+    })}\n`)
+    const draft = record(root)
+    const studio = backend(draft)
+    const payload = {
+      draftId: draft.id,
+      kind: 'replace-string',
+      targets: [{ package: 'target-plugin', file: 'lib/client.js' }],
+      text: 'Original',
+      replacement: 'Changed',
+    }
+
+    const analyzed = await studio.call(request('studio.patches.analyzeAutomatic', payload))
+    expect(analyzed.result).toMatchObject({ ok: true, value: {
+      canApply: true,
+      targets: [{ package: 'target-plugin', file: 'lib/client.js', matches: [{ line: 1 }, { line: 2 }] }],
+      provider: { patchIds: [expect.any(String)] },
+    } })
+    await expect(readFile(join(root, 'package.json'), 'utf8')).resolves.not.toContain('patch.auto-')
+
+    const created = await studio.call(request('studio.patches.createAutomatic', payload))
+    expect(created.result).toMatchObject({ ok: true, value: { files: [expect.stringMatching(/^patch\.auto-/), 'package.json'] } })
+    await expect(readFile(join(root, 'package.json'), 'utf8')).resolves.toContain('patch.auto-')
   })
 
   it('exports a Draft only through its explicit folder action', async () => {

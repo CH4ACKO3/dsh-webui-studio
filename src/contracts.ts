@@ -206,6 +206,44 @@ export interface StudioBuildResult {
   build: StudioBuildOutput
 }
 
+export interface StudioAutomaticPatchTarget {
+  package: string
+  file: string
+}
+
+export interface StudioAutomaticPatchRequest {
+  kind: 'replace-string'
+  targets: StudioAutomaticPatchTarget[]
+  text: string
+  replacement: string
+}
+
+export interface StudioAutomaticPatchMatch {
+  line: number
+  column: number
+  excerpt: string
+}
+
+export interface StudioAutomaticPatchTargetAnalysis extends StudioAutomaticPatchTarget {
+  version: string
+  matches: StudioAutomaticPatchMatch[]
+}
+
+export interface StudioAutomaticPatchPlan {
+  request: StudioAutomaticPatchRequest
+  targets: StudioAutomaticPatchTargetAnalysis[]
+  canApply: boolean
+  provider: {
+    file: string
+    source: string
+    patchIds: string[]
+  }
+}
+
+export interface StudioAutomaticPatchWriteResult extends StudioAutomaticPatchPlan {
+  files: string[]
+}
+
 export type StudioHarmonyService = HarmonyService
 
 export interface StudioPreviewInspection {

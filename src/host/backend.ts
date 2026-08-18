@@ -3,6 +3,9 @@ import type { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 import type {
   StudioBuildResult,
   StudioAgentContext,
+  StudioAutomaticPatchPlan,
+  StudioAutomaticPatchRequest,
+  StudioAutomaticPatchWriteResult,
   StudioClientRequest,
   StudioCreateDraftInput,
   StudioDraftRecord,
@@ -20,6 +23,7 @@ import type {
   StudioWorkspaceState,
 } from '../contracts.js'
 import { StudioAgentController, type StudioAgentWorkspace } from './agent.js'
+import { analyzeAutomaticPatch, writeAutomaticPatch } from './automatic-patch.js'
 import { StudioBuildError, StudioBuildRunner } from './build.js'
 import type { StudioCommandRunner, StudioDraftRegistry } from './drafts.js'
 import { saveElementsDefaults as saveElementsDefaultsToProject } from './element-source.js'
@@ -56,12 +60,33 @@ function optionalStringList(value: unknown, field: string): string[] | undefined
   return value
 }
 
+function automaticPatchRequest(payload: unknown): StudioAutomaticPatchRequest {
+  const input = objectPayload(payload)
+  if (input.kind !== 'replace-string') throw new Error('automatic Patch kind must be replace-string')
+  if (!Array.isArray(input.targets) || input.targets.length === 0) {
+    throw new Error('automatic Patch targets must be a non-empty array')
+  }
+  const targets = input.targets.map((value, index) => {
+    if (typeof value !== 'object' || value === null) throw new Error(`automatic Patch target ${index} must be an object`)
+    const target = value as Record<string, unknown>
+    if (typeof target.package !== 'string' || target.package === '' || typeof target.file !== 'string' || target.file === '') {
+      throw new Error(`automatic Patch target ${index} requires package and file`)
+    }
+    return { package: target.package, file: target.file }
+  })
+  if (typeof input.text !== 'string' || typeof input.replacement !== 'string') {
+    throw new Error('automatic string Patch requires text and replacement strings')
+  }
+  return { kind: input.kind, targets, text: input.text, replacement: input.replacement }
+}
+
 class StudioDraftController implements StudioAgentWorkspace {
   private projectState?: StudioProjectState
   private previewState: StudioPreviewStatus = { connected: false, mode: 'browse' }
   private readonly builds: StudioBuildRunner
   private readonly packs: StudioPackRunner
   private readonly agent: StudioAgentController
+  private automaticPatchWrites: Promise<void> = Promise.resolve()
   readonly preview: StudioPreviewSupervisor
 
   constructor(
@@ -222,6 +247,20 @@ class StudioDraftController implements StudioAgentWorkspace {
     return saveElementsDefaultsToProject(this.record.root, elements)
   }
 
+  async analyzeAutomaticPatch(request: StudioAutomaticPatchRequest): Promise<StudioAutomaticPatchPlan> {
+    const sources = await Promise.all(request.targets.map(target => this.preview.readPatchTarget(target.package, target.file)))
+    return analyzeAutomaticPatch(request, sources)
+  }
+
+  async createAutomaticPatch(request: StudioAutomaticPatchRequest): Promise<StudioAutomaticPatchWriteResult> {
+    const run = this.automaticPatchWrites.then(async () => {
+      const plan = await this.analyzeAutomaticPatch(request)
+      return writeAutomaticPatch(this.record.root, plan)
+    })
+    this.automaticPatchWrites = run.then(() => undefined, () => undefined)
+    return run
+  }
+
   async build(signal: AbortSignal): Promise<StudioBuildResult> {
     const current = this.project()
     if (current.state !== 'active') throw new Error('Draft must be active before it can be built')
@@ -322,6 +361,12 @@ export class StudioBackend {
       if (method === 'studio.elements.saveDefaults') {
         objectPayload(payload)
         return success(rpcId, await controller.saveElementDefaults())
+      }
+      if (method === 'studio.patches.analyzeAutomatic') {
+        return success(rpcId, await controller.analyzeAutomaticPatch(automaticPatchRequest(payload)))
+      }
+      if (method === 'studio.patches.createAutomatic') {
+        return success(rpcId, await controller.createAutomaticPatch(automaticPatchRequest(payload)))
       }
       if (method === 'studio.project.build') return success(rpcId, await controller.build(new AbortController().signal))
       if (method === 'studio.project.cancelBuild') return success(rpcId, { canceled: await controller.cancelBuild() })

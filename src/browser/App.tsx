@@ -30,7 +30,7 @@ import {
   type StudioHarmonyInspection,
   type StudioProjectFile,
   type StudioProjectState,
-  type StudioPatchTrace,
+  type StudioPreviewStatus,
   type StudioReadinessLevel,
   type StudioReadinessReport,
   type StudioServerRequest,
@@ -43,6 +43,7 @@ import { callStudio, StudioRpcError } from './rpc'
 import { CodeEditor } from './CodeEditor'
 import { useStudioLocale, type StudioTranslate } from './i18n'
 import { flattenVariableTree } from '../variable-tree'
+import { parseVariableInput } from './variable-input'
 import {
   clamp,
   constrainRect,
@@ -104,6 +105,14 @@ type Panel = typeof panels[number]
 const leftPanels = ['instance', 'plugins'] as const
 type LeftPanel = typeof leftPanels[number]
 type InstanceOperation = 'start' | 'stop' | 'restart'
+type PreviewConnection = {
+  port: MessagePort
+  sessionId: string
+  nonce: string
+}
+type StudioVariableUpdate =
+  | { scope: 'element'; owner: string; elementId: string; variableId: string; value: StudioVariableValue }
+  | { scope: 'global'; owner: string; variableId: string; value: StudioVariableValue }
 type DraftTabDrag = {
   draftId: string
   sourceIndex: number
@@ -267,6 +276,28 @@ function VariableControl({
   depth?: number
 }): JSX.Element {
   const id = useId()
+  const validatedInput = definition.control === 'length' || definition.control === 'number' || definition.control === 'string'
+  const [draftValue, setDraftValue] = useState(String(value))
+  const [focused, setFocused] = useState(false)
+  const composing = useRef(false)
+  const parsedValue = validatedInput ? parseVariableInput(definition, draftValue) : undefined
+
+  useEffect(() => {
+    if (!focused) setDraftValue(String(value))
+  }, [focused, value])
+
+  const finishEditing = (): void => {
+    setFocused(false)
+    if (parsedValue === undefined) setDraftValue(String(value))
+  }
+
+  const changeDraftValue = (next: string): void => {
+    setDraftValue(next)
+    if (composing.current) return
+    const parsed = parseVariableInput(definition, next)
+    if (parsed !== undefined && !Object.is(parsed, value)) onChange(parsed)
+  }
+
   let control: JSX.Element
   if (definition.control === 'boolean') {
     control = <Input id={id} type="checkbox" checked={value === true} onChange={event => onChange(event.target.checked)} />
@@ -276,11 +307,24 @@ function VariableControl({
       if (option !== undefined) onChange(option)
     }}>{definition.options?.map(option => <option key={String(option)} value={String(option)}>{String(option)}</option>)}</Select>
   } else if (definition.control === 'number') {
-    control = <Input id={id} type="number" value={Number(value)} min={definition.constraints?.min}
-      max={definition.constraints?.max} step={definition.constraints?.step} onChange={event => onChange(event.target.valueAsNumber)} />
+    control = <Input id={id} type="number" value={draftValue} min={definition.constraints?.min}
+      max={definition.constraints?.max} step={definition.constraints?.step ?? 'any'}
+      aria-invalid={draftValue.trim() !== '' && parsedValue === undefined}
+      onFocus={() => setFocused(true)} onBlur={finishEditing}
+      onChange={event => changeDraftValue(event.target.value)} />
   } else {
-    control = <Input id={id} type={definition.control === 'color' ? 'color' : 'text'} value={String(value)}
-      onChange={event => onChange(event.target.value)} />
+    const textEntry = definition.control === 'length' || definition.control === 'string'
+    control = <Input id={id} type={definition.control === 'color' ? 'color' : 'text'}
+      value={textEntry ? draftValue : String(value)}
+      aria-invalid={definition.control === 'length' && draftValue.trim() !== '' && parsedValue === undefined}
+      onFocus={textEntry ? () => setFocused(true) : undefined}
+      onBlur={textEntry ? finishEditing : undefined}
+      onCompositionStart={textEntry ? () => { composing.current = true } : undefined}
+      onCompositionEnd={textEntry ? event => {
+        composing.current = false
+        changeDraftValue(event.currentTarget.value)
+      } : undefined}
+      onChange={event => textEntry ? changeDraftValue(event.target.value) : onChange(event.target.value)} />
   }
   return <label className="element-variable" htmlFor={id}
     style={{ '--variable-tree-depth': Math.min(depth, 4) } as CSSProperties}>
@@ -300,7 +344,7 @@ function VariableGroup({
   onChange(definition: StudioVariableDefinition, value: StudioVariableValue): void
   depth: number
 }): JSX.Element {
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(false)
   return <details className="variable-group" open={open} onToggle={event => setOpen(event.currentTarget.open)}>
     <summary className="variable-group-summary"
       style={{ '--variable-tree-depth': Math.min(depth, 4) } as CSSProperties}>
@@ -332,47 +376,9 @@ function VariableTree({
   </div>
 }
 
-function PatchProvenance({
-  patches,
-  currentOwner,
-  boundaryMatched,
-  t,
-}: {
-  patches: readonly StudioPatchTrace[]
-  currentOwner?: string
-  boundaryMatched: boolean
-  t: StudioTranslate
-}): JSX.Element {
-  const externallyPatched = boundaryMatched && currentOwner !== undefined
-    && patches.some(patch => patch.owner !== currentOwner)
-
-  return <section className="patch-provenance" aria-label={t('patchCandidates')}>
-    <div className="section-heading">
-      <strong>{t('patchCandidates')}</strong>
-      <Badge tone="warning">{t('patchCandidate')}</Badge>
-    </div>
-    {externallyPatched && <Notice tone="warning">
-      {t('patchExternalNotice')}
-    </Notice>}
-    {patches.length === 0
-      ? <p className="inspection-empty">{t('patchEmpty')}</p>
-      : <div className="patch-trace-list">{patches.map(patch => <article
-          key={`${patch.owner}:${patch.key}:${patch.effect}:${patch.declaration}:${patch.target.package}:${patch.target.file}`}>
-          <div><strong>{patch.owner}</strong><code>{patch.key}</code></div>
-          <dl>
-            <div><dt>{t('effect')}</dt><dd>{patch.effect}</dd></div>
-            <div><dt>{t('declaration')}</dt><dd><code>{patch.declaration}</code></dd></div>
-            <div><dt>{t('target')}</dt><dd><code>{patch.target.package} · {patch.target.file}</code></dd></div>
-          </dl>
-        </article>)}</div>}
-  </section>
-}
-
 function ElementTreeNode({
   element,
   matched,
-  patches,
-  currentOwner,
   sourceAvailable,
   initialOpen,
   onOpenSource,
@@ -381,8 +387,6 @@ function ElementTreeNode({
 }: {
   element: StudioElementSnapshot
   matched: boolean
-  patches?: readonly StudioPatchTrace[]
-  currentOwner?: string
   sourceAvailable: boolean
   initialOpen: boolean
   onOpenSource(): void
@@ -407,8 +411,6 @@ function ElementTreeNode({
         <Button className="source-link" variant="ghost" size="small" disabled={!sourceAvailable}
           onClick={onOpenSource}>{t('openElementSource')}</Button>
       </div>
-      {matched && patches !== undefined
-        && <PatchProvenance patches={patches} currentOwner={currentOwner} boundaryMatched t={t} />}
       {variables.length === 0
         ? <p className="inspection-empty">{t('elementNoVariables')}</p>
         : <VariableTree nodes={element.element.variables ?? []} values={element.values} depth={1} onChange={onChange} />}
@@ -471,11 +473,10 @@ export function App(): JSX.Element {
   const [instanceOperations, setInstanceOperations] = useState<Record<string, InstanceOperation>>({})
   const [buildOperations, setBuildOperations] = useState<Record<string, true>>({})
   const [buildOutputs, setBuildOutputs] = useState<Record<string, StudioBuildOutput>>({})
-  const [confirming, setConfirming] = useState(false)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string>()
   const [interaction, setInteraction] = useState<string>()
-  const [previewKey, setPreviewKey] = useState(0)
+  const [previewVersions, setPreviewVersions] = useState<Record<string, number>>({})
   const [previewMode, setPreviewMode] = useState<'browse' | 'inspect'>('browse')
   const [previewAspectRatio, setPreviewAspectRatio] = useState<PreviewAspectRatio>(
     () => aspectRatioLabel(initialViewport.width, initialViewport.height),
@@ -506,28 +507,32 @@ export function App(): JSX.Element {
   const [fileBusy, setFileBusy] = useState(false)
   const [elementSourceBusy, setElementSourceBusy] = useState(false)
   const [elementSourceMessage, setElementSourceMessage] = useState<string>()
+  const [modifiedElementDefaults, setModifiedElementDefaults] = useState<ReadonlySet<string>>(() => new Set())
   const [inspection, setInspection] = useState<StudioHarmonyInspection>({ patches: [], targets: [] })
   const [readiness, setReadiness] = useState<StudioReadinessReport>({ findings: [] })
   const [packingDraftId, setPackingDraftId] = useState<string>()
   const sessionRef = useRef<string>()
   const runningVersion = useRef(0)
   const draftIdRef = useRef<string>()
+  const draftsRef = useRef<StudioDraftView[]>([])
   const projectRef = useRef<StudioProjectState>()
-  const previewRef = useRef<HTMLIFrameElement>(null)
+  const previewFrames = useRef(new Map<string, HTMLIFrameElement>())
+  const previewFrameRefs = useRef(new Map<string, (node: HTMLIFrameElement | null) => void>())
+  const previewConnections = useRef(new Map<string, PreviewConnection>())
+  const confirmingDrafts = useRef(new Set<string>())
   const previewSectionRef = useRef<HTMLElement>(null)
   const previewStageRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<HTMLPreElement>(null)
   const terminalToggleRef = useRef<HTMLButtonElement>(null)
   const terminalPinnedRef = useRef(true)
-  const previewPort = useRef<MessagePort>()
   const previewBridgeHandlerRef = useRef<(event: MessageEvent) => void>(() => {})
-  const previewNonce = useRef(crypto.randomUUID())
   const previewModeRef = useRef(previewMode)
   const previewTransformRef = useRef({ scale: previewScale, origin: previewOrigin })
   const previewLockedAspectRatioRef = useRef(initialViewport.width / initialViewport.height)
   const previewUpdateQueue = useRef<Promise<void>>(Promise.resolve())
   const variableUpdateTail = useRef<Promise<void>>(Promise.resolve())
   const pendingVariableResults = useRef(new Map<string, { resolve(): void; reject(error: Error): void }>())
+  const sourceVariableBaselines = useRef(new Map<string, StudioVariableValue>())
   const workspaceUpdateQueue = useRef<Promise<void>>(Promise.resolve())
   const suppressDraftTabClickRef = useRef<string>()
   const selectionResolve = useRef(0)
@@ -563,9 +568,9 @@ export function App(): JSX.Element {
     () => elementForSelection(selection, registry, selectedDraft?.name),
     [registry, selectedDraft?.name, selection],
   )
-  const hasElementSourceDefaults = draftElements.some(element => flattenVariableTree(
-    element.element.variables ?? [],
-  ).some(variable => variable.defaultSource !== undefined))
+  const modifiedElementPrefix = selectedDraftId === undefined ? undefined : `${selectedDraftId}\0`
+  const hasModifiedElementDefaults = modifiedElementPrefix !== undefined
+    && [...modifiedElementDefaults].some(key => key.startsWith(modifiedElementPrefix))
   const previewInsets = previewFullscreen
     ? { left: 0, right: 0 }
     : {
@@ -717,6 +722,10 @@ export function App(): JSX.Element {
   }, [project])
 
   useEffect(() => {
+    draftsRef.current = drafts
+  }, [drafts])
+
+  useEffect(() => {
     if (selectedDraftId === undefined || project === undefined) return
     setDrafts(current => current.map(draft => draft.id === selectedDraftId ? { ...draft, project } : draft))
   }, [project, selectedDraftId])
@@ -725,6 +734,21 @@ export function App(): JSX.Element {
     previewUpdateQueue.current = previewUpdateQueue.current.then(async () => {
       await callStudio('studio.preview.update', { draftId, ...update })
     }).catch(() => undefined)
+  }
+
+  const reloadPreview = (draftId: string): void => {
+    setPreviewVersions(current => ({ ...current, [draftId]: (current[draftId] ?? 0) + 1 }))
+  }
+
+  const clearElementModifications = (draftId: string): void => {
+    const prefix = `${draftId}\0`
+    for (const key of sourceVariableBaselines.current.keys()) {
+      if (key.startsWith(prefix)) sourceVariableBaselines.current.delete(key)
+    }
+    setModifiedElementDefaults(current => {
+      if (![...current].some(key => key.startsWith(prefix))) return current
+      return new Set([...current].filter(key => !key.startsWith(prefix)))
+    })
   }
 
   const queueWorkspaceUpdate = (open: string[], selected: string | undefined): void => {
@@ -757,39 +781,40 @@ export function App(): JSX.Element {
   }, [previewFullscreen])
 
   useEffect(() => {
-    const frame = requestAnimationFrame(() => previewPort.current?.postMessage({
+    const connection = selectedDraftId === undefined ? undefined : previewConnections.current.get(selectedDraftId)
+    const frame = requestAnimationFrame(() => connection?.port.postMessage({
       type: 'refresh-overlay',
-      sessionId: previewSession,
-      nonce: previewNonce.current,
+      sessionId: connection.sessionId,
+      nonce: connection.nonce,
     }))
     return () => cancelAnimationFrame(frame)
-  }, [previewScale, previewSession, previewViewport.height, previewViewport.width])
+  }, [previewScale, previewSession, previewViewport.height, previewViewport.width, selectedDraftId])
 
   useEffect(() => {
     setElementSourceMessage(undefined)
   }, [selectedDraftId])
 
   useEffect(() => {
-    const currentDraft = selectedDraftId
     for (const pending of pendingVariableResults.current.values()) pending.reject(new Error('Preview bridge changed'))
     pendingVariableResults.current.clear()
-    previewPort.current?.close()
-    previewPort.current = undefined
-    previewNonce.current = crypto.randomUUID()
     selectionResolve.current += 1
     setRegistry(EMPTY_REGISTRY)
     setSelection(undefined)
-    return () => {
-      previewPort.current?.close()
-      previewPort.current = undefined
-      if (currentDraft !== undefined) queuePreviewUpdate(currentDraft, {
-        connected: false,
-        mode: previewModeRef.current,
-        selection: null,
-        registry: null,
-      })
-    }
-  }, [previewKey, previewSession, selectedDraftId])
+    if (selectedDraftId === undefined) return
+    const draftId = selectedDraftId
+    void callStudio<StudioPreviewStatus>('studio.preview.status', { draftId }).then(status => {
+      if (draftIdRef.current !== draftId) return
+      previewModeRef.current = status.mode
+      setPreviewMode(status.mode)
+      setRegistry(status.registry ?? EMPTY_REGISTRY)
+      setSelection(status.selection)
+    }).catch(() => undefined)
+  }, [previewSession, selectedDraftId])
+
+  useEffect(() => () => {
+    for (const connection of previewConnections.current.values()) connection.port.close()
+    previewConnections.current.clear()
+  }, [])
 
   useEffect(() => {
     void Promise.all([
@@ -866,7 +891,7 @@ export function App(): JSX.Element {
         setReadiness(nextReadiness)
         if (next.state === 'preview-pending'
           && (previous?.state !== 'preview-pending' || previous.graphRev !== next.graphRev)) {
-          setPreviewKey(value => value + 1)
+          reloadPreview(currentDraft)
         }
       }).catch(() => undefined)
     }
@@ -1012,7 +1037,7 @@ export function App(): JSX.Element {
       const next = await callStudio<StudioDraftView>('studio.drafts.start', { draftId: id })
       polling = false
       updateDraft(next)
-      if (draftIdRef.current === id) setPreviewKey(value => value + 1)
+      reloadPreview(id)
     } catch (cause) {
       polling = false
       try {
@@ -1054,6 +1079,15 @@ export function App(): JSX.Element {
     }
   }
 
+  const applyDraftBuild = async (draftId: string): Promise<StudioBuildResult> => {
+    const result = await callStudio<StudioBuildResult>('studio.project.build', { draftId })
+    setBuildOutputs(current => ({ ...current, [draftId]: result.build }))
+    updateDraftProject(draftId, result.project)
+    clearElementModifications(draftId)
+    reloadPreview(draftId)
+    return result
+  }
+
   const hotReloadDraft = async (): Promise<void> => {
     if (selectedDraftId === undefined) return
     if (hasUnsavedSource) {
@@ -1065,10 +1099,7 @@ export function App(): JSX.Element {
     setBuildOperations(current => ({ ...current, [id]: true }))
     setError(undefined)
     try {
-      const result = await callStudio<StudioBuildResult>('studio.project.build', { draftId: id })
-      setBuildOutputs(current => ({ ...current, [id]: result.build }))
-      updateDraftProject(id, result.project)
-      if (draftIdRef.current === id) setPreviewKey(value => value + 1)
+      await applyDraftBuild(id)
     } catch (cause) {
       if (draftIdRef.current === id) setError(cause instanceof StudioRpcError ? cause.message : String(cause))
     } finally {
@@ -1080,84 +1111,94 @@ export function App(): JSX.Element {
     }
   }
 
-  const confirmPreview = async (graphRev: string): Promise<void> => {
-    if (selectedDraftId === undefined || project?.state !== 'preview-pending' || confirming) return
-    setConfirming(true)
-    setError(undefined)
+  const confirmPreview = async (draftId: string, graphRev: string): Promise<void> => {
+    const draft = draftsRef.current.find(candidate => candidate.id === draftId)
+    if (draft?.project?.state !== 'preview-pending' || confirmingDrafts.current.has(draftId)) return
+    confirmingDrafts.current.add(draftId)
+    if (draftIdRef.current === draftId) setError(undefined)
     try {
-      const active = await callStudio<StudioProjectState>('studio.project.activate', { draftId: selectedDraftId, graphRev })
-      updateDraftProject(selectedDraftId, active)
+      const active = await callStudio<StudioProjectState>('studio.project.activate', { draftId, graphRev })
+      updateDraftProject(draftId, active)
     } catch (cause) {
-      setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+      if (draftIdRef.current === draftId) setError(cause instanceof StudioRpcError ? cause.message : String(cause))
     } finally {
-      setConfirming(false)
+      confirmingDrafts.current.delete(draftId)
     }
   }
 
   const connectPreview = (event: MessageEvent): void => {
-    const target = previewRef.current?.contentWindow
-    if (target === undefined || target === null || previewSession === undefined || previewUrl === undefined || selectedDraftId === undefined) return
-    const targetOrigin = new URL(previewUrl).origin
-    if (event.source !== target || event.origin !== targetOrigin || event.ports.length !== 1
-      || previewPort.current !== undefined || !isBridgeOffer(event.data, previewSession)) return
+    const draft = draftsRef.current.find(candidate => previewFrames.current.get(candidate.id)?.contentWindow === event.source)
+    const previewUrl = draft?.runtime.previewUrl
+    const sessionId = draft?.runtime.bridgeCapability
+    if (draft === undefined || previewUrl === undefined || sessionId === undefined) return
+    if (event.origin !== new URL(previewUrl).origin || event.ports.length !== 1 || !isBridgeOffer(event.data, sessionId)) return
+    previewConnections.current.get(draft.id)?.port.close()
     const nextPort = event.ports[0]
-    previewPort.current = nextPort
+    const nonce = crypto.randomUUID()
+    const connection = { port: nextPort, sessionId, nonce }
+    previewConnections.current.set(draft.id, connection)
     nextPort.onmessage = portEvent => {
-      if (!isBridgeEnvelope(portEvent.data, previewSession, previewNonce.current)) return
+      if (!isBridgeEnvelope(portEvent.data, sessionId, nonce)
+        || previewConnections.current.get(draft.id)?.port !== nextPort) return
       const message = portEvent.data
+      const active = draftIdRef.current === draft.id
       if (message.type === 'preview-ready' && boundedBridgeText(message.graphRev) && message.graphRev !== ''
         && (message.mode === 'browse' || message.mode === 'inspect')) {
-        nextPort.postMessage({ type: 'set-mode', sessionId: previewSession, nonce: previewNonce.current, mode: previewModeRef.current })
-        queuePreviewUpdate(selectedDraftId, {
+        const mode = active ? previewModeRef.current : message.mode
+        nextPort.postMessage({ type: 'set-mode', sessionId, nonce, mode })
+        queuePreviewUpdate(draft.id, {
           connected: true,
           graphRev: message.graphRev,
-          mode: previewModeRef.current,
+          mode,
         })
-        void confirmPreview(message.graphRev)
+        void confirmPreview(draft.id, message.graphRev)
       }
       if (message.type === 'selection' && isStudioDomSelection(message.selection)) {
         const raw = message.selection
         const request = ++selectionResolve.current
-        const expectedNonce = previewNonce.current
         const commit = (next: StudioDomSelection): void => {
-          if (request !== selectionResolve.current || previewPort.current !== nextPort
-            || expectedNonce !== previewNonce.current) return
-          setSelection(next)
-          queuePreviewUpdate(selectedDraftId, { connected: true, mode: 'inspect', selection: next })
+          if (request !== selectionResolve.current || previewConnections.current.get(draft.id)?.port !== nextPort) return
+          if (draftIdRef.current === draft.id) {
+            setSelection(next)
+            if (previewModeRef.current === 'inspect') setPanel('selection')
+          }
+          queuePreviewUpdate(draft.id, { connected: true, mode: 'inspect', selection: next })
         }
         if (raw.react?.source === undefined) commit(raw)
         else void callStudio<StudioSourceCandidate>('studio.preview.resolveSource', {
-          draftId: selectedDraftId,
+          draftId: draft.id,
           source: raw.react.source,
         }).then(resolved => commit({
           ...raw,
           react: { ...raw.react!, source: { ...raw.react!.source!, resolved } },
         })).catch(cause => {
-          if (request === selectionResolve.current) setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+          if (request === selectionResolve.current && draftIdRef.current === draft.id) {
+            setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+          }
         })
       }
-      if (message.type === 'preview-pan' && isFinitePreviewPan(message)) {
+      if (active && message.type === 'preview-pan' && isFinitePreviewPan(message)) {
         setPreviewOrigin(current => ({
           x: current.x + message.dx,
           y: current.y + message.dy,
         }))
       }
-      if (message.type === 'preview-zoom' && isFinitePreviewZoom(message)) {
+      if (active && message.type === 'preview-zoom' && isFinitePreviewZoom(message)) {
         zoomPreviewByWheel(message.deltaY, message.deltaMode)
       }
       if (message.type === 'registry' && isStudioRegistrySnapshot(message.registry)) {
         const nextRegistry = message.registry
-        setRegistry(nextRegistry)
-        queuePreviewUpdate(selectedDraftId, {
+        if (active) setRegistry(nextRegistry)
+        queuePreviewUpdate(draft.id, {
           connected: true,
-          mode: previewModeRef.current,
+          mode: active ? previewModeRef.current : 'browse',
           registry: nextRegistry,
         })
       }
-      if (message.type === 'registry-error' && boundedBridgeText(message.error)) {
+      if (active && message.type === 'registry-error' && boundedBridgeText(message.error)) {
         setError(message.error)
       }
-      if (message.type === 'selection-error' && boundedBridgeText(message.error)) setError(message.error)
+      if (active && message.type === 'selection-error' && boundedBridgeText(message.error)) setError(message.error)
       if (message.type === 'variable-result' && boundedBridgeText(message.requestId)) {
         const pending = pendingVariableResults.current.get(message.requestId)
         if (pending !== undefined) {
@@ -1165,17 +1206,42 @@ export function App(): JSX.Element {
           if (message.ok === true) pending.resolve()
           else pending.reject(new Error(boundedBridgeText(message.error) ? message.error : 'Preview variable update failed'))
         }
-        if (message.ok === false && boundedBridgeText(message.error)) setError(message.error)
+        if (active && message.ok === false && boundedBridgeText(message.error)) setError(message.error)
       }
-      if (message.type === 'mode' && (message.mode === 'browse' || message.mode === 'inspect')) {
+      if (active && message.type === 'mode' && (message.mode === 'browse' || message.mode === 'inspect')) {
         previewModeRef.current = message.mode
         setPreviewMode(message.mode)
       }
     }
     nextPort.start()
-    nextPort.postMessage({ type: 'connect', sessionId: previewSession, nonce: previewNonce.current })
+    nextPort.postMessage({ type: 'connect', sessionId, nonce })
   }
   previewBridgeHandlerRef.current = connectPreview
+
+  const previewFrameRef = (draftId: string): ((node: HTMLIFrameElement | null) => void) => {
+    const existing = previewFrameRefs.current.get(draftId)
+    if (existing !== undefined) return existing
+    const ref = (node: HTMLIFrameElement | null): void => {
+      if (node !== null) {
+        previewFrames.current.set(draftId, node)
+        return
+      }
+      previewFrames.current.delete(draftId)
+      const connection = previewConnections.current.get(draftId)
+      if (connection === undefined) return
+      connection.port.close()
+      previewConnections.current.delete(draftId)
+      clearElementModifications(draftId)
+      queuePreviewUpdate(draftId, {
+        connected: false,
+        mode: 'browse',
+        selection: null,
+        registry: null,
+      })
+    }
+    previewFrameRefs.current.set(draftId, ref)
+    return ref
+  }
 
   const openFile = async (path: string): Promise<void> => {
     if (path === '' || selectedDraftId === undefined) return
@@ -1229,7 +1295,7 @@ export function App(): JSX.Element {
   }
 
   const saveElementDefaults = async (): Promise<void> => {
-    if (selectedDraftId === undefined || !hasElementSourceDefaults) return
+    if (selectedDraftId === undefined || !hasModifiedElementDefaults) return
     if (hasUnsavedSource) {
       setPanel('source')
       setError(t('errorUnsavedElementSave'))
@@ -1237,13 +1303,13 @@ export function App(): JSX.Element {
     }
     const draftId = selectedDraftId
     setElementSourceBusy(true)
+    setBuildOperations(current => ({ ...current, [draftId]: true }))
     setElementSourceMessage(undefined)
     setError(undefined)
     try {
       await variableUpdateTail.current
       await previewUpdateQueue.current
       const result = await callStudio<{ files: string[] }>('studio.elements.saveDefaults', { draftId })
-      setElementSourceMessage(t('elementSourceSaved', { count: result.files.length }))
       if (filePath !== '' && result.files.includes(filePath)) {
         const file = await callStudio<{ path: string; content: string }>('studio.project.readFile', { draftId, path: filePath })
         if (draftIdRef.current === draftId && file.path === filePath) {
@@ -1251,13 +1317,20 @@ export function App(): JSX.Element {
           setSavedSource(file.content)
         }
       }
+      await applyDraftBuild(draftId)
+      if (draftIdRef.current === draftId) setElementSourceMessage(t('elementSourceSaved', { count: result.files.length }))
       void callStudio<StudioReadinessReport>('studio.readiness.inspect', { draftId }).then(next => {
         if (draftIdRef.current === draftId) setReadiness(next)
       }).catch(() => undefined)
     } catch (cause) {
       if (draftIdRef.current === draftId) setError(cause instanceof StudioRpcError ? cause.message : String(cause))
     } finally {
-      if (draftIdRef.current === draftId) setElementSourceBusy(false)
+      setElementSourceBusy(false)
+      setBuildOperations(current => {
+        const next = { ...current }
+        delete next[draftId]
+        return next
+      })
     }
   }
 
@@ -1281,34 +1354,44 @@ export function App(): JSX.Element {
   const changePreviewMode = (mode: 'browse' | 'inspect'): void => {
     previewModeRef.current = mode
     setPreviewMode(mode)
-    previewPort.current?.postMessage({
-      type: 'set-mode',
-      sessionId: previewSession,
-      nonce: previewNonce.current,
-      mode,
-    })
+    const connection = selectedDraftId === undefined ? undefined : previewConnections.current.get(selectedDraftId)
+    connection?.port.postMessage({ type: 'set-mode', sessionId: connection.sessionId, nonce: connection.nonce, mode })
     if (selectedDraftId !== undefined) queuePreviewUpdate(selectedDraftId, { connected: true, mode })
   }
 
   const setVariable = (
-    target:
-      | { scope: 'element'; owner: string; elementId: string; variableId: string; value: StudioVariableValue }
-      | { scope: 'global'; owner: string; variableId: string; value: StudioVariableValue },
+    target: StudioVariableUpdate,
+    sourceBaseline?: StudioVariableValue,
   ): void => {
     setError(undefined)
-    const port = previewPort.current
-    if (port === undefined) return
+    if (selectedDraftId === undefined) return
+    const draftId = selectedDraftId
+    const connection = previewConnections.current.get(draftId)
+    if (connection === undefined) return
     const requestId = crypto.randomUUID()
     const result = new Promise<void>((resolve, reject) => {
       pendingVariableResults.current.set(requestId, { resolve, reject })
     })
     variableUpdateTail.current = variableUpdateTail.current.catch(() => undefined).then(() => result)
     void variableUpdateTail.current.catch(() => undefined)
-    port.postMessage({
+    if (target.scope === 'element' && sourceBaseline !== undefined) {
+      const key = `${draftId}\0${target.owner}\0${target.elementId}\0${target.variableId}`
+      if (!sourceVariableBaselines.current.has(key)) sourceVariableBaselines.current.set(key, sourceBaseline)
+      void result.then(() => {
+        const baseline = sourceVariableBaselines.current.get(key)
+        setModifiedElementDefaults(current => {
+          const next = new Set(current)
+          if (Object.is(target.value, baseline)) next.delete(key)
+          else next.add(key)
+          return next
+        })
+      }).catch(() => undefined)
+    }
+    connection.port.postMessage({
       type: 'set-variable',
       requestId,
-      sessionId: previewSession,
-      nonce: previewNonce.current,
+      sessionId: connection.sessionId,
+      nonce: connection.nonce,
       target,
     })
   }
@@ -2025,8 +2108,7 @@ export function App(): JSX.Element {
             <div className="preview-viewport" style={previewFullscreen
               ? { width: '100%', height: '100%' }
               : { width: previewViewport.width, height: previewViewport.height, transform: `scale(${previewScale})` }}>
-                {previewUrl === undefined
-                  ? <EmptyState className="preview-empty"
+                {previewUrl === undefined && <EmptyState className="preview-empty"
                       title={selectedDraft !== undefined ? t('previewStartDraft', { name: selectedDraft.label })
                         : drafts.length === 0 ? t('createFirstDraft') : t('previewNoOpenDraft')}
                       description={selectedDraft !== undefined ? t('previewHostDescription')
@@ -2039,9 +2121,17 @@ export function App(): JSX.Element {
                               setLeftSidebarCollapsed(false)
                               setLeftPanel('plugins')
                             }}>{t('openPluginManagement')}</Button>
-                        : undefined} />
-                  : <iframe ref={previewRef} key={`${selectedDraftId}:${previewKey}`} title={t('previewFrameTitle')}
-                      src={previewUrl} />}
+                        : undefined} />}
+                {openDrafts.flatMap(draft => {
+                  const url = draft.runtime.previewUrl
+                  const session = draft.runtime.bridgeCapability
+                  if (url === undefined || session === undefined) return []
+                  const active = draft.id === selectedDraftId
+                  return <iframe ref={previewFrameRef(draft.id)}
+                    key={`${draft.id}:${session}:${previewVersions[draft.id] ?? 0}`}
+                    data-active={active} aria-hidden={!active}
+                    title={t('previewFrameTitle')} src={url} />
+                })}
             </div>
             {!previewFullscreen && <ResizeHandles kind="preview" onPointerDown={beginPreviewResize} />}
           </div>
@@ -2138,7 +2228,7 @@ export function App(): JSX.Element {
               <Badge tone="info">{draftElements.length}</Badge>
               <Button variant="primary" size="small" loading={elementSourceBusy}
                 loadingLabel={t('savingElementToSource')}
-                disabled={!hasElementSourceDefaults || elementSourceBusy}
+                disabled={!hasModifiedElementDefaults || elementSourceBusy || selectedBuildRunning}
                 onClick={() => void saveElementDefaults()}>{t('saveElementToSource')}</Button>
             </div>
           </div>
@@ -2151,8 +2241,6 @@ export function App(): JSX.Element {
                   {draftElements.map((element, index) => {
                     const matched = matchedElement?.element.id === element.element.id
                     return <ElementTreeNode key={element.element.id} element={element} matched={matched}
-                      patches={matched ? selection?.react?.patches : undefined}
-                      currentOwner={selectedDraft?.name}
                       sourceAvailable={files.some(file => file.path === element.element.source.file)}
                       initialOpen={matched || index === 0}
                       onOpenSource={() => {
@@ -2162,7 +2250,7 @@ export function App(): JSX.Element {
                       onChange={(definition, value) => setVariable({
                         scope: 'element', owner: element.owner, elementId: element.element.id,
                         variableId: definition.id, value,
-                      })}
+                      }, definition.defaultSource === undefined ? undefined : element.values[definition.id])}
                       t={t} />
                   })}
                 </div>}
@@ -2212,8 +2300,6 @@ export function App(): JSX.Element {
                     }}>{t('openSelectedSource')}</Button>}
                   </dd></div>}
                 </dl>
-                {selection.react !== undefined && <PatchProvenance patches={selection.react.patches}
-                  currentOwner={selectedDraft?.name} boundaryMatched={matchedElement !== undefined} t={t} />}
                 {selection.react !== undefined && Object.keys(selection.react.props).length > 0 && <details>
                   <summary>{t('safeProps')}</summary>
                   <pre className="selection-code">{JSON.stringify(selection.react.props, null, 2)}</pre>

@@ -6,6 +6,7 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import { STUDIO_PREVIEW_API_PATH, type StudioHarmonyService } from '../contracts.js'
 
 const previewDraft = vi.hoisted(() => ({ open: vi.fn() }))
+const sourceResolver = vi.hoisted(() => ({ readDependencyTarget: vi.fn() }))
 
 vi.mock('./preview-draft.js', () => ({
   StudioPreviewDraft: class {
@@ -14,13 +15,18 @@ vi.mock('./preview-draft.js', () => ({
 }))
 
 vi.mock('./source-resolution.js', () => ({
-  StudioSourceResolver: class {},
+  StudioSourceResolver: class {
+    readDependencyTarget(packageName: string, file: string) {
+      return sourceResolver.readDependencyTarget(packageName, file)
+    }
+  },
 }))
 
 import { applyPreviewWorker } from './preview-worker.js'
 
 beforeEach(() => {
   previewDraft.open.mockReset()
+  sourceResolver.readDependencyTarget.mockReset()
 })
 
 function workerRoute(): WebRoute {
@@ -46,9 +52,13 @@ function workerRoute(): WebRoute {
 }
 
 async function health(route: WebRoute): Promise<{ status: number; body: unknown }> {
-  const request = Object.assign(Readable.from(['{}']), {
+  return workerRequest(route, 'health', {})
+}
+
+async function workerRequest(route: WebRoute, method: string, payload: unknown): Promise<{ status: number; body: unknown }> {
+  const request = Object.assign(Readable.from([JSON.stringify(payload)]), {
     method: 'POST',
-    url: `${STUDIO_PREVIEW_API_PATH}/health`,
+    url: `${STUDIO_PREVIEW_API_PATH}/${method}`,
     headers: { authorization: 'Bearer secret' },
     socket: { remoteAddress: '127.0.0.1' },
   }) as unknown as IncomingMessage
@@ -87,4 +97,18 @@ it('handles startup rejection immediately and reports the failure', async () => 
       body: { ok: false, error: 'Draft Patch reload failed' },
     })
   })
+})
+
+it('returns installed dependency source and version for automatic Patch analysis', async () => {
+  previewDraft.open.mockResolvedValue({ snapshot: () => ({ name: 'draft-plugin' }), async close() {} })
+  sourceResolver.readDependencyTarget.mockResolvedValue({
+    package: 'target-plugin', file: 'lib/client.js', version: '1.2.3', source: 'const title = "Original";\n',
+  })
+  const route = workerRoute()
+
+  await expect(workerRequest(route, 'read-patch-target', {
+    package: 'target-plugin', file: 'lib/client.js',
+  })).resolves.toEqual({ status: 200, body: { ok: true, value: {
+    package: 'target-plugin', file: 'lib/client.js', version: '1.2.3', source: 'const title = "Original";\n',
+  } } })
 })

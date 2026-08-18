@@ -109,6 +109,15 @@ export function applyPreviewWorker(ctx: Context, harmony: StudioHarmonyService, 
               value: await sources.readDependency(payload.package, payload.file),
             })
           }
+          if (method === 'read-patch-target') {
+            if (typeof payload.package !== 'string' || typeof payload.file !== 'string') {
+              throw new Error('dependency package and file are required')
+            }
+            return json(response, 200, {
+              ok: true,
+              value: await sources.readDependencyTarget(payload.package, payload.file),
+            })
+          }
           return json(response, 404, { ok: false, error: `unknown Preview worker method ${method}` })
         } catch (error) {
           return json(response, 400, { ok: false, error: error instanceof Error ? error.message : String(error) })

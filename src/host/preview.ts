@@ -225,6 +225,15 @@ export class StudioPreviewSupervisor {
     return this.worker<string>('read-source', { package: packageName, file })
   }
 
+  async readPatchTarget(packageName: string, file: string): Promise<{
+    package: string
+    file: string
+    version: string
+    source: string
+  }> {
+    return this.worker('read-patch-target', { package: packageName, file })
+  }
+
   async dispose(): Promise<void> {
     await this.stop()
   }

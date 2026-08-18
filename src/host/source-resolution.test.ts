@@ -24,10 +24,10 @@ async function fixture(): Promise<{ root: string; draft: string; profile: string
   await writeFile(join(draft, 'package.json'), JSON.stringify({ name: 'draft-plugin' }))
   await writeFile(join(draft, 'src', 'Button.tsx'), 'export const Button = () => null\n')
   for (const name of ['package-a', 'package-b']) {
-    await writeFile(join(profile, 'node_modules', name, 'package.json'), JSON.stringify({ name }))
+    await writeFile(join(profile, 'node_modules', name, 'package.json'), JSON.stringify({ name, version: '1.0.0' }))
     await writeFile(join(profile, 'node_modules', name, 'src', 'Button.tsx'), 'export const Button = () => null\n')
   }
-  await writeFile(join(profile, 'node_modules', 'package-c', 'package.json'), JSON.stringify({ name: 'package-c' }))
+  await writeFile(join(profile, 'node_modules', 'package-c', 'package.json'), JSON.stringify({ name: 'package-c', version: '2.0.0' }))
   await writeFile(join(profile, 'node_modules', 'package-c', 'lib', 'client.js'), 'export const bundle = true\n')
   await writeFile(join(profile, 'package.json'), JSON.stringify({
     dependencies: { 'package-a': '1.0.0', 'package-b': '1.0.0' },
@@ -82,6 +82,9 @@ test('resolves profile-only bundles and reads only installed dependency files', 
     package: 'package-c', file: 'lib/client.js', kind: 'dependency', confidence: 'exact',
   })
   await expect(resolver.readDependency('package-c', 'lib/client.js')).resolves.toBe('export const bundle = true\n')
+  await expect(resolver.readDependencyTarget('package-c', 'lib/client.js')).resolves.toEqual({
+    package: 'package-c', file: 'lib/client.js', version: '2.0.0', source: 'export const bundle = true\n',
+  })
   await expect(resolver.readDependency('draft-plugin', 'src/Button.tsx')).rejects.toThrow('not uniquely installed')
   await expect(resolver.readDependency('package-a', '../outside.tsx')).rejects.toThrow('invalid')
 })

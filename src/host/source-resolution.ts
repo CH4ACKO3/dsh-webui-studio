@@ -157,6 +157,15 @@ export class StudioSourceResolver {
   }
 
   async readDependency(packageName: string, file: string): Promise<string> {
+    return (await this.readDependencyTarget(packageName, file)).source
+  }
+
+  async readDependencyTarget(packageName: string, file: string): Promise<{
+    package: string
+    file: string
+    version: string
+    source: string
+  }> {
     const relativeFile = relativeSource(file)
     if (packageName === '' || relativeFile === undefined) throw new Error('dependency source reference is invalid')
     const roots = (await this.#roots).filter(root => root.kind === 'dependency' && root.name === packageName)
@@ -171,6 +180,10 @@ export class StudioSourceResolver {
     if (info.size > MAX_SOURCE_BYTES) throw new Error('dependency source exceeds the 1 MiB Studio limit')
     const content = await readFile(target)
     if (content.includes(0)) throw new Error('binary dependency sources cannot be read')
-    return content.toString('utf8')
+    const manifest = JSON.parse(await readFile(join(roots[0]!.root, 'package.json'), 'utf8')) as { version?: unknown }
+    if (typeof manifest.version !== 'string' || manifest.version === '') {
+      throw new Error(`dependency package ${JSON.stringify(packageName)} does not declare a version`)
+    }
+    return { package: packageName, file: relativeFile, version: manifest.version, source: content.toString('utf8') }
   }
 }
