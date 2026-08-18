@@ -32,6 +32,22 @@ describe('Patch provenance', () => {
     }])
   })
 
+  it('collects Component decorate and replace traces', () => {
+    const traces = ['decorate-component', 'replace-component'].map(effect => ({
+      key: `draft/${effect}`,
+      owner: 'draft',
+      effect,
+      declaration: 'patch.cjs',
+      target: { package: 'target', file: 'lib/client.js' },
+    }))
+    const fiber: FiberSnapshot = { type: traceType(), memoizedProps: { traces } }
+
+    expect(patchTraces(fiber).map(trace => trace.effect)).toEqual([
+      'decorate-component',
+      'replace-component',
+    ])
+  })
+
   it('keeps distinct targets and effects while removing exact duplicates and invalid evidence', () => {
     const duplicate = {
       key: 'draft/change', owner: 'draft', effect: 'wrap-element', declaration: 'patch.cjs',

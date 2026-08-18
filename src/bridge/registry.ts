@@ -1,15 +1,17 @@
 import type {
-  StudioBrowserRuntime,
   StudioElementRegistration,
-  StudioElementSnapshot,
-  StudioRegistrySnapshot,
   StudioVariableBinding,
   StudioVariableDefinition,
   StudioVariableNode,
   StudioVariablesRegistration,
-  StudioVariablesSnapshot,
   StudioVariableValue,
 } from 'dsh-harmony-react/studio'
+import type { StudioBrowserRuntime } from 'dsh-harmony-react/studio-host'
+import type {
+  StudioElementSnapshot,
+  StudioRegistrySnapshot,
+  StudioVariablesSnapshot,
+} from '../contracts.js'
 import { flattenVariableTree } from '../variable-tree.js'
 
 export type StudioVariableTarget =

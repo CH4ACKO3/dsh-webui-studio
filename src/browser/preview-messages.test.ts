@@ -36,6 +36,23 @@ describe('Preview bridge message validation', () => {
     expect(isStudioDomSelection({ ...selection, classes: Array.from({ length: 101 }, () => 'class') })).toBe(false)
   })
 
+  it('accepts component Patch traces and rejects unknown effects', () => {
+    const trace = {
+      key: 'draft/decorate-hero', owner: 'draft', effect: 'decorate-component', declaration: 'patch.cjs',
+      target: { package: 'target', file: 'lib/client.js' }, confidence: 'candidate',
+    }
+    const selection = {
+      tag: 'main', classes: [], attributes: {}, text: '', outerHTML: '<main></main>',
+      rect: { x: 0, y: 0, width: 100, height: 100 }, style: {}, boundaries: [], confidence: 'mapped',
+      react: { owners: ['Hero'], props: {}, patches: [trace] },
+    }
+    expect(isStudioDomSelection(selection)).toBe(true)
+    expect(isStudioDomSelection({
+      ...selection,
+      react: { ...selection.react, patches: [{ ...trace, effect: 'unknown-component-effect' }] },
+    })).toBe(false)
+  })
+
   it('accepts complete registries and rejects missing or oversized collections', () => {
     const registry = {
       elements: [{

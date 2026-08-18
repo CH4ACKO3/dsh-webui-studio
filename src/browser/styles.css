@@ -997,6 +997,35 @@ body[data-studio-dragging="true"] iframe { pointer-events: none; }
 .element-tree-source-row > code { min-width: 0; margin-top: 0; }
 .source-link { min-height: 24px; padding-inline: 4px; color: var(--studio-accent); }
 .source-link:disabled { color: var(--studio-text-tertiary); }
+.element-styles { border-bottom: 1px solid var(--studio-border); padding: 7px 7px 8px 24px; }
+.element-styles-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 24px; color: var(--studio-text-secondary); font-size: var(--studio-font-size-xs); }
+.element-style-add { min-height: 24px; padding-inline: 5px; color: var(--studio-accent); }
+.element-style-add svg, .element-style-remove svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
+.element-style-rule { border-top: 1px solid var(--studio-border); }
+.element-style-rule > summary { min-height: 28px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 3px 4px; cursor: pointer; }
+.element-style-rule > summary::marker { color: var(--studio-text-tertiary); }
+.element-style-rule > summary code { overflow: hidden; color: var(--studio-text); font: var(--studio-font-size-xs)/14px var(--studio-font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.element-style-rule > summary span { color: var(--studio-text-tertiary); font-size: var(--studio-font-size-xs); }
+.element-style-rule-actions { min-height: 27px; display: flex; justify-content: flex-end; gap: 2px; padding: 1px 2px 3px; }
+.element-style-rule-actions .studio-ui-button { min-height: 24px; padding-inline: 5px; color: var(--studio-accent); }
+.element-style-rule-actions svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
+.element-style-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: center; gap: 6px; min-height: 28px; border-top: 1px solid var(--studio-border); color: var(--studio-text); font-size: var(--studio-font-size-xs); }
+.element-style-row code, .element-style-row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.element-style-row code { color: var(--studio-text-secondary); }
+.element-style-row span { color: var(--studio-text); }
+.element-style-remove { min-height: 24px; width: 24px; padding: 0; color: var(--studio-text-tertiary); }
+.element-style-remove:hover { color: var(--studio-danger); }
+.element-style-editor { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto; gap: 5px; align-items: center; padding-top: 7px; }
+.element-style-property-field { position: relative; min-width: 0; }
+.element-style-editor .studio-ui-input { min-height: 26px; min-width: 0; width: auto; font-size: var(--studio-font-size-xs); }
+.element-style-editor .studio-ui-button { min-height: 26px; padding-inline: 7px; white-space: nowrap; }
+.element-selector-editor { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 5px; padding-top: 7px; }
+.element-selector-editor .studio-ui-input { min-height: 26px; min-width: 0; width: 100%; font: var(--studio-font-size-xs)/14px var(--studio-font-mono); }
+.element-selector-editor .studio-ui-button { min-height: 26px; padding-inline: 7px; white-space: nowrap; }
+.element-style-suggestions { position: absolute; z-index: 5; top: calc(100% + 3px); left: 0; right: 0; display: grid; max-height: 168px; overflow-y: auto; overscroll-behavior: contain; padding: 3px; border: 1px solid var(--studio-border); border-radius: 3px; background: var(--studio-panel-raised); box-shadow: var(--studio-shadow-panel); scrollbar-width: thin; }
+.element-style-suggestions button { min-height: 24px; padding: 3px 6px; border: 0; border-radius: 2px; background: transparent; color: var(--studio-text-secondary); font: var(--studio-font-size-xs)/14px var(--studio-font-mono); text-align: left; cursor: pointer; }
+.element-style-suggestions button:hover, .element-style-suggestions button:focus-visible, .element-style-suggestions button[data-focused="true"] { background: var(--studio-control-hover); color: var(--studio-text); outline: none; }
+.element-style-error { grid-column: 1 / -1; color: var(--studio-danger); font-size: var(--studio-font-size-xs); }
 .variable-tree {
   margin-top: 12px;
   border-top: 1px solid var(--studio-border);

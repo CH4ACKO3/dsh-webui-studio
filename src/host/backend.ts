@@ -3,6 +3,7 @@ import type { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 import type {
   StudioBuildResult,
   StudioAgentContext,
+  StudioAutomaticCssVariable,
   StudioAutomaticPatchPlan,
   StudioAutomaticPatchRequest,
   StudioAutomaticPatchWriteResult,
@@ -62,7 +63,6 @@ function optionalStringList(value: unknown, field: string): string[] | undefined
 
 function automaticPatchRequest(payload: unknown): StudioAutomaticPatchRequest {
   const input = objectPayload(payload)
-  if (input.kind !== 'replace-string') throw new Error('automatic Patch kind must be replace-string')
   if (!Array.isArray(input.targets) || input.targets.length === 0) {
     throw new Error('automatic Patch targets must be a non-empty array')
   }
@@ -74,10 +74,20 @@ function automaticPatchRequest(payload: unknown): StudioAutomaticPatchRequest {
     }
     return { package: target.package, file: target.file }
   })
-  if (typeof input.text !== 'string' || typeof input.replacement !== 'string') {
-    throw new Error('automatic string Patch requires text and replacement strings')
+  if (input.kind === 'replace-string') {
+    if (typeof input.text !== 'string' || typeof input.replacement !== 'string') throw new Error('automatic string Patch requires text and replacement strings')
+    return { kind: input.kind, targets, text: input.text, replacement: input.replacement }
   }
-  return { kind: input.kind, targets, text: input.text, replacement: input.replacement }
+  if (input.kind !== 'css-style' || typeof input.select !== 'string' || typeof input.elementId !== 'string' || typeof input.elementLabel !== 'string'
+    || !Array.isArray(input.variables)) throw new Error('automatic CSS Patch requires selector, element identity, and variables')
+  return {
+    kind: input.kind,
+    targets,
+    select: input.select,
+    elementId: input.elementId,
+    elementLabel: input.elementLabel,
+    variables: input.variables as StudioAutomaticCssVariable[],
+  }
 }
 
 class StudioDraftController implements StudioAgentWorkspace {
@@ -249,7 +259,7 @@ class StudioDraftController implements StudioAgentWorkspace {
 
   async analyzeAutomaticPatch(request: StudioAutomaticPatchRequest): Promise<StudioAutomaticPatchPlan> {
     const sources = await Promise.all(request.targets.map(target => this.preview.readPatchTarget(target.package, target.file)))
-    return analyzeAutomaticPatch(request, sources)
+    return analyzeAutomaticPatch(request, sources, this.record.name)
   }
 
   async createAutomaticPatch(request: StudioAutomaticPatchRequest): Promise<StudioAutomaticPatchWriteResult> {

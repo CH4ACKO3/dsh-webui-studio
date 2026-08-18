@@ -10,6 +10,7 @@ import type {
 } from '../contracts.js'
 import { STUDIO_PREVIEW_API_PATH } from '../contracts.js'
 import type { StudioCommandRunner } from './drafts.js'
+import { studioPreviewPortPool, type StudioPreviewPortPool } from './preview-port.js'
 import { installDraftDependencies, materializeDraftProfile, terminalCommandLine } from './runtime-profile.js'
 
 const START_TIMEOUT_MS = 30_000
@@ -63,6 +64,7 @@ export class StudioPreviewSupervisor {
   private runtime: StudioPreviewRuntime = { state: 'stopped', log: '' }
   private startAbort?: AbortController
   private startPromise?: Promise<StudioPreviewRuntime>
+  private previewPort?: number
 
   constructor(
     readonly draft: StudioDraftRecord,
@@ -71,6 +73,7 @@ export class StudioPreviewSupervisor {
     private readonly commands: StudioCommandRunner,
     private readonly harmonyBinEntry: string,
     private readonly stopTimeoutMs = 5_000,
+    private readonly portPool: StudioPreviewPortPool = studioPreviewPortPool,
   ) {}
 
   snapshot(): StudioPreviewRuntime {
@@ -112,7 +115,8 @@ export class StudioPreviewSupervisor {
         signal,
       )
       signal.throwIfAborted()
-      const hostArgs = [this.harmonyBinEntry, 'web', '--port', '0']
+      this.previewPort = this.portPool.claim()
+      const hostArgs = [this.harmonyBinEntry, 'web', '--port', String(this.previewPort ?? 0)]
       this.runtime.log = appendLog(this.runtime.log,
         `[studio] Profile dependencies ready\n[studio] Starting Preview Host\nDSH_HOME=${this.draft.runtimeHome}\n${terminalCommandLine(this.draft.worktreeDir, process.execPath, hostArgs)}`)
       const controlToken = randomBytes(32).toString('hex')
@@ -150,6 +154,7 @@ export class StudioPreviewSupervisor {
         if (this.child !== child) return
         this.child = undefined
         this.controlToken = undefined
+        this.releasePreviewPort()
         if (this.runtime.state === 'stopped') return
         const error = `Preview Host exited (${signal ?? code ?? 'unknown'})`
         this.runtime = { state: 'failed', error, log: this.runtime.log }
@@ -199,6 +204,12 @@ export class StudioPreviewSupervisor {
       }
     }
     if (this.child === child) this.child = undefined
+    this.releasePreviewPort()
+  }
+
+  private releasePreviewPort(): void {
+    this.portPool.release(this.previewPort)
+    this.previewPort = undefined
   }
 
   async state(): Promise<StudioProjectState> {

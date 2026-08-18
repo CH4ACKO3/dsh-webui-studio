@@ -1,3 +1,16 @@
+import type {
+  HarmonyInspection,
+  HarmonyPatchDependency,
+  HarmonyProfileUpdateResult,
+  HarmonyProfileView,
+  HarmonyService,
+} from 'dsh-harmony'
+import type {
+  StudioElementDefinition,
+  StudioVariableNode,
+  StudioVariableValue,
+} from 'dsh-harmony-react/studio'
+
 export const STUDIO_PATH = '/studio'
 export const STUDIO_API_PATH = `${STUDIO_PATH}/api`
 export const STUDIO_PREVIEW_FRAGMENT = 'dsh-studio-preview'
@@ -41,7 +54,14 @@ export interface StudioReactSnapshot {
 export interface StudioPatchTrace {
   key: string
   owner: string
-  effect: 'replace-element' | 'wrap-element' | 'insert-before' | 'insert-after' | 'transform-props'
+  effect:
+    | 'replace-element'
+    | 'wrap-element'
+    | 'insert-before'
+    | 'insert-after'
+    | 'transform-props'
+    | 'decorate-component'
+    | 'replace-component'
   declaration: string
   target: { package: string; file: string }
   confidence: 'candidate'
@@ -79,6 +99,38 @@ export interface StudioSurfaceBoundary {
   path: string[]
 }
 
+export interface StudioElementStyleTarget {
+  owner: string
+  elementId: string
+  boundary: StudioSurfaceBoundary
+  selector: string
+  property: string
+  value?: string
+}
+
+export interface StudioElementSelectorTarget {
+  owner: string
+  elementId: string
+  boundary: StudioSurfaceBoundary
+}
+
+export interface StudioElementSnapshot {
+  owner: string
+  element: StudioElementDefinition
+  values: Readonly<Record<string, StudioVariableValue>>
+}
+
+export interface StudioVariablesSnapshot {
+  owner: string
+  variables: readonly StudioVariableNode[]
+  values: Readonly<Record<string, StudioVariableValue>>
+}
+
+export interface StudioRegistrySnapshot {
+  elements: readonly StudioElementSnapshot[]
+  variables: readonly StudioVariablesSnapshot[]
+}
+
 export interface StudioPreviewStatus {
   connected: boolean
   graphRev?: string
@@ -105,8 +157,6 @@ export interface StudioPreviewUpdate {
   selection?: StudioDomSelection | null
   registry?: StudioRegistrySnapshot | null
 }
-
-export type { StudioRegistrySnapshot }
 
 export interface StudioProjectFile {
   path: string
@@ -211,17 +261,38 @@ export interface StudioAutomaticPatchTarget {
   file: string
 }
 
-export interface StudioAutomaticPatchRequest {
-  kind: 'replace-string'
-  targets: StudioAutomaticPatchTarget[]
-  text: string
-  replacement: string
+export interface StudioAutomaticCssVariable {
+  id: string
+  label: string
+  property: string
+  control: 'color' | 'length' | 'number' | 'enum' | 'string'
+  value: string | number
+  options?: string[]
+  constraints?: { min?: number; max?: number; step?: number }
 }
+
+export type StudioAutomaticPatchRequest =
+  | {
+    kind: 'replace-string'
+    targets: StudioAutomaticPatchTarget[]
+    text: string
+    replacement: string
+  }
+  | {
+    kind: 'css-style'
+    targets: StudioAutomaticPatchTarget[]
+    select: string
+    elementId: string
+    elementLabel: string
+    variables: StudioAutomaticCssVariable[]
+  }
 
 export interface StudioAutomaticPatchMatch {
   line: number
   column: number
   excerpt: string
+  applicable: boolean
+  reason?: string
 }
 
 export interface StudioAutomaticPatchTargetAnalysis extends StudioAutomaticPatchTarget {
@@ -252,11 +323,3 @@ export interface StudioPreviewInspection {
 }
 
 export type StudioPatchDependency = HarmonyPatchDependency
-import type {
-  HarmonyInspection,
-  HarmonyPatchDependency,
-  HarmonyProfileUpdateResult,
-  HarmonyProfileView,
-  HarmonyService,
-} from 'dsh-harmony'
-import type { StudioRegistrySnapshot } from 'dsh-harmony-react/studio'

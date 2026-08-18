@@ -36,8 +36,8 @@ test('reports a built, declared Draft as ready', () => {
 
   expect(inspectReadiness(root, '@scope/draft', inspection([{
     key: '@scope/draft/title', id: 'title', owner: '@scope/draft',
-    target: { package: 'target-ui', files: ['lib/client.js'], version: '^1.0.0' },
-    kind: 'source', state: 'bound', loaded: true, matches: 1, generation: 1, declaration: 'patch.cjs',
+    index: 0, targets: [{ package: 'target-ui', files: ['lib/client.js'], version: '^1.0.0' }],
+    kind: 'source', state: 'bound', status: 'normal', loaded: true, matches: 1, generation: 1, declaration: 'patch.cjs',
   }]), root)).toEqual({ findings: [] })
 })
 
@@ -62,8 +62,9 @@ test('separates definite failures from ambient provider warnings and effective o
   })
   writeFileSync(join(root, 'harmony.json'), JSON.stringify({ order: ['draft', 'provider-a'] }))
   const report = inspectReadiness(root, 'draft', inspection([{
-    key: 'draft/title', id: 'title', owner: 'draft', target: { package: 'provider-a', files: ['lib/client.js'] },
-    kind: 'source', state: 'failed', loaded: false, matches: 0, generation: 1,
+    key: 'draft/title', id: 'title', owner: 'draft', index: 0,
+    targets: [{ package: 'provider-a', files: ['lib/client.js'] }],
+    kind: 'source', state: 'failed', status: 'error', loaded: false, matches: 0, generation: 1,
     declaration: 'patch.cjs', error: 'selector did not match',
   }]), root)
 

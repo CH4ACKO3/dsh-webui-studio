@@ -153,11 +153,14 @@ export function inspectReadiness(
 
   const patches = inspection.patches.filter(patch => patch.owner === projectName)
   for (const patch of patches) {
-    if (!declared.has(patch.target.package)) {
-      findings.push(finding('warning', 'ambient-patch-target', `Patch target ${JSON.stringify(patch.target.package)} is available in this Preview but is not declared as a dependency or peer dependency`, { patch: patch.key }))
-    }
-    if (patch.target.version === undefined) {
-      findings.push(finding('warning', 'unbounded-target-version', `Patch ${JSON.stringify(patch.key)} does not constrain the target package version`, { patch: patch.key }))
+    const targets = new Map(patch.targets.map(target => [`${target.package}\0${target.version ?? ''}`, target]))
+    for (const target of targets.values()) {
+      if (!declared.has(target.package)) {
+        findings.push(finding('warning', 'ambient-patch-target', `Patch target ${JSON.stringify(target.package)} is available in this Preview but is not declared as a dependency or peer dependency`, { patch: patch.key }))
+      }
+      if (target.version === undefined) {
+        findings.push(finding('warning', 'unbounded-target-version', `Patch ${JSON.stringify(patch.key)} does not constrain target package ${JSON.stringify(target.package)}`, { patch: patch.key }))
+      }
     }
     if (patch.state === 'failed') {
       findings.push(finding('error', 'patch-failed', patch.error ?? `Patch ${JSON.stringify(patch.key)} failed against the current provider stack`, { patch: patch.key, file: patch.file }))

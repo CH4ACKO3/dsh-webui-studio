@@ -93,8 +93,9 @@
     "@deepseek-ai/dsh-tools": "0.1.0-rc.6"
   },
   "dependencies": {
-    "dsh-harmony": "^0.3.2",
-    "dsh-harmony-react": "^0.1.2",
+    "@phenomnomnominal/tsquery": "^6.2.0",
+    "dsh-harmony": "^0.4.2",
+    "dsh-harmony-react": "^0.2.1",
     "pnpm": "^10.34.5"
   },
   "devDependencies": {

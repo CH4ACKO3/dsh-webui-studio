@@ -1,8 +1,8 @@
 import type {
-  StudioElementSnapshot,
   StudioVariableDefinition,
   StudioVariableValue,
 } from 'dsh-harmony-react/studio'
+import type { StudioElementSnapshot } from '../contracts.js'
 import { readProjectFile, writeProjectFile } from './project-files.js'
 import { flattenVariableTree } from '../variable-tree.js'
 

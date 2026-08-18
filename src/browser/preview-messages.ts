@@ -1,10 +1,15 @@
 import type {
-  StudioRegistrySnapshot,
   StudioVariableDefinition,
   StudioVariableNode,
   StudioVariableValue,
 } from 'dsh-harmony-react/studio'
-import type { StudioDomSelection, StudioPatchTrace, StudioSourceCandidate, StudioSourceLocation } from '../contracts'
+import type {
+  StudioDomSelection,
+  StudioPatchTrace,
+  StudioRegistrySnapshot,
+  StudioSourceCandidate,
+  StudioSourceLocation,
+} from '../contracts'
 
 const MAX_COLLECTION = 500
 const MAX_NESTED_COLLECTION = 100
@@ -55,7 +60,15 @@ function sourceCandidate(value: unknown): value is StudioSourceCandidate {
 function patchTrace(value: unknown): value is StudioPatchTrace {
   if (!record(value) || !record(value.target)) return false
   return string(value.key, 1_000) && string(value.owner, 1_000) && string(value.declaration)
-    && ['replace-element', 'wrap-element', 'insert-before', 'insert-after', 'transform-props'].includes(value.effect as string)
+    && [
+      'replace-element',
+      'wrap-element',
+      'insert-before',
+      'insert-after',
+      'transform-props',
+      'decorate-component',
+      'replace-component',
+    ].includes(value.effect as string)
     && string(value.target.package, 500) && string(value.target.file, 2_000)
     && value.confidence === 'candidate'
 }

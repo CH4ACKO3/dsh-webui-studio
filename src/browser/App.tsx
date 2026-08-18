@@ -1,6 +1,7 @@
 import {
   type CSSProperties,
   FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
@@ -13,8 +14,6 @@ import {
 import { createPortal } from 'react-dom'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {
-  StudioElementSnapshot,
-  StudioRegistrySnapshot,
   StudioVariableDefinition,
   StudioVariableGroupDefinition,
   StudioVariableNode,
@@ -27,10 +26,13 @@ import {
   type StudioBuildResult,
   type StudioDraftView,
   type StudioDomSelection,
+  type StudioElementSnapshot,
+  type StudioElementStyleTarget,
   type StudioHarmonyInspection,
   type StudioProjectFile,
   type StudioProjectState,
   type StudioPreviewStatus,
+  type StudioRegistrySnapshot,
   type StudioReadinessLevel,
   type StudioReadinessReport,
   type StudioServerRequest,
@@ -44,6 +46,8 @@ import { CodeEditor } from './CodeEditor'
 import { useStudioLocale, type StudioTranslate } from './i18n'
 import { flattenVariableTree } from '../variable-tree'
 import { parseVariableInput } from './variable-input'
+import { suggestCssProperties } from './css-property-suggestions'
+import { compileElementStyleSelector } from '../bridge/element-style-selector'
 import {
   clamp,
   constrainRect,
@@ -376,6 +380,189 @@ function VariableTree({
   </div>
 }
 
+type ElementStyleDeclaration = { property: string; value: string }
+type ElementStyleRule = { selector: string; declarations: ElementStyleDeclaration[] }
+
+const cssPropertySuggestions = [
+  'align-items', 'align-self', 'background', 'background-color', 'border', 'border-color', 'border-radius',
+  'bottom', 'box-shadow', 'color', 'display', 'flex', 'flex-direction', 'font-family', 'font-size', 'font-weight',
+  'gap', 'grid-template-columns', 'height', 'justify-content', 'left', 'letter-spacing', 'line-height', 'margin',
+  'margin-block', 'margin-inline', 'max-height', 'max-width', 'min-height', 'min-width', 'opacity', 'overflow',
+  'padding', 'padding-block', 'padding-inline', 'position', 'right', 'text-align', 'text-decoration', 'top',
+  'transform', 'transition', 'visibility', 'white-space', 'width', 'z-index',
+] as const
+
+const cssSelectorSuggestions = [
+  '&', '&.', '&[', '&:hover', '&:focus', '&:focus-visible', '&:active', '&:disabled', '&:checked',
+  '& > .', '& > *', '& .', '& *',
+] as const
+
+function TrashIcon(): JSX.Element {
+  return <svg aria-hidden="true" viewBox="0 0 20 20"><path d="M5 6.5h10M8 6.5V4h4v2.5M7 8.5v6.5M10 8.5v6.5M13 8.5v6.5M5.5 6.5l.7 10h7.6l.7-10" /></svg>
+}
+
+function StyleDeclarationEditor({ properties, onSubmit, onCancel, t }: {
+  properties: readonly string[]
+  onSubmit(property: string, value: string): void
+  onCancel(): void
+  t: StudioTranslate
+}): JSX.Element {
+  const [property, setProperty] = useState('')
+  const [value, setValue] = useState('')
+  const [invalid, setInvalid] = useState(false)
+  const [focused, setFocused] = useState(false)
+  const [suggestionIndex, setSuggestionIndex] = useState(0)
+  const suggestionListId = useId()
+  const suggestionsRef = useRef<HTMLDivElement>(null)
+  const suggestions = focused ? suggestCssProperties([...cssPropertySuggestions, ...properties], property) : []
+  const selectSuggestion = (next: string): void => { setProperty(next); setSuggestionIndex(0) }
+  const keyDown = (event: ReactKeyboardEvent<HTMLInputElement>): void => {
+    if (suggestions.length === 0) return
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      setSuggestionIndex(current => (current + (event.key === 'ArrowDown' ? 1 : -1) + suggestions.length) % suggestions.length)
+    } else if (event.key === 'Tab' || event.key === 'ArrowRight') {
+      event.preventDefault()
+      selectSuggestion(suggestions[suggestionIndex]!.value)
+    }
+  }
+  useEffect(() => {
+    suggestionsRef.current?.querySelector(`[data-suggestion-index="${suggestionIndex}"]`)?.scrollIntoView({ block: 'nearest' })
+  }, [suggestionIndex, suggestions])
+  return <form className="element-style-editor" onSubmit={event => {
+    event.preventDefault()
+    if (property.trim() === '' || value.trim() === '') return setInvalid(true)
+    onSubmit(property.trim(), value.trim())
+  }}>
+    <div className="element-style-property-field">
+      <Input autoFocus value={property} placeholder={t('stylePropertyPlaceholder')} aria-label={t('styleProperty')}
+        aria-autocomplete="list" aria-controls={suggestions.length > 0 ? suggestionListId : undefined}
+        aria-activedescendant={suggestions.length > 0 ? `${suggestionListId}-${suggestionIndex}` : undefined}
+        aria-expanded={suggestions.length > 0} aria-invalid={invalid && property.trim() === ''}
+        onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} onKeyDown={keyDown}
+        onChange={event => { setProperty(event.target.value); setSuggestionIndex(0) }} />
+      {suggestions.length > 0 && <div ref={suggestionsRef} id={suggestionListId}
+        className="element-style-suggestions" role="listbox" aria-label={t('styleProperty')}>
+        {suggestions.map((candidate, index) => <button key={candidate.label} type="button" role="option"
+          id={`${suggestionListId}-${index}`} data-suggestion-index={index} aria-selected={index === suggestionIndex}
+          data-focused={index === suggestionIndex || undefined} onMouseEnter={() => setSuggestionIndex(index)}
+          onMouseDown={event => event.preventDefault()} onClick={() => selectSuggestion(candidate.value)}>{candidate.label}</button>)}
+      </div>}
+    </div>
+    <Input value={value} placeholder={t('styleValuePlaceholder')} aria-label={t('styleValue')}
+      aria-invalid={invalid && value.trim() === ''} onChange={event => setValue(event.target.value)} />
+    <Button size="small" variant="primary" type="submit">{t('addStyleConfirm')}</Button>
+    <Button size="small" variant="ghost" type="button" onClick={onCancel}>{t('addStyleCancel')}</Button>
+    {invalid && <small className="element-style-error">{t('stylePropertyRequired')}</small>}
+  </form>
+}
+
+function ElementStyles({ rules, selectorCandidates, onRequestSelectors, onAddRule, onRemoveRule, onAdd, onRemove, canEdit, t }: {
+  rules: readonly ElementStyleRule[]
+  selectorCandidates: readonly string[]
+  onRequestSelectors(): void
+  onAddRule(selector: string): void
+  onRemoveRule(selector: string): void
+  onAdd(selector: string, property: string, value: string): void
+  onRemove(selector: string, property: string): void
+  canEdit: boolean
+  t: StudioTranslate
+}): JSX.Element {
+  const [editingRule, setEditingRule] = useState<string>()
+  const [addingSelector, setAddingSelector] = useState(false)
+  const [selector, setSelector] = useState('&')
+  const [selectorInvalid, setSelectorInvalid] = useState(false)
+  const [selectorFocused, setSelectorFocused] = useState(false)
+  const [suggestionIndex, setSuggestionIndex] = useState(0)
+  const suggestionListId = useId()
+  const suggestionsRef = useRef<HTMLDivElement>(null)
+  const visibleRules = rules.some(rule => rule.selector === '&')
+    ? rules : [{ selector: '&', declarations: [] }, ...rules]
+  const selectorSuggestions = selectorFocused
+    ? [...new Set([...cssSelectorSuggestions, ...selectorCandidates])]
+      .filter(candidate => candidate.startsWith(selector) && candidate !== selector) : []
+  const selectorKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>): void => {
+    if (selectorSuggestions.length === 0) return
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      setSuggestionIndex(current => (current + (event.key === 'ArrowDown' ? 1 : -1) + selectorSuggestions.length) % selectorSuggestions.length)
+    } else if (event.key === 'Tab' || event.key === 'ArrowRight') {
+      event.preventDefault()
+      setSelector(selectorSuggestions[suggestionIndex]!)
+      setSuggestionIndex(0)
+    }
+  }
+  useEffect(() => {
+    suggestionsRef.current?.querySelector(`[data-suggestion-index="${suggestionIndex}"]`)
+      ?.scrollIntoView({ block: 'nearest' })
+  }, [suggestionIndex, selectorSuggestions])
+  const properties = rules.flatMap(rule => rule.declarations.map(declaration => declaration.property))
+  return <section className="element-styles" aria-label={t('elementStyles')}>
+    <div className="element-styles-heading">
+      <strong>{t('elementStyles')}</strong>
+      <Button className="element-style-add" variant="ghost" size="small" disabled={!canEdit} onClick={() => {
+        onRequestSelectors()
+        setAddingSelector(true)
+      }}>
+        <PlusIcon />{t('addStyleSelector')}
+      </Button>
+    </div>
+    {visibleRules.map(rule => <details className="element-style-rule" key={rule.selector} open>
+      <summary><code>{rule.selector}</code><span>{rule.selector === '&' ? t('currentElementSelector') : t('relativeElementSelector')}</span></summary>
+      <div className="element-style-rule-actions">
+        <Button variant="ghost" size="small" disabled={!canEdit} onClick={() => setEditingRule(rule.selector)}>
+          <PlusIcon />{t('addStyleDeclaration')}
+        </Button>
+        {rules.some(candidate => candidate.selector === rule.selector) && <IconButton size="small" variant="ghost"
+          label={t('removeStyleSelector', { selector: rule.selector })} disabled={!canEdit}
+          onClick={() => onRemoveRule(rule.selector)}><TrashIcon /></IconButton>}
+      </div>
+      {rule.declarations.map(declaration => <div className="element-style-row" key={declaration.property}>
+        <code>{declaration.property}</code><span>{declaration.value}</span>
+        <IconButton className="element-style-remove" size="small" variant="ghost"
+          label={t('removeElementStyle', { property: declaration.property })} disabled={!canEdit}
+          onClick={() => onRemove(rule.selector, declaration.property)}><TrashIcon /></IconButton>
+      </div>)}
+      {editingRule === rule.selector && <StyleDeclarationEditor properties={properties} t={t}
+        onCancel={() => setEditingRule(undefined)}
+        onSubmit={(property, value) => { onAdd(rule.selector, property, value); setEditingRule(undefined) }} />}
+    </details>)}
+    {addingSelector && <form className="element-selector-editor" onSubmit={event => {
+      event.preventDefault()
+      const next = selector.trim()
+      try {
+        compileElementStyleSelector(next, '[data-scope]')
+      } catch {
+        return setSelectorInvalid(true)
+      }
+      if (rules.some(rule => rule.selector === next)) return setSelectorInvalid(true)
+      onAddRule(next)
+      setAddingSelector(false)
+      setSelector('&')
+      setSelectorInvalid(false)
+    }}>
+      <div className="element-style-property-field">
+        <Input autoFocus value={selector} aria-label={t('styleSelector')} placeholder="& .title"
+          aria-autocomplete="list" aria-expanded={selectorSuggestions.length > 0}
+          aria-controls={selectorSuggestions.length > 0 ? suggestionListId : undefined}
+          aria-activedescendant={selectorSuggestions.length > 0 ? `${suggestionListId}-${suggestionIndex}` : undefined}
+          aria-invalid={selectorInvalid} onFocus={() => setSelectorFocused(true)} onBlur={() => setSelectorFocused(false)}
+          onKeyDown={selectorKeyDown} onChange={event => { setSelector(event.target.value); setSuggestionIndex(0) }} />
+        {selectorSuggestions.length > 0 && <div ref={suggestionsRef} id={suggestionListId}
+          className="element-style-suggestions" role="listbox" aria-label={t('styleSelector')}>
+          {selectorSuggestions.map((candidate, index) => <button key={candidate} type="button" role="option"
+            id={`${suggestionListId}-${index}`} data-suggestion-index={index} aria-selected={index === suggestionIndex}
+            data-focused={index === suggestionIndex || undefined} onMouseEnter={() => setSuggestionIndex(index)}
+            onMouseDown={event => event.preventDefault()} onClick={() => setSelector(candidate)}>{candidate}</button>)}
+        </div>}
+      </div>
+      <Button size="small" variant="primary" type="submit">{t('addStyleConfirm')}</Button>
+      <Button size="small" variant="ghost" type="button" onClick={() => setAddingSelector(false)}>{t('addStyleCancel')}</Button>
+      {selectorInvalid && <small className="element-style-error">{t('styleSelectorRequired')}</small>}
+    </form>}
+  </section>
+}
+
 function ElementTreeNode({
   element,
   matched,
@@ -383,6 +570,14 @@ function ElementTreeNode({
   initialOpen,
   onOpenSource,
   onChange,
+  styles,
+  selectorCandidates,
+  onRequestSelectors,
+  onAddStyleRule,
+  onRemoveStyleRule,
+  onAddStyle,
+  onRemoveStyle,
+  canEditStyles,
   t,
 }: {
   element: StudioElementSnapshot
@@ -391,6 +586,14 @@ function ElementTreeNode({
   initialOpen: boolean
   onOpenSource(): void
   onChange(definition: StudioVariableDefinition, value: StudioVariableValue): void
+  styles: readonly ElementStyleRule[]
+  selectorCandidates: readonly string[]
+  onRequestSelectors(): void
+  onAddStyleRule(selector: string): void
+  onRemoveStyleRule(selector: string): void
+  onAddStyle(selector: string, property: string, value: string): void
+  onRemoveStyle(selector: string, property: string): void
+  canEditStyles: boolean
   t: StudioTranslate
 }): JSX.Element {
   const [open, setOpen] = useState(initialOpen)
@@ -411,6 +614,9 @@ function ElementTreeNode({
         <Button className="source-link" variant="ghost" size="small" disabled={!sourceAvailable}
           onClick={onOpenSource}>{t('openElementSource')}</Button>
       </div>
+      <ElementStyles rules={styles} selectorCandidates={selectorCandidates} onRequestSelectors={onRequestSelectors}
+        onAddRule={onAddStyleRule} onRemoveRule={onRemoveStyleRule}
+        onAdd={onAddStyle} onRemove={onRemoveStyle} canEdit={canEditStyles} t={t} />
       {variables.length === 0
         ? <p className="inspection-empty">{t('elementNoVariables')}</p>
         : <VariableTree nodes={element.element.variables ?? []} values={element.values} depth={1} onChange={onChange} />}
@@ -508,6 +714,8 @@ export function App(): JSX.Element {
   const [elementSourceBusy, setElementSourceBusy] = useState(false)
   const [elementSourceMessage, setElementSourceMessage] = useState<string>()
   const [modifiedElementDefaults, setModifiedElementDefaults] = useState<ReadonlySet<string>>(() => new Set())
+  const [elementStyles, setElementStyles] = useState<Record<string, ElementStyleRule[]>>({})
+  const [elementSelectorCandidates, setElementSelectorCandidates] = useState<Record<string, string[]>>({})
   const [inspection, setInspection] = useState<StudioHarmonyInspection>({ patches: [], targets: [] })
   const [readiness, setReadiness] = useState<StudioReadinessReport>({ findings: [] })
   const [packingDraftId, setPackingDraftId] = useState<string>()
@@ -749,6 +957,11 @@ export function App(): JSX.Element {
       if (![...current].some(key => key.startsWith(prefix))) return current
       return new Set([...current].filter(key => !key.startsWith(prefix)))
     })
+    setElementStyles(current => {
+      const next = Object.fromEntries(Object.entries(current).filter(([key]) => !key.startsWith(prefix)))
+      return Object.keys(next).length === Object.keys(current).length ? current : next
+    })
+    setElementSelectorCandidates(current => Object.fromEntries(Object.entries(current).filter(([key]) => !key.startsWith(prefix))))
   }
 
   const queueWorkspaceUpdate = (open: string[], selected: string | undefined): void => {
@@ -1208,6 +1421,15 @@ export function App(): JSX.Element {
         }
         if (active && message.ok === false && boundedBridgeText(message.error)) setError(message.error)
       }
+      if (active && message.type === 'element-style-result' && message.ok === false && boundedBridgeText(message.error)) {
+        setError(message.error)
+      }
+      if (message.type === 'element-style-selectors' && boundedBridgeText(message.owner)
+        && boundedBridgeText(message.elementId) && Array.isArray(message.candidates)
+        && message.candidates.length <= 500 && message.candidates.every(candidate => boundedBridgeText(candidate))) {
+        const key = `${draft.id}\0${message.owner}\0${message.elementId}`
+        setElementSelectorCandidates(current => ({ ...current, [key]: message.candidates as string[] }))
+      }
       if (active && message.type === 'mode' && (message.mode === 'browse' || message.mode === 'inspect')) {
         previewModeRef.current = message.mode
         setPreviewMode(message.mode)
@@ -1394,6 +1616,72 @@ export function App(): JSX.Element {
       nonce: connection.nonce,
       target,
     })
+  }
+
+  const elementStyleKey = (draftId: string, element: StudioElementSnapshot): string =>
+    `${draftId}\0${element.owner}\0${element.element.id}`
+
+  const addElementStyleRule = (element: StudioElementSnapshot, selector: string): void => {
+    if (selectedDraftId === undefined) return
+    const key = elementStyleKey(selectedDraftId, element)
+    setElementStyles(current => ({
+      ...current,
+      [key]: [...(current[key] ?? []), { selector, declarations: [] }],
+    }))
+  }
+
+  const requestElementStyleSelectors = (element: StudioElementSnapshot): void => {
+    if (selectedDraftId === undefined) return
+    const connection = previewConnections.current.get(selectedDraftId)
+    connection?.port.postMessage({
+      type: 'get-element-style-selectors', requestId: crypto.randomUUID(),
+      sessionId: connection.sessionId, nonce: connection.nonce,
+      target: {
+        owner: element.owner,
+        elementId: element.element.id,
+        boundary: { surfaceId: element.element.boundary.surfaceId, path: [...element.element.boundary.path] },
+      },
+    })
+  }
+
+  const setElementStyle = (element: StudioElementSnapshot, selector: string, property: string, value?: string): void => {
+    if (selectedDraftId === undefined) return
+    const connection = previewConnections.current.get(selectedDraftId)
+    if (connection === undefined) return
+    const draftId = selectedDraftId
+    const target: StudioElementStyleTarget = {
+      owner: element.owner,
+      elementId: element.element.id,
+      boundary: { surfaceId: element.element.boundary.surfaceId, path: [...element.element.boundary.path] },
+      selector,
+      property,
+      ...(value === undefined ? {} : { value }),
+    }
+    connection.port.postMessage({
+      type: 'set-element-style', requestId: crypto.randomUUID(), sessionId: connection.sessionId, nonce: connection.nonce, target,
+    })
+    setElementStyles(current => {
+      const key = elementStyleKey(draftId, element)
+      const rules = current[key] ?? []
+      const existing = rules.find(rule => rule.selector === selector)
+      const declarations = existing?.declarations ?? []
+      const nextDeclarations = value === undefined
+        ? declarations.filter(declaration => declaration.property !== property)
+        : [...declarations.filter(declaration => declaration.property !== property), { property, value }]
+      const nextRule = { selector, declarations: nextDeclarations }
+      return { ...current, [key]: [...rules.filter(rule => rule.selector !== selector), nextRule] }
+    })
+  }
+
+  const removeElementStyleRule = (element: StudioElementSnapshot, selector: string): void => {
+    if (selectedDraftId === undefined) return
+    const key = elementStyleKey(selectedDraftId, element)
+    const rule = elementStyles[key]?.find(candidate => candidate.selector === selector)
+    for (const declaration of rule?.declarations ?? []) setElementStyle(element, selector, declaration.property)
+    setElementStyles(current => ({
+      ...current,
+      [key]: (current[key] ?? []).filter(candidate => candidate.selector !== selector),
+    }))
   }
 
   const togglePreviewFullscreen = (): void => {
@@ -2241,6 +2529,10 @@ export function App(): JSX.Element {
                   {draftElements.map((element, index) => {
                     const matched = matchedElement?.element.id === element.element.id
                     return <ElementTreeNode key={element.element.id} element={element} matched={matched}
+                      styles={elementStyles[elementStyleKey(selectedDraftId!, element)] ?? []}
+                      selectorCandidates={elementSelectorCandidates[elementStyleKey(selectedDraftId!, element)] ?? []}
+                      onRequestSelectors={() => requestElementStyleSelectors(element)}
+                      canEditStyles={selectedDraft?.runtime.state === 'running'}
                       sourceAvailable={files.some(file => file.path === element.element.source.file)}
                       initialOpen={matched || index === 0}
                       onOpenSource={() => {
@@ -2251,6 +2543,10 @@ export function App(): JSX.Element {
                         scope: 'element', owner: element.owner, elementId: element.element.id,
                         variableId: definition.id, value,
                       }, definition.defaultSource === undefined ? undefined : element.values[definition.id])}
+                      onAddStyleRule={selector => addElementStyleRule(element, selector)}
+                      onRemoveStyleRule={selector => removeElementStyleRule(element, selector)}
+                      onAddStyle={(selector, property, value) => setElementStyle(element, selector, property, value)}
+                      onRemoveStyle={(selector, property) => setElementStyle(element, selector, property)}
                       t={t} />
                   })}
                 </div>}

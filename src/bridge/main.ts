@@ -1,4 +1,4 @@
-import { STUDIO_RUNTIME_KEY, type StudioBrowserRuntime } from 'dsh-harmony-react/studio'
+import { STUDIO_RUNTIME_KEY, type StudioBrowserRuntime } from 'dsh-harmony-react/studio-host'
 import {
   getElementAtPoint,
   getElementBounds,
@@ -9,12 +9,15 @@ import {
 import {
   STUDIO_PREVIEW_FRAGMENT,
   type StudioDomSelection,
+  type StudioElementSelectorTarget,
+  type StudioElementStyleTarget,
   type StudioReactSnapshot,
   type StudioSurfaceBoundary,
 } from '../contracts'
 import { StudioPreviewRegistry, type StudioVariableTarget } from './registry'
 import { patchTraces, type FiberSnapshot } from './provenance'
 import { pointInsideSelection } from './selection'
+import { compileElementStyleSelector } from './element-style-selector'
 
 const MAX_TEXT = 2_000
 const MAX_HTML = 16_000
@@ -28,6 +31,11 @@ interface BridgeMessage {
   target?: unknown
   requestId?: unknown
 }
+
+const elementStyles = new Map<string, StudioElementStyleTarget>()
+let elementStyleObserver: MutationObserver | undefined
+let elementStyleSheet: HTMLStyleElement | undefined
+const styledElements = new Set<Element>()
 
 declare global {
   interface Window {
@@ -60,6 +68,132 @@ function variableTarget(value: unknown): value is StudioVariableTarget {
   if (!boundedText(target.owner, 1_000) || !boundedText(target.variableId, 500)) return false
   if (target.scope === 'global') return true
   return target.scope === 'element' && boundedText(target.elementId, 500)
+}
+
+function elementStyleTarget(value: unknown): value is StudioElementStyleTarget {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const target = value as Partial<StudioElementStyleTarget>
+  return boundedText(target.owner, 1_000) && boundedText(target.elementId, 500)
+    && typeof target.boundary === 'object' && target.boundary !== null
+    && boundedText(target.boundary.surfaceId, 1_000) && Array.isArray(target.boundary.path)
+    && target.boundary.path.length > 0 && target.boundary.path.every(segment => boundedText(segment, 500))
+    && boundedText(target.selector, 1_000) && target.selector.startsWith('&')
+    && !/[{},;]/.test(target.selector)
+    && typeof target.property === 'string' && /^(?:--)?[a-zA-Z][a-zA-Z0-9-]*$/.test(target.property)
+    && (target.value === undefined || boundedText(target.value, 2_000))
+}
+
+function elementSelectorTarget(value: unknown): value is StudioElementSelectorTarget {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const target = value as Partial<StudioElementSelectorTarget>
+  return boundedText(target.owner, 1_000) && boundedText(target.elementId, 500)
+    && typeof target.boundary === 'object' && target.boundary !== null
+    && boundedText(target.boundary.surfaceId, 1_000) && Array.isArray(target.boundary.path)
+    && target.boundary.path.length > 0 && target.boundary.path.every(segment => boundedText(segment, 500))
+}
+
+function boundaryMatches(element: Element, boundary: StudioElementStyleTarget['boundary']): boolean {
+  if (element.getAttribute('data-ui-surface') !== boundary.surfaceId) return false
+  try {
+    const path = JSON.parse(element.getAttribute('data-ui-surface-path') ?? '') as unknown
+    return Array.isArray(path) && path.length === boundary.path.length && path.every((segment, index) => segment === boundary.path[index])
+  } catch {
+    return false
+  }
+}
+
+function styleGroupKey(target: StudioElementStyleTarget): string {
+  return `${target.owner}\0${target.elementId}\0${target.boundary.surfaceId}\0${JSON.stringify(target.boundary.path)}`
+}
+
+function validateRelativeSelector(selector: string): void {
+  document.querySelector(compileElementStyleSelector(selector, '[data-dsh-studio-scope~="preview"]'))
+}
+
+function applyElementStyles(): void {
+  elementStyleObserver?.disconnect()
+  for (const element of styledElements) element.removeAttribute('data-dsh-studio-scope')
+  styledElements.clear()
+  elementStyleSheet?.remove()
+  elementStyleSheet = undefined
+  if (elementStyles.size === 0) return
+
+  const elements = [...document.querySelectorAll('[data-ui-surface][data-ui-surface-path]')]
+  const groups = new Map<string, { token: string; rules: Map<string, StudioElementStyleTarget[]> }>()
+  for (const target of elementStyles.values()) {
+    validateRelativeSelector(target.selector)
+    const key = styleGroupKey(target)
+    let group = groups.get(key)
+    if (group === undefined) {
+      group = { token: `s${groups.size + 1}`, rules: new Map() }
+      groups.set(key, group)
+      for (const element of elements) {
+        if (!boundaryMatches(element, target.boundary)) continue
+        const tokens = new Set((element.getAttribute('data-dsh-studio-scope') ?? '').split(/\s+/).filter(Boolean))
+        tokens.add(group.token)
+        element.setAttribute('data-dsh-studio-scope', [...tokens].join(' '))
+        styledElements.add(element)
+      }
+    }
+    const declarations = group.rules.get(target.selector)
+    if (declarations === undefined) group.rules.set(target.selector, [target])
+    else declarations.push(target)
+  }
+
+  elementStyleSheet = document.createElement('style')
+  elementStyleSheet.dataset.dshStudioElementStyles = ''
+  document.head.append(elementStyleSheet)
+  const sheet = elementStyleSheet.sheet
+  if (sheet === null) throw new Error('Preview stylesheet is unavailable')
+  for (const group of groups.values()) {
+    const scope = `[data-dsh-studio-scope~="${group.token}"]`
+    for (const [selector, declarations] of group.rules) {
+      const index = sheet.insertRule(`${compileElementStyleSelector(selector, scope)} {}`, sheet.cssRules.length)
+      const rule = sheet.cssRules[index]
+      if (!(rule instanceof CSSStyleRule)) throw new Error('Preview CSS rule could not be created')
+      for (const declaration of declarations) rule.style.setProperty(declaration.property, declaration.value ?? '')
+    }
+  }
+  elementStyleObserver?.observe(document.documentElement, { childList: true, subtree: true })
+}
+
+function updateElementStyle(target: StudioElementStyleTarget): void {
+  validateRelativeSelector(target.selector)
+  const key = `${styleGroupKey(target)}\0${target.selector}\0${target.property}`
+  if (target.value === undefined) elementStyles.delete(key)
+  else elementStyles.set(key, target)
+  if (elementStyles.size > 0 && elementStyleObserver === undefined) {
+    elementStyleObserver = new MutationObserver(() => applyElementStyles())
+    elementStyleObserver.observe(document.documentElement, { childList: true, subtree: true })
+  } else if (elementStyles.size === 0) {
+    elementStyleObserver?.disconnect()
+    elementStyleObserver = undefined
+  }
+  applyElementStyles()
+}
+
+function elementSelectorCandidates(target: StudioElementSelectorTarget): string[] {
+  const candidates = new Set<string>()
+  const roots = [...document.querySelectorAll('[data-ui-surface][data-ui-surface-path]')]
+    .filter(element => boundaryMatches(element, target.boundary))
+  const addElement = (prefix: string, element: Element): void => {
+    candidates.add(`${prefix}${element.localName}`)
+    for (const className of element.classList) candidates.add(`${prefix}.${CSS.escape(className)}`)
+    for (const attribute of element.attributes) {
+      if (attribute.name.startsWith('data-ui-') || SENSITIVE_ATTRIBUTE.test(attribute.name)) continue
+      candidates.add(`${prefix}[${CSS.escape(attribute.name)}]`)
+    }
+  }
+  for (const root of roots) {
+    for (const className of root.classList) candidates.add(`&.${CSS.escape(className)}`)
+    for (const attribute of root.attributes) {
+      if (attribute.name.startsWith('data-ui-') || SENSITIVE_ATTRIBUTE.test(attribute.name)) continue
+      candidates.add(`&[${CSS.escape(attribute.name)}]`)
+    }
+    for (const child of [...root.children].slice(0, 100)) addElement('& > ', child)
+    for (const descendant of [...root.querySelectorAll('*')].slice(0, 200)) addElement('& ', descendant)
+  }
+  return [...candidates].sort().slice(0, 500)
 }
 
 const registry = new StudioPreviewRegistry(() => {
@@ -403,6 +537,23 @@ function receiveParentCommand(portEvent: MessageEvent): void {
       post({ type: 'variable-result', requestId: command.requestId, ok: false, error: error instanceof Error ? error.message : String(error) })
     })
   }
+  if (command.type === 'set-element-style' && boundedText(command.requestId, 200)
+    && elementStyleTarget(command.target)) {
+    try {
+      updateElementStyle(command.target)
+      post({ type: 'element-style-result', requestId: command.requestId, ok: true })
+    } catch (error) {
+      post({ type: 'element-style-result', requestId: command.requestId, ok: false, error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+  if (command.type === 'get-element-style-selectors' && boundedText(command.requestId, 200)
+    && elementSelectorTarget(command.target)) {
+    post({
+      type: 'element-style-selectors', requestId: command.requestId,
+      owner: command.target.owner, elementId: command.target.elementId,
+      candidates: elementSelectorCandidates(command.target),
+    })
+  }
 }
 
 if (previewEnabled) {
@@ -425,6 +576,8 @@ if (previewEnabled) {
 
 window.addEventListener('beforeunload', () => {
   setMode('browse')
+  elementStyleObserver?.disconnect()
+  elementStyles.clear()
   window.removeEventListener('pointerdown', beginPan, true)
   window.removeEventListener('pointermove', movePan, true)
   window.removeEventListener('pointerup', endPan, true)

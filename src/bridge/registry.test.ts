@@ -77,6 +77,25 @@ describe('StudioPreviewRegistry', () => {
     })).toThrow('Duplicate Studio variable node id shared')
   })
 
+  it('finds and updates variables nested in recursive groups', async () => {
+    let size = '12px'
+    const registry = new StudioPreviewRegistry(() => {})
+    registry.registerVariables({
+      owner: 'draft',
+      variables: [{ kind: 'group', id: 'appearance', label: 'Appearance', children: [{
+        kind: 'group', id: 'typography', label: 'Typography', children: [{
+          kind: 'variable', id: 'size', label: 'Size', control: 'length',
+        }],
+      }] }],
+      bindings: { size: { get: () => size, set: value => { size = String(value) } } },
+    })
+
+    await registry.set({ scope: 'global', owner: 'draft', variableId: 'size', value: '14px' })
+
+    expect(size).toBe('14px')
+    expect(registry.snapshot().variables[0]?.values).toEqual({ size: '14px' })
+  })
+
   it('serializes writes and never applies an old queued write to a replacement registration', async () => {
     let release: (() => void) | undefined
     let value = 0

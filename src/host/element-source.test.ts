@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, test } from 'vitest'
-import type { StudioElementSnapshot } from 'dsh-harmony-react/studio'
+import type { StudioElementSnapshot } from '../contracts.js'
 import { saveElementsDefaults } from './element-source.js'
 
 const roots: string[] = []

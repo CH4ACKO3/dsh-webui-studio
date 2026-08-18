@@ -15,7 +15,15 @@ function patchTrace(value: unknown): StudioPatchTrace | undefined {
   if (typeof value !== 'object' || value === null) return undefined
   const trace = value as Partial<StudioPatchTrace>
   const target = trace.target as Partial<StudioPatchTrace['target']> | undefined
-  const effects = new Set(['replace-element', 'wrap-element', 'insert-before', 'insert-after', 'transform-props'])
+  const effects = new Set([
+    'replace-element',
+    'wrap-element',
+    'insert-before',
+    'insert-after',
+    'transform-props',
+    'decorate-component',
+    'replace-component',
+  ])
   if (typeof trace.key !== 'string' || typeof trace.owner !== 'string' || typeof trace.declaration !== 'string'
     || typeof trace.effect !== 'string' || !effects.has(trace.effect)
     || target === undefined || typeof target.package !== 'string' || typeof target.file !== 'string') return undefined
