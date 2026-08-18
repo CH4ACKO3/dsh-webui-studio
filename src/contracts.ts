@@ -108,6 +108,21 @@ export interface StudioElementStyleTarget {
   value?: string
 }
 
+export interface StudioElementStyleDeclaration {
+  property: string
+  value: string
+}
+
+export interface StudioElementStyleRule {
+  selector: string
+  declarations: StudioElementStyleDeclaration[]
+}
+
+export interface StudioElementStyleSource {
+  elementId: string
+  rules: StudioElementStyleRule[]
+}
+
 export interface StudioElementSelectorTarget {
   owner: string
   elementId: string
@@ -281,7 +296,10 @@ export type StudioAutomaticPatchRequest =
   | {
     kind: 'css-style'
     targets: StudioAutomaticPatchTarget[]
-    select: string
+    component: string
+    clientFile: string
+    boundary: StudioSurfaceBoundary
+    selector: string
     elementId: string
     elementLabel: string
     variables: StudioAutomaticCssVariable[]
@@ -308,6 +326,12 @@ export interface StudioAutomaticPatchPlan {
     file: string
     source: string
     patchIds: string[]
+  }
+  client?: {
+    file: string
+    source: string
+    export: string
+    entryFile: string
   }
 }
 

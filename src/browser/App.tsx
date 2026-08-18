@@ -27,6 +27,8 @@ import {
   type StudioDraftView,
   type StudioDomSelection,
   type StudioElementSnapshot,
+  type StudioElementStyleRule,
+  type StudioElementStyleSource,
   type StudioElementStyleTarget,
   type StudioHarmonyInspection,
   type StudioProjectFile,
@@ -77,6 +79,7 @@ import { CreateDraftDialog } from './CreateDraftDialog'
 import { HarmonyTargets } from './HarmonyTargets'
 import { PluginManagement } from './PluginManagement'
 import { SettingsDialog, SettingsIcon } from './SettingsDialog'
+import { AutomaticPatchDialog } from './AutomaticPatchDialog'
 import {
   boundedBridgeText,
   isBridgeEnvelope,
@@ -380,9 +383,6 @@ function VariableTree({
   </div>
 }
 
-type ElementStyleDeclaration = { property: string; value: string }
-type ElementStyleRule = { selector: string; declarations: ElementStyleDeclaration[] }
-
 const cssPropertySuggestions = [
   'align-items', 'align-self', 'background', 'background-color', 'border', 'border-color', 'border-radius',
   'bottom', 'box-shadow', 'color', 'display', 'flex', 'flex-direction', 'font-family', 'font-size', 'font-weight',
@@ -458,7 +458,7 @@ function StyleDeclarationEditor({ properties, onSubmit, onCancel, t }: {
 }
 
 function ElementStyles({ rules, selectorCandidates, onRequestSelectors, onAddRule, onRemoveRule, onAdd, onRemove, canEdit, t }: {
-  rules: readonly ElementStyleRule[]
+  rules: readonly StudioElementStyleRule[]
   selectorCandidates: readonly string[]
   onRequestSelectors(): void
   onAddRule(selector: string): void
@@ -586,7 +586,7 @@ function ElementTreeNode({
   initialOpen: boolean
   onOpenSource(): void
   onChange(definition: StudioVariableDefinition, value: StudioVariableValue): void
-  styles: readonly ElementStyleRule[]
+  styles: readonly StudioElementStyleRule[]
   selectorCandidates: readonly string[]
   onRequestSelectors(): void
   onAddStyleRule(selector: string): void
@@ -666,6 +666,7 @@ export function App(): JSX.Element {
   const [loadingDrafts, setLoadingDrafts] = useState(true)
   const [selectedDraftId, setSelectedDraftId] = useState<string>()
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [automaticPatchOpen, setAutomaticPatchOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [project, setProject] = useState<StudioProjectState>()
   const [sessionId, setSessionId] = useState<string>()
@@ -714,7 +715,7 @@ export function App(): JSX.Element {
   const [elementSourceBusy, setElementSourceBusy] = useState(false)
   const [elementSourceMessage, setElementSourceMessage] = useState<string>()
   const [modifiedElementDefaults, setModifiedElementDefaults] = useState<ReadonlySet<string>>(() => new Set())
-  const [elementStyles, setElementStyles] = useState<Record<string, ElementStyleRule[]>>({})
+  const [elementStyles, setElementStyles] = useState<Record<string, StudioElementStyleRule[]>>({})
   const [elementSelectorCandidates, setElementSelectorCandidates] = useState<Record<string, string[]>>({})
   const [inspection, setInspection] = useState<StudioHarmonyInspection>({ patches: [], targets: [] })
   const [readiness, setReadiness] = useState<StudioReadinessReport>({ findings: [] })
@@ -741,6 +742,7 @@ export function App(): JSX.Element {
   const variableUpdateTail = useRef<Promise<void>>(Promise.resolve())
   const pendingVariableResults = useRef(new Map<string, { resolve(): void; reject(error: Error): void }>())
   const sourceVariableBaselines = useRef(new Map<string, StudioVariableValue>())
+  const elementStyleBaselines = useRef(new Map<string, string>())
   const workspaceUpdateQueue = useRef<Promise<void>>(Promise.resolve())
   const suppressDraftTabClickRef = useRef<string>()
   const selectionResolve = useRef(0)
@@ -779,6 +781,11 @@ export function App(): JSX.Element {
   const modifiedElementPrefix = selectedDraftId === undefined ? undefined : `${selectedDraftId}\0`
   const hasModifiedElementDefaults = modifiedElementPrefix !== undefined
     && [...modifiedElementDefaults].some(key => key.startsWith(modifiedElementPrefix))
+  const hasModifiedElementStyles = selectedDraftId !== undefined && draftElements.some(element => {
+    const key = `${selectedDraftId}\0${element.owner}\0${element.element.id}`
+    return JSON.stringify(elementStyles[key] ?? []) !== (elementStyleBaselines.current.get(key) ?? '[]')
+  })
+  const hasModifiedElementSource = hasModifiedElementDefaults || hasModifiedElementStyles
   const previewInsets = previewFullscreen
     ? { left: 0, right: 0 }
     : {
@@ -953,6 +960,9 @@ export function App(): JSX.Element {
     for (const key of sourceVariableBaselines.current.keys()) {
       if (key.startsWith(prefix)) sourceVariableBaselines.current.delete(key)
     }
+    for (const key of elementStyleBaselines.current.keys()) {
+      if (key.startsWith(prefix)) elementStyleBaselines.current.delete(key)
+    }
     setModifiedElementDefaults(current => {
       if (![...current].some(key => key.startsWith(prefix))) return current
       return new Set([...current].filter(key => !key.startsWith(prefix)))
@@ -1006,6 +1016,28 @@ export function App(): JSX.Element {
   useEffect(() => {
     setElementSourceMessage(undefined)
   }, [selectedDraftId])
+
+  const draftElementIdentity = draftElements.map(item => `${item.owner}\0${item.element.id}\0${item.element.source.file}`).join('\n')
+  useEffect(() => {
+    if (selectedDraftId === undefined || draftElements.length === 0) return
+    const draftId = selectedDraftId
+    void callStudio<StudioElementStyleSource[]>('studio.elements.styles', { draftId }).then(sources => {
+      if (draftIdRef.current !== draftId) return
+      setElementStyles(current => {
+        const next = { ...current }
+        for (const element of draftElements) {
+          const key = `${draftId}\0${element.owner}\0${element.element.id}`
+          if (elementStyleBaselines.current.has(key)) continue
+          const rules = sources.find(item => item.elementId === element.element.id)?.rules ?? []
+          next[key] = rules
+          elementStyleBaselines.current.set(key, JSON.stringify(rules))
+        }
+        return next
+      })
+    }).catch(cause => {
+      if (draftIdRef.current === draftId) setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+    })
+  }, [draftElementIdentity, selectedDraftId])
 
   useEffect(() => {
     for (const pending of pendingVariableResults.current.values()) pending.reject(new Error('Preview bridge changed'))
@@ -1292,11 +1324,11 @@ export function App(): JSX.Element {
     }
   }
 
-  const applyDraftBuild = async (draftId: string): Promise<StudioBuildResult> => {
+  const applyDraftBuild = async (draftId: string, preserveElementState = false): Promise<StudioBuildResult> => {
     const result = await callStudio<StudioBuildResult>('studio.project.build', { draftId })
     setBuildOutputs(current => ({ ...current, [draftId]: result.build }))
     updateDraftProject(draftId, result.project)
-    clearElementModifications(draftId)
+    if (!preserveElementState) clearElementModifications(draftId)
     reloadPreview(draftId)
     return result
   }
@@ -1517,7 +1549,7 @@ export function App(): JSX.Element {
   }
 
   const saveElementDefaults = async (): Promise<void> => {
-    if (selectedDraftId === undefined || !hasModifiedElementDefaults) return
+    if (selectedDraftId === undefined || !hasModifiedElementSource) return
     if (hasUnsavedSource) {
       setPanel('source')
       setError(t('errorUnsavedElementSave'))
@@ -1531,7 +1563,12 @@ export function App(): JSX.Element {
     try {
       await variableUpdateTail.current
       await previewUpdateQueue.current
-      const result = await callStudio<{ files: string[] }>('studio.elements.saveDefaults', { draftId })
+      const styles: StudioElementStyleSource[] = draftElements.flatMap(element => {
+        const key = elementStyleKey(draftId, element)
+        if (!elementStyleBaselines.current.has(key) && !Object.hasOwn(elementStyles, key)) return []
+        return [{ elementId: element.element.id, rules: elementStyles[key] ?? [] }]
+      })
+      const result = await callStudio<{ files: string[] }>('studio.elements.saveSource', { draftId, styles })
       if (filePath !== '' && result.files.includes(filePath)) {
         const file = await callStudio<{ path: string; content: string }>('studio.project.readFile', { draftId, path: filePath })
         if (draftIdRef.current === draftId && file.path === filePath) {
@@ -1539,8 +1576,24 @@ export function App(): JSX.Element {
           setSavedSource(file.content)
         }
       }
-      await applyDraftBuild(draftId)
-      if (draftIdRef.current === draftId) setElementSourceMessage(t('elementSourceSaved', { count: result.files.length }))
+      await applyDraftBuild(draftId, true)
+      if (draftIdRef.current === draftId) {
+        for (const element of draftElements) {
+          for (const definition of flattenVariableTree(element.element.variables ?? [])) {
+            if (definition.defaultSource === undefined) continue
+            sourceVariableBaselines.current.set(
+              `${draftId}\0${element.owner}\0${element.element.id}\0${definition.id}`,
+              element.values[definition.id]!,
+            )
+          }
+          const key = elementStyleKey(draftId, element)
+          if (styles.some(item => item.elementId === element.element.id)) {
+            elementStyleBaselines.current.set(key, JSON.stringify(elementStyles[key] ?? []))
+          }
+        }
+        setModifiedElementDefaults(current => new Set([...current].filter(key => !key.startsWith(`${draftId}\0`))))
+        setElementSourceMessage(t('elementSourceSaved', { count: result.files.length }))
+      }
       void callStudio<StudioReadinessReport>('studio.readiness.inspect', { draftId }).then(next => {
         if (draftIdRef.current === draftId) setReadiness(next)
       }).catch(() => undefined)
@@ -2516,7 +2569,7 @@ export function App(): JSX.Element {
               <Badge tone="info">{draftElements.length}</Badge>
               <Button variant="primary" size="small" loading={elementSourceBusy}
                 loadingLabel={t('savingElementToSource')}
-                disabled={!hasModifiedElementDefaults || elementSourceBusy || selectedBuildRunning}
+                disabled={!hasModifiedElementSource || elementSourceBusy || selectedBuildRunning}
                 onClick={() => void saveElementDefaults()}>{t('saveElementToSource')}</Button>
             </div>
           </div>
@@ -2596,6 +2649,11 @@ export function App(): JSX.Element {
                     }}>{t('openSelectedSource')}</Button>}
                   </dd></div>}
                 </dl>
+                <div className="selection-actions">
+                  <Button size="small" variant="primary" disabled={selection.react?.component === undefined
+                    || selection.react.source?.resolved?.package === undefined || selection.boundaries.length === 0 || selectedDraftId === undefined}
+                    onClick={() => setAutomaticPatchOpen(true)}>{t('automaticPatchAction')}</Button>
+                </div>
                 {selection.react !== undefined && Object.keys(selection.react.props).length > 0 && <details>
                   <summary>{t('safeProps')}</summary>
                   <pre className="selection-code">{JSON.stringify(selection.react.props, null, 2)}</pre>
@@ -2724,6 +2782,17 @@ export function App(): JSX.Element {
     </main>
     {terminalExpanded && terminal !== null && createPortal(terminal, document.body)}
     <CreateDraftDialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} onCreate={createDraft} />
+    <AutomaticPatchDialog open={automaticPatchOpen} draftId={selectedDraftId} selection={selection} files={files}
+      onClose={() => setAutomaticPatchOpen(false)} onCreated={async result => {
+        if (selectedDraftId === undefined) return
+        await applyDraftBuild(selectedDraftId)
+        setFiles(await callStudio<StudioProjectFile[]>('studio.project.files', { draftId: selectedDraftId }))
+        setElementSourceMessage(t('automaticPatchCreated', { count: result.provider.patchIds.length }))
+      }} onAgent={nextPrompt => {
+        setAutomaticPatchOpen(false)
+        setPanel('agent')
+        setPrompt(nextPrompt)
+      }} />
     <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
   </div>
 }

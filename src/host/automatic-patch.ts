@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto'
 import { unlink } from 'node:fs/promises'
-import { join } from 'node:path'
-import { tsquery } from '@phenomnomnominal/tsquery'
+import { basename, dirname, extname, join, posix } from 'node:path'
 import ts from 'typescript'
 import type {
   StudioAutomaticCssVariable,
@@ -12,6 +11,7 @@ import type {
   StudioAutomaticPatchWriteResult,
 } from '../contracts.js'
 import { readProjectFile, writeProjectFile } from './project-files.js'
+import { compileElementStyleSelector } from '../bridge/element-style-selector.js'
 
 export interface AutomaticPatchSource {
   package: string
@@ -49,21 +49,6 @@ function match(sourceFile: ts.SourceFile, source: string, node: ts.Node, applica
   }
 }
 
-function jsxProps(node: ts.Node): ts.Expression | undefined {
-  if (!ts.isCallExpression(node) || node.arguments.length < 2) return undefined
-  let expression: ts.Expression = node.expression
-  while (ts.isParenthesizedExpression(expression)) expression = expression.expression
-  if (!ts.isBinaryExpression(expression) || expression.operatorToken.kind !== ts.SyntaxKind.CommaToken
-    || !ts.isPropertyAccessExpression(expression.right)
-    || (expression.right.name.text !== 'jsx' && expression.right.name.text !== 'jsxs')) return undefined
-  return node.arguments[1]
-}
-
-function cssReactProperty(property: string): string {
-  if (property.startsWith('--')) return property
-  return property.replace(/^-([a-z])/, (_, letter: string) => letter.toUpperCase()).replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase())
-}
-
 function cssVariable(value: unknown): value is StudioAutomaticCssVariable {
   if (typeof value !== 'object' || value === null) return false
   const variable = value as Partial<StudioAutomaticCssVariable>
@@ -77,7 +62,12 @@ function cssVariable(value: unknown): value is StudioAutomaticCssVariable {
 }
 
 function validateCssRequest(request: Extract<StudioAutomaticPatchRequest, { kind: 'css-style' }>): void {
-  if (request.select.trim() === '') throw new Error('automatic CSS Patch selector must not be empty')
+  if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(request.component)) throw new Error('automatic CSS Patch component name is invalid')
+  if (!/\.(?:[cm]?[jt]sx?)$/.test(request.clientFile)) throw new Error('automatic CSS Patch client source must be a JavaScript or TypeScript file')
+  compileElementStyleSelector(request.selector, '[data-dsh-studio-root]')
+  if (request.boundary.surfaceId === '' || request.boundary.path.length === 0 || request.boundary.path.some(item => item === '')) {
+    throw new Error('automatic CSS Patch boundary is invalid')
+  }
   if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(request.elementId)) throw new Error('automatic CSS Patch element id is invalid')
   if (request.elementLabel.trim() === '') throw new Error('automatic CSS Patch element label must not be empty')
   if (request.variables.length === 0) throw new Error('automatic CSS Patch requires at least one variable')
@@ -106,14 +96,18 @@ function analyzeTarget(
     }
     visit(sourceFile)
   } else {
-    let nodes: readonly ts.Node[]
-    try {
-      nodes = tsquery(sourceFile, request.select)
-    } catch (error) {
-      throw new Error(`automatic CSS Patch selector is invalid: ${error instanceof Error ? error.message : String(error)}`)
+    matches = []
+    const visit = (node: ts.Node): void => {
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === request.component) {
+        matches.push(match(sourceFile, target.source, node, node.initializer !== undefined,
+          node.initializer === undefined ? 'component variable declaration has no initializer' : undefined))
+      } else if (ts.isFunctionDeclaration(node) && node.name?.text === request.component) {
+        matches.push(match(sourceFile, target.source, node, node.body !== undefined,
+          node.body === undefined ? 'component function declaration has no body' : undefined))
+      }
+      ts.forEachChild(node, visit)
     }
-    matches = nodes.map(node => match(sourceFile, target.source, node, jsxProps(node) !== undefined,
-      jsxProps(node) === undefined ? 'selector match is not a compiled React jsx/jsxs call' : undefined))
+    visit(sourceFile)
   }
   return { package: target.package, file: target.file, version: target.version, matches }
 }
@@ -138,90 +132,107 @@ function cssPatch(
   request: Extract<StudioAutomaticPatchRequest, { kind: 'css-style' }>,
   target: StudioAutomaticPatchTargetAnalysis,
   id: string,
-  providerFile: string,
   owner: string,
 ): string {
-  const variables = request.variables
-  const definitions = variables.map(variable => `{
-          kind: 'variable', id: ${JSON.stringify(variable.id)}, label: ${JSON.stringify(variable.label)}, control: ${JSON.stringify(variable.control)},
-          ${variable.options === undefined ? '' : `options: ${JSON.stringify(variable.options)},`}
-          ${variable.constraints === undefined ? '' : `constraints: ${JSON.stringify(variable.constraints)},`}
-          defaultSource: { file: ${JSON.stringify(providerFile)}, before: ${JSON.stringify(`        ${JSON.stringify(variable.id)}: /* dsh-studio-default:${id}:${variable.id} */ `)}, after: ',\n' },
-        }`).join(',\n')
-  const config = JSON.stringify(variables.map(variable => ({
-    id: variable.id,
-    property: variable.property,
-    reactProperty: cssReactProperty(variable.property),
-  })))
-  const registration = `(() => {
-        const __props = (${`SOURCE_PROPS`}) || {};
-        const __runtime = globalThis.__DSH_HARMONY_STUDIO_RUNTIME__;
-        const __key = Symbol.for(${JSON.stringify(`dsh-studio:auto:${id}`)});
-        const __signature = ${JSON.stringify(digest({ id, variables }))};
-        const __defaults = DEFAULT_VALUES;
-        const __config = ${config}.map(item => ({ ...item, value: __defaults[item.id] }));
-        let __state = globalThis[__key];
-        if (!__state || __state.signature !== __signature) {
-          __state?.dispose?.();
-          const __values = Object.fromEntries(__config.map(item => [item.id, item.value]));
-          const __apply = () => {
-            if (typeof document === 'undefined') return;
-            for (const element of document.querySelectorAll('[data-dsh-studio-auto=${id}]')) {
-              for (const item of __config) element.style.setProperty(item.property, String(__values[item.id]));
-            }
-          };
-          const __bindings = Object.fromEntries(__config.map(item => [item.id, {
-            get: () => __values[item.id],
-            set: value => { __values[item.id] = value; __apply(); },
-          }]));
-          const __registration = __runtime?.registerElement({
-            owner: ${JSON.stringify(owner)},
-            element: {
-              id: ${JSON.stringify(`${request.elementId}-${identifier(target.package)}-${digest(target.file, 6)}`)},
-              label: ${JSON.stringify(`${request.elementLabel} · ${target.package}`)},
-              boundary: { surfaceId: 'dsh-studio-auto', path: [${JSON.stringify(request.elementId)}] },
-              source: { file: ${JSON.stringify(providerFile)} },
-              variables: [{ kind: 'group', id: 'css', label: 'CSS', children: [${definitions}] }],
-            },
-            bindings: __bindings,
-          });
-          __state = { signature: __signature, values: __values, apply: __apply, dispose: __registration };
-          globalThis[__key] = __state;
-        }
-        const __style = { ...(typeof __props.style === 'object' && __props.style !== null ? __props.style : {}) };
-        for (const item of __config) __style[item.reactProperty] = __state.values[item.id];
-        return { ...__props, 'data-dsh-studio-auto': ${JSON.stringify(id)}, style: __style };
-      })()`
-  return `  {
+  return `  component({
     id: ${JSON.stringify(id)},
     target: { package: ${JSON.stringify(target.package)}, version: ${JSON.stringify(target.version)}, files: [${JSON.stringify(target.file)}] },
-    select: ${JSON.stringify(request.select)},
+    select: { name: ${JSON.stringify(request.component)} },
     expect: ${target.matches.length},
-    apply(context) {
-      const node = context.node;
-      if (!context.ts.isCallExpression(node) || node.arguments.length < 2) throw new Error('automatic CSS Patch matched a non-element node');
-      let expression = node.expression;
-      while (context.ts.isParenthesizedExpression(expression)) expression = expression.expression;
-      if (!context.ts.isBinaryExpression(expression) || expression.operatorToken.kind !== context.ts.SyntaxKind.CommaToken || !context.ts.isPropertyAccessExpression(expression.right) || (expression.right.name.text !== 'jsx' && expression.right.name.text !== 'jsxs')) throw new Error('automatic CSS Patch matched a non-compiled React element');
-      const props = node.arguments[1];
-      const __defaults = {
-${variables.map(variable => `        ${JSON.stringify(variable.id)}: /* dsh-studio-default:${id}:${variable.id} */ ${JSON.stringify(variable.value)},`).join('\n')}
-      };
-      const replacement = ${JSON.stringify(registration)}
-        .replace('SOURCE_PROPS', context.source.slice(props.getStart(context.sourceFile), props.getEnd()))
-        .replace('DEFAULT_VALUES', JSON.stringify(__defaults));
-      context.edit.overwrite(props.getStart(context.sourceFile), props.getEnd(), replacement);
-    },
-  }`
+    operation: { kind: 'decorate', with: { module: ${JSON.stringify(owner)}, export: AUTO_EXPORT } },
+  })`
 }
 
-function providerSource(request: StudioAutomaticPatchRequest, targets: StudioAutomaticPatchTargetAnalysis[], owner: string, providerFile: string): { source: string; patchIds: string[] } {
+function clientSource(request: Extract<StudioAutomaticPatchRequest, { kind: 'css-style' }>, owner: string, id: string, file: string, exportName: string): string {
+  const definitions = request.variables.map(variable => `{
+      kind: 'variable', id: ${JSON.stringify(variable.id)}, label: ${JSON.stringify(variable.label)}, control: ${JSON.stringify(variable.control)},
+      ${variable.options === undefined ? '' : `options: ${JSON.stringify(variable.options)},`}
+      ${variable.constraints === undefined ? '' : `constraints: ${JSON.stringify(variable.constraints)},`}
+      defaultSource: { file: ${JSON.stringify(file)}, before: ${JSON.stringify(`  ${JSON.stringify(variable.id)}: /* dsh-studio-default:${id}:${variable.id} */ `)}, after: ${JSON.stringify(',\n')} },
+    }`).join(',\n')
+  const defaults = request.variables.map(variable => `  ${JSON.stringify(variable.id)}: /* dsh-studio-default:${id}:${variable.id} */ ${JSON.stringify(variable.value)},`).join('\n')
+  const properties = JSON.stringify(request.variables.map(item => ({ id: item.id, property: item.property })))
+  const root = `[data-ui-surface=${JSON.stringify(request.boundary.surfaceId)}][data-ui-surface-path=${JSON.stringify(JSON.stringify(request.boundary.path))}]`
+  const selector = compileElementStyleSelector(request.selector, root)
+  return `import * as React from 'react'
+import { registerStudioElement } from 'dsh-harmony-react/studio'
+
+const values = {
+${defaults}
+}
+const declarations = ${properties}
+let mounts = 0
+let disposeRegistration
+let styleElement
+
+function applyStyles() {
+  if (typeof document === 'undefined') return
+  if (styleElement === undefined) {
+    styleElement = document.createElement('style')
+    styleElement.dataset.plugin = ${JSON.stringify(owner)}
+    document.head.append(styleElement)
+  }
+  styleElement.textContent = ''
+  const sheet = styleElement.sheet
+  if (sheet === null) return
+  const index = sheet.insertRule(${JSON.stringify(`${selector} {}`)}, 0)
+  const rule = sheet.cssRules[index]
+  if (!(rule instanceof CSSStyleRule)) return
+  for (const declaration of declarations) rule.style.setProperty(declaration.property, String(values[declaration.id]))
+}
+
+const bindings = Object.fromEntries(declarations.map(declaration => [declaration.id, {
+  get: () => values[declaration.id],
+  set: value => { values[declaration.id] = value; applyStyles() },
+}]))
+
+function acquire() {
+  mounts += 1
+  if (mounts === 1) {
+    disposeRegistration = registerStudioElement({
+      owner: ${JSON.stringify(owner)},
+      element: {
+        id: ${JSON.stringify(request.elementId)}, label: ${JSON.stringify(request.elementLabel)},
+        boundary: ${JSON.stringify(request.boundary)}, source: { file: ${JSON.stringify(file)} },
+        variables: [{ kind: 'group', id: 'css', label: 'CSS', children: [
+${definitions}
+        ] }],
+      },
+      bindings,
+    })
+    applyStyles()
+  }
+  return () => {
+    mounts -= 1
+    if (mounts !== 0) return
+    disposeRegistration?.()
+    disposeRegistration = undefined
+    styleElement?.remove()
+    styleElement = undefined
+  }
+}
+
+export function ${exportName}(Original) {
+  function StudioDecoratedComponent(props) {
+    React.useEffect(acquire, [])
+    return React.createElement(Original, props)
+  }
+  StudioDecoratedComponent.displayName = \`Studio(${request.component})\`
+  return StudioDecoratedComponent
+}
+`
+}
+
+function providerSource(request: StudioAutomaticPatchRequest, targets: StudioAutomaticPatchTargetAnalysis[], owner: string): { source: string; patchIds: string[] } {
   const applicable = targets.filter(target => target.matches.length > 0 && target.matches.every(item => item.applicable))
   const patchIds = applicable.map(target => patchId(request, target))
   const declarations = applicable.map((target, index) => request.kind === 'replace-string'
     ? stringPatch(request, target, patchIds[index]!)
-    : cssPatch(request, target, patchIds[index]!, providerFile, owner)).join(',\n')
-  return { patchIds, source: `'use strict'\n\nmodule.exports = [\n${declarations}\n]\n` }
+    : cssPatch(request, target, patchIds[index]!, owner)).join(',\n')
+  const prefix = request.kind === 'css-style'
+    ? `'use strict'\n\nconst { component } = require('dsh-harmony-react')\nconst AUTO_EXPORT = ${JSON.stringify(`DshStudioAuto${digest(request, 10)}`)}\n\n`
+    : `'use strict'\n\n`
+  return { patchIds, source: `${prefix}module.exports = [\n${declarations}\n]\n` }
 }
 
 export function analyzeAutomaticPatch(
@@ -242,12 +253,32 @@ export function analyzeAutomaticPatch(
   }
   const targets = sources.map(source => analyzeTarget(request, source))
   const file = `patch.auto-${digest({ request, owner, versions: targets.map(target => target.version) })}.cjs`
-  const generated = providerSource(request, targets, owner, file)
-  return { request, targets, canApply: generated.patchIds.length > 0, provider: { file, source: generated.source, patchIds: generated.patchIds } }
+  const generated = providerSource(request, targets, owner)
+  if (request.kind === 'replace-string') {
+    return { request, targets, canApply: generated.patchIds.length > 0, provider: { file, source: generated.source, patchIds: generated.patchIds } }
+  }
+  const extension = extname(request.clientFile)
+  const stem = basename(request.clientFile, extension)
+  const suffix = digest({ request, owner }, 10)
+  const generatedFile = posix.join(dirname(request.clientFile).split('\\').join('/'), `${stem}.dsh-studio-auto-${suffix}.js`)
+  const exportName = `DshStudioAuto${digest(request, 10)}`
+  return {
+    request,
+    targets,
+    canApply: generated.patchIds.length > 0,
+    provider: { file, source: generated.source, patchIds: generated.patchIds },
+    client: {
+      file: generatedFile,
+      source: clientSource(request, owner, `auto-css-${suffix}`, generatedFile, exportName),
+      export: exportName,
+      entryFile: request.clientFile,
+    },
+  }
 }
 
 interface DraftManifest {
-  dsh?: { harmony?: { patches?: unknown }; [key: string]: unknown }
+  dependencies?: Record<string, string>
+  dsh?: { client?: Record<string, unknown>; harmony?: { patches?: unknown }; [key: string]: unknown }
   [key: string]: unknown
 }
 
@@ -265,15 +296,60 @@ export async function writeAutomaticPatch(root: string, plan: StudioAutomaticPat
   if (!Array.isArray(current) || current.some(value => typeof value !== 'string')) throw new Error('Draft package.json must declare dsh.harmony.patches as an array of file paths')
   const declaration = `./${plan.provider.file}`
   if (current.includes(declaration)) throw new Error('automatic Patch provider is already declared')
-  const nextManifest: DraftManifest = { ...manifest, dsh: { ...manifest.dsh, harmony: { ...manifest.dsh?.harmony, patches: [...current, declaration] } } }
-  await writeProjectFile(root, plan.provider.file, plan.provider.source)
-  try {
-    await writeProjectFile(root, 'package.json', `${JSON.stringify(nextManifest, null, 2)}\n`)
-  } catch (error) {
-    try { await unlink(join(root, plan.provider.file)) } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'automatic Patch manifest update failed and provider rollback failed')
+  let clientEntrySource: string | undefined
+  let clientEntryNext: string | undefined
+  if (plan.client !== undefined) {
+    clientEntrySource = await readProjectFile(root, plan.client.entryFile)
+    if (clientEntrySource.includes('__ModuleLoader__.load')) {
+      throw new Error('automatic Component Patch requires the Draft client source before it is bundled')
     }
+    const relative = posix.relative(posix.dirname(plan.client.entryFile), plan.client.file)
+    const specifier = relative.startsWith('.') ? relative : `./${relative}`
+    const reexport = `export { ${plan.client.export} } from ${JSON.stringify(specifier)}`
+    if (clientEntrySource.includes(reexport)) throw new Error('automatic Patch client export is already declared')
+    clientEntryNext = `${clientEntrySource.trimEnd()}\n\n${reexport}\n`
+  }
+  const nextManifest: DraftManifest = {
+    ...manifest,
+    dependencies: plan.client === undefined ? manifest.dependencies : { ...manifest.dependencies, 'dsh-harmony-react': '^0.2.1' },
+    dsh: {
+      ...manifest.dsh,
+      ...(plan.client === undefined ? {} : { client: { ...manifest.dsh?.client, immediately: true } }),
+      harmony: { ...manifest.dsh?.harmony, patches: [...current, declaration] },
+    },
+  }
+  const writes = [
+    { file: plan.provider.file, content: plan.provider.source, created: true },
+    ...(plan.client === undefined ? [] : [
+      { file: plan.client.file, content: plan.client.source, created: true },
+      { file: plan.client.entryFile, content: clientEntryNext!, original: clientEntrySource, created: false },
+    ]),
+    { file: 'package.json', content: `${JSON.stringify(nextManifest, null, 2)}\n`, original: manifestSource, created: false },
+  ]
+  const written: typeof writes = []
+  try {
+    for (const write of writes) {
+      if (write.created) {
+        try {
+          await readProjectFile(root, write.file)
+          throw new Error(`automatic Patch file ${JSON.stringify(write.file)} already exists`)
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        }
+      }
+      await writeProjectFile(root, write.file, write.content)
+      written.push(write)
+    }
+  } catch (error) {
+    const rollbackErrors: unknown[] = []
+    for (const write of written.reverse()) {
+      try {
+        if (write.created) await unlink(join(root, write.file))
+        else await writeProjectFile(root, write.file, write.original!)
+      } catch (rollbackError) { rollbackErrors.push(rollbackError) }
+    }
+    if (rollbackErrors.length > 0) throw new AggregateError([error, ...rollbackErrors], 'automatic Patch write rollback failed')
     throw error
   }
-  return { ...plan, files: [plan.provider.file, 'package.json'] }
+  return { ...plan, files: writes.map(item => item.file) }
 }

@@ -88,15 +88,18 @@ describe('StudioBackend', () => {
     const profile = {
       dir: '/home/profiles/web',
       order: ['dsh-harmony', 'plugin-a'],
+      patchOrder: ['plugin-a/one'],
       disabled: [],
       plugins: [],
       orderViolations: [],
+      patchOrderViolations: [],
       incompatibilities: [],
     }
     const harmony = {
       profileDir: profile.dir,
       profile: vi.fn(() => profile),
-      updateProfile: vi.fn(async (input: { order?: string[]; disabled?: string[] }) => ({
+      inspect: vi.fn(() => ({ patches: [], targets: [] })),
+      updateProfile: vi.fn(async (input: { order?: string[]; patchOrder?: string[]; disabled?: string[] }) => ({
         profile: { ...profile, ...input },
         generation: 2,
         reload: { state: 'succeeded' },
@@ -108,12 +111,14 @@ describe('StudioBackend', () => {
     const current = await studio.call(request('studio.harmony.profile', {}))
     const updated = await studio.call(request('studio.harmony.updateProfile', {
       order: ['dsh-harmony', 'plugin-a'],
+      patchOrder: ['plugin-a/one'],
       disabled: ['plugin-a/*'],
     }))
 
     expect(current.result).toEqual({ ok: true, value: profile })
     expect(harmony.updateProfile).toHaveBeenCalledWith({
       order: ['dsh-harmony', 'plugin-a'],
+      patchOrder: ['plugin-a/one'],
       disabled: ['plugin-a/*'],
     })
     expect(updated.result).toMatchObject({ ok: true, value: {
@@ -302,7 +307,7 @@ describe('StudioBackend', () => {
       },
     }))
 
-    const saved = await studio.call(request('studio.elements.saveDefaults', { draftId: draft.id }))
+    const saved = await studio.call(request('studio.elements.saveSource', { draftId: draft.id, styles: [] }))
 
     expect(saved.result).toEqual({ ok: true, value: { files: ['src/theme.ts', 'src/layout.ts'] } })
     await expect(readFile(join(root, 'src/theme.ts'), 'utf8')).resolves.toBe(

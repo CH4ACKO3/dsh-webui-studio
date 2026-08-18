@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, test } from 'vitest'
 import type { StudioElementSnapshot } from '../contracts.js'
-import { saveElementsDefaults } from './element-source.js'
+import { readElementsStyles, saveElementsDefaults, saveElementsSource } from './element-source.js'
 
 const roots: string[] = []
 
@@ -67,4 +67,22 @@ test('refuses to replace a computed initializer instead of fixing it to the live
     'default is not a quoted string literal',
   )
   await expect(readFile(join(root, 'src', 'Card.tsx'), 'utf8')).resolves.toContain('resolveAccent()')
+})
+
+test('persists subtree-scoped CSS beside the Element source and restores its editable rules', async () => {
+  const root = await project("'use client';\nconst accent = '#235be6';\nconst density = 1;\nexport { accent, density };\n")
+  const snapshot = element({ accent: '#235be6', density: 1 })
+  const rules = [{ selector: '&:hover', declarations: [
+    { property: 'color', value: 'rgb(1, 2, 3)' },
+    { property: 'border-radius', value: '8px' },
+  ] }]
+
+  const saved = await saveElementsSource(root, [snapshot], [{ elementId: 'card', rules }])
+  expect(saved.files).toHaveLength(2)
+  await expect(readFile(join(root, 'src', 'Card.tsx'), 'utf8')).resolves.toMatch(/^'use client';\nimport "\.\/Card\.dsh-studio-/)
+  const cssFile = saved.files.find(file => file.endsWith('.css'))!
+  await expect(readFile(join(root, cssFile), 'utf8')).resolves.toContain(
+    '[data-ui-surface="surface"][data-ui-surface-path="[\\"card\\"]"]:hover',
+  )
+  await expect(readElementsStyles(root, [snapshot])).resolves.toEqual([{ elementId: 'card', rules }])
 })

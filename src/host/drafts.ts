@@ -38,19 +38,43 @@ function templateManifest(name: string): string {
     version: '0.1.0',
     private: true,
     type: 'module',
-    packageManager: 'npm@10.0.0',
+    packageManager: 'pnpm@10.34.5',
     exports: { '.': './lib/index.js', './client': './lib/client.js', './package.json': './package.json' },
-    scripts: { build: 'node --check lib/index.js && node --check lib/client.js' },
-    dsh: { client: { platform: 'web' }, harmony: { patches: [] } },
+    scripts: { build: 'npm run build:client && npm run build:host', 'build:client': 'tsdown --config-loader unrun', 'build:host': 'tsc -p tsconfig.host.json' },
+    dsh: { client: { immediately: true, inject: ['@deepseek-ai/dsh-client-runtime'], platform: 'web' }, harmony: { patches: [] } },
+    dependencies: { 'dsh-harmony-react': '^0.2.1' },
+    peerDependencies: { '@deepseek-ai/dsh-client-runtime': '0.1.0-rc.7', react: '^18.3.1' },
+    devDependencies: {
+      '@deepseek-ai/dsh-client-runtime': '0.1.0-rc.7', '@types/react': '~18.3.1', react: '^18.3.1',
+      tsdown: '0.22.14', typescript: '^6.0.3', unrun: '0.3.1',
+    },
   }, null, 2)}\n`
 }
 
-function templateClient(name: string): string {
-  return `window.__ModuleLoader__.load({
+function templateClient(): string {
+  return `import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+
+export function apply(_ctx: ClientContext): void {}
+`
+}
+
+function templateTsdown(name: string): string {
+  return `import { defineConfig } from 'tsdown'
+
+const moduleHeader = \`window.__ModuleLoader__.load({
   id: ${JSON.stringify(name)},
-  factory: () => ({
-    apply() {},
-  }),
+  factory: (require) => {
+    const module = { exports: {} };
+    const exports = module.exports;\`
+const moduleFooter = \`return module.exports;
+  },
+});\`
+
+export default defineConfig({
+  entry: { client: 'src/client.tsx' }, tsconfig: 'tsconfig.client.json', format: 'cjs', platform: 'browser', target: 'es2023',
+  deps: { alwaysBundle: ['dsh-harmony-react/studio'], neverBundle: ['react', 'react/jsx-runtime'], onlyBundle: ['dsh-harmony-react'] },
+  outDir: 'lib', clean: true, fixedExtension: false, outExtensions: () => ({ js: '.js' }), hash: false, sourcemap: true, dts: false,
+  banner: { js: moduleHeader }, footer: { js: moduleFooter },
 })
 `
 }
@@ -217,10 +241,14 @@ async function validateProfileDirectory(mode: StudioCreateDraftInput['profileMod
 }
 
 async function initializeRepository(root: string, name: string, commands: StudioCommandRunner): Promise<void> {
-  await mkdir(join(root, 'lib'), { recursive: true })
+  await mkdir(join(root, 'src'), { recursive: true })
   await writeFile(join(root, 'package.json'), templateManifest(name))
-  await writeFile(join(root, 'lib/index.js'), 'export const name = "draft-host"\nexport function apply() {}\n')
-  await writeFile(join(root, 'lib/client.js'), templateClient(name))
+  await writeFile(join(root, 'src/index.ts'), `export const name = ${JSON.stringify(name)}\nexport function apply(): void {}\n`)
+  await writeFile(join(root, 'src/client.tsx'), templateClient())
+  await writeFile(join(root, 'tsdown.config.ts'), templateTsdown(name))
+  await writeFile(join(root, 'tsconfig.client.json'), `${JSON.stringify({ compilerOptions: { target: 'ES2023', module: 'ESNext', moduleResolution: 'Bundler', jsx: 'react-jsx', strict: true, noUncheckedIndexedAccess: true, skipLibCheck: true, types: ['react'] }, include: ['src/client.tsx', 'src/**/*.js'] }, null, 2)}\n`)
+  await writeFile(join(root, 'tsconfig.host.json'), `${JSON.stringify({ compilerOptions: { target: 'ES2023', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true, declaration: true, outDir: 'lib', rootDir: 'src', skipLibCheck: true }, include: ['src/index.ts'] }, null, 2)}\n`)
+  await writeFile(join(root, '.gitignore'), 'lib/\nnode_modules/\n')
   await writeFile(join(root, 'README.md'), `# ${name}\n\nCreated by dsh-webui-studio.\n`)
   await commands.run('git', ['init', '--initial-branch=main'], root)
   await commands.run('git', ['add', '.'], root)

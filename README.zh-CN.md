@@ -48,7 +48,9 @@ Patch engine 与 service API，并使用
 - [x] 为每个 Draft 分配独立 Git worktree、`DSH_HOME`、profile、依赖树和 child Host
 - [x] 预览官方 WebUI，同时不把 Draft 代码加载进稳定 Host
 - [x] 正常浏览，或检查 DOM、React owner、源码候选和 Patch trace
-- [x] 自动展示插件注册的 Element 控件，并将支持的控件值保存为源码默认值
+- [x] 自动展示插件注册的 Element 控件，并将默认值与限定在当前子树内的 CSS 保存回草稿源码
+- [x] 检查 Component 声明命中后生成 CSS decorator，不修改既有调用点 Props
+- [x] 通过一次事务热重载调整 Harmony Provider 与单个 Patch 的顺序和启停状态
 - [x] 使用 CodeMirror 编辑 Draft 源码，并保持已安装依赖源码只读
 - [x] 构建、经 Harmony 应用、重载，并确认实时 Client graph revision
 - [x] 运行带显式 Studio tools 的 Draft 级 DSH Agent
@@ -113,15 +115,16 @@ Draft 显示名与 npm package identity 相互独立，可在实例面板中重�
 > [!IMPORTANT]
 > Studio 依赖 [`docs/harmony-api-requirements.md`](docs/harmony-api-requirements.md)
 > 中列出的 Harmony 公共 extension 与 service API，最低兼容版本为
-> `dsh-harmony@0.3.2`。
+> `dsh-harmony@0.4.2`。
 
 ```sh
-dsh plugin --profile web add dsh-webui-studio --allow-build=dsh-harmony
+dsh plugin --profile web add dsh-webui-studio
 dsh web
 ```
 
-Harmony 会作为传递依赖自动解析，无需作为第二个插件单独安装。该构建权限用于允许其
-仅在全局安装时生效的 DSH shim 安装器；普通 profile 安装不会修改全局命令。
+Studio 会把 Harmony 作为传递依赖一并安装。第一次访问 `/studio` 时，点击
+**安装 Harmony 并重启**；页面会安装 launcher，并在本地 DSH 进程重启后自动返回
+Studio，无需再执行第二条 package 安装命令。已经安装 Harmony launcher 时会跳过此步骤。
 
 如需开发 Studio 本身：
 
@@ -139,8 +142,7 @@ dsh web
 
 ```sh
 studio_tarball="$(npm pack --silent --ignore-scripts)"
-dsh plugin --profile web add "file:$(pwd)/${studio_tarball}" \
-  --allow-build=dsh-harmony
+dsh plugin --profile web add "file:$(pwd)/${studio_tarball}"
 ```
 
 打开本地 `dsh web` 进程输出的 Studio 地址，创建或导入 Draft，然后启动它的 Preview Host。
@@ -170,7 +172,8 @@ Draft package 必须：
 - 来自 Preview 的 DOM、React、源码、Patch 与注释数据均被视为不可信证据。
 - 源码写入始终限制在所选 Draft package 内，且不会沿符号链接写到外部。
 - 已注册 element boundary 与 Patch trace 只是候选证据，不代表对 DOM 的精确所有权声明。
-- Element 控件通过插件 binding 修改实时 Preview。“保存默认值到源码”只替换插件声明的默认初始化值，不会改写组件使用位置，也不会固定运行时 binding。
+- Element 控件通过插件 binding 修改实时 Preview。“保存到插件源码”会在 Draft 工作树中更新插件声明的默认初始化值与限定子树 CSS，不会改写组件使用位置，也不会固定运行时 binding。
+- 自动 CSS Patch 使用 Harmony React 的 Component decorator。Studio 会先展示所有声明命中，再写入可立即加载的 Draft client export；现有 JSX 调用与 Props 保持不变。
 
 ## 常见问题
 

@@ -37,13 +37,12 @@ describe('StudioDraftRegistry', () => {
     expect(draft.worktreeDir).toContain(join(home, 'studio', 'worktrees'))
     expect(JSON.parse(await readFile(join(draft.root, 'package.json'), 'utf8'))).toMatchObject({
       name: 'dsh-test-draft',
-      dsh: { client: { platform: 'web' } },
+      scripts: { 'build:client': 'tsdown --config-loader unrun' },
+      dependencies: { 'dsh-harmony-react': '^0.2.1' },
+      dsh: { client: { platform: 'web', immediately: true } },
     })
-    const client = await readFile(join(draft.root, 'lib/client.js'), 'utf8')
-    let registration: { id: string; factory: () => { apply: () => void } } | undefined
-    Function('window', client)({ __ModuleLoader__: { load(value: typeof registration) { registration = value } } })
-    expect(registration?.id).toBe('dsh-test-draft')
-    expect(registration?.factory().apply).toBeTypeOf('function')
+    await expect(readFile(join(draft.root, 'src/client.tsx'), 'utf8')).resolves.toContain('export function apply')
+    await expect(readFile(join(draft.root, 'tsdown.config.ts'), 'utf8')).resolves.toContain('id: "dsh-test-draft"')
     await expect(registry.list()).resolves.toEqual([draft])
     await expect(registry.get(draft.id)).resolves.toEqual(draft)
   })

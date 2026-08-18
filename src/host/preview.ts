@@ -11,7 +11,7 @@ import type {
 import { STUDIO_PREVIEW_API_PATH } from '../contracts.js'
 import type { StudioCommandRunner } from './drafts.js'
 import { studioPreviewPortPool, type StudioPreviewPortPool } from './preview-port.js'
-import { installDraftDependencies, materializeDraftProfile, terminalCommandLine } from './runtime-profile.js'
+import { buildDraft, installDraftDependencies, materializeDraftProfile, terminalCommandLine } from './runtime-profile.js'
 
 const START_TIMEOUT_MS = 30_000
 const LOG_LIMIT = 64_000
@@ -101,6 +101,12 @@ export class StudioPreviewSupervisor {
     this.runtime = { state: 'starting', log: '[studio] Preparing Draft dependencies and isolated profile\n' }
     try {
       await installDraftDependencies(
+        this.draft,
+        this.commands,
+        chunk => { this.runtime.log = appendLog(this.runtime.log, chunk) },
+        signal,
+      )
+      await buildDraft(
         this.draft,
         this.commands,
         chunk => { this.runtime.log = appendLog(this.runtime.log, chunk) },

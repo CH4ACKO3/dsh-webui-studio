@@ -14,6 +14,7 @@ import type {
   StudioHarmonyInspection,
   StudioHarmonyProfileUpdateResult,
   StudioHarmonyService,
+  StudioElementStyleSource,
   StudioPreviewStatus,
   StudioPreviewUpdate,
   StudioProjectFile,
@@ -27,11 +28,11 @@ import { StudioAgentController, type StudioAgentWorkspace } from './agent.js'
 import { analyzeAutomaticPatch, writeAutomaticPatch } from './automatic-patch.js'
 import { StudioBuildError, StudioBuildRunner } from './build.js'
 import type { StudioCommandRunner, StudioDraftRegistry } from './drafts.js'
-import { saveElementsDefaults as saveElementsDefaultsToProject } from './element-source.js'
+import { readElementsStyles, saveElementsSource } from './element-source.js'
 import { StudioPreviewSupervisor } from './preview.js'
 import { applyProjectPatch, listProjectFiles, readProjectFile, writeProjectFile } from './project-files.js'
 import { inspectReadiness, StudioPackRunner } from './readiness.js'
-import { assertDraftPackageIdentity } from './runtime-profile.js'
+import { assertDraftPackageIdentity, installDraftDependencies } from './runtime-profile.js'
 import type { StudioWorkspaceStore } from './workspace.js'
 
 function failure<T = never>(rpcId: string, code: string, message: string, details: unknown = {}): StudioServerResponse<T> {
@@ -78,16 +79,36 @@ function automaticPatchRequest(payload: unknown): StudioAutomaticPatchRequest {
     if (typeof input.text !== 'string' || typeof input.replacement !== 'string') throw new Error('automatic string Patch requires text and replacement strings')
     return { kind: input.kind, targets, text: input.text, replacement: input.replacement }
   }
-  if (input.kind !== 'css-style' || typeof input.select !== 'string' || typeof input.elementId !== 'string' || typeof input.elementLabel !== 'string'
-    || !Array.isArray(input.variables)) throw new Error('automatic CSS Patch requires selector, element identity, and variables')
+  if (input.kind !== 'css-style' || typeof input.component !== 'string' || typeof input.clientFile !== 'string'
+    || typeof input.selector !== 'string' || typeof input.elementId !== 'string' || typeof input.elementLabel !== 'string'
+    || typeof input.boundary !== 'object' || input.boundary === null || !Array.isArray((input.boundary as Record<string, unknown>).path)
+    || !Array.isArray(input.variables)) throw new Error('automatic CSS Patch requires component, client source, boundary, selector, element identity, and variables')
+  const boundary = input.boundary as Record<string, unknown>
+  if (typeof boundary.surfaceId !== 'string' || !(boundary.path as unknown[]).every(item => typeof item === 'string')) {
+    throw new Error('automatic CSS Patch boundary is invalid')
+  }
   return {
     kind: input.kind,
     targets,
-    select: input.select,
+    component: input.component,
+    clientFile: input.clientFile,
+    boundary: { surfaceId: boundary.surfaceId, path: boundary.path as string[] },
+    selector: input.selector,
     elementId: input.elementId,
     elementLabel: input.elementLabel,
     variables: input.variables as StudioAutomaticCssVariable[],
   }
+}
+
+function elementStyleSources(payload: unknown): StudioElementStyleSource[] {
+  const value = objectPayload(payload).styles
+  if (!Array.isArray(value)) throw new Error('styles must be an array')
+  return value.map((entry, index) => {
+    if (typeof entry !== 'object' || entry === null) throw new Error(`styles[${index}] must be an object`)
+    const input = entry as Record<string, unknown>
+    if (typeof input.elementId !== 'string' || !Array.isArray(input.rules)) throw new Error(`styles[${index}] requires elementId and rules`)
+    return { elementId: input.elementId, rules: input.rules as StudioElementStyleSource['rules'] }
+  })
 }
 
 class StudioDraftController implements StudioAgentWorkspace {
@@ -103,7 +124,7 @@ class StudioDraftController implements StudioAgentWorkspace {
     public record: StudioDraftRecord,
     profileDir: string,
     parentOrigin: string,
-    commands: StudioCommandRunner,
+    private readonly commands: StudioCommandRunner,
     harmonyBinEntry: string,
     agents: AgentRegistry,
     subprocess: SubprocessRuntime,
@@ -251,10 +272,18 @@ class StudioDraftController implements StudioAgentWorkspace {
     return applyProjectPatch(this.record.root, path, before, after)
   }
 
-  async saveElementDefaults(): Promise<{ files: string[] }> {
+  private draftElements() {
     const elements = this.previewStatus().registry?.elements.filter(item => item.owner === this.record.name) ?? []
     if (elements.length === 0) throw new Error('No Elements are registered by the active Draft')
-    return saveElementsDefaultsToProject(this.record.root, elements)
+    return elements
+  }
+
+  async readElementStyles(): Promise<StudioElementStyleSource[]> {
+    return readElementsStyles(this.record.root, this.draftElements())
+  }
+
+  async saveElementSource(styles: StudioElementStyleSource[]): Promise<{ files: string[] }> {
+    return saveElementsSource(this.record.root, this.draftElements(), styles)
   }
 
   async analyzeAutomaticPatch(request: StudioAutomaticPatchRequest): Promise<StudioAutomaticPatchPlan> {
@@ -265,7 +294,9 @@ class StudioDraftController implements StudioAgentWorkspace {
   async createAutomaticPatch(request: StudioAutomaticPatchRequest): Promise<StudioAutomaticPatchWriteResult> {
     const run = this.automaticPatchWrites.then(async () => {
       const plan = await this.analyzeAutomaticPatch(request)
-      return writeAutomaticPatch(this.record.root, plan)
+      const result = await writeAutomaticPatch(this.record.root, plan)
+      if (plan.client !== undefined) await installDraftDependencies(this.record, this.commands)
+      return result
     })
     this.automaticPatchWrites = run.then(() => undefined, () => undefined)
     return run
@@ -325,12 +356,15 @@ export class StudioBackend {
         ))
       }
       if (method === 'studio.harmony.profile') return success(rpcId, this.harmony.profile())
+      if (method === 'studio.harmony.inspectStable') return success(rpcId, this.harmony.inspect())
       if (method === 'studio.harmony.updateProfile') {
         const input = objectPayload(payload)
         const order = optionalStringList(input.order, 'order')
+        const patchOrder = optionalStringList(input.patchOrder, 'patchOrder')
         const disabled = optionalStringList(input.disabled, 'disabled')
-        const update: { order?: string[]; disabled?: string[] } = {
+        const update: { order?: string[]; patchOrder?: string[]; disabled?: string[] } = {
           ...(order === undefined ? {} : { order }),
+          ...(patchOrder === undefined ? {} : { patchOrder }),
           ...(disabled === undefined ? {} : { disabled }),
         }
         return success<StudioHarmonyProfileUpdateResult>(rpcId, await this.harmony.updateProfile(update))
@@ -368,10 +402,8 @@ export class StudioBackend {
         await writeProjectFile(controller.record.root, path, content)
         return success(rpcId, { path, saved: true })
       }
-      if (method === 'studio.elements.saveDefaults') {
-        objectPayload(payload)
-        return success(rpcId, await controller.saveElementDefaults())
-      }
+      if (method === 'studio.elements.styles') return success(rpcId, await controller.readElementStyles())
+      if (method === 'studio.elements.saveSource') return success(rpcId, await controller.saveElementSource(elementStyleSources(payload)))
       if (method === 'studio.patches.analyzeAutomatic') {
         return success(rpcId, await controller.analyzeAutomaticPatch(automaticPatchRequest(payload)))
       }

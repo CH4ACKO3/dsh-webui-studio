@@ -5,11 +5,12 @@ import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { STUDIO_PREVIEW_API_PATH, type StudioHarmonyService } from '../contracts.js'
 
-const previewDraft = vi.hoisted(() => ({ open: vi.fn() }))
+const previewDraft = vi.hoisted(() => ({ construct: vi.fn(), open: vi.fn() }))
 const sourceResolver = vi.hoisted(() => ({ readDependencyTarget: vi.fn() }))
 
 vi.mock('./preview-draft.js', () => ({
   StudioPreviewDraft: class {
+    constructor() { previewDraft.construct() }
     open() { return previewDraft.open() }
   },
 }))
@@ -25,6 +26,7 @@ vi.mock('./source-resolution.js', () => ({
 import { applyPreviewWorker } from './preview-worker.js'
 
 beforeEach(() => {
+  previewDraft.construct.mockReset()
   previewDraft.open.mockReset()
   sourceResolver.readDependencyTarget.mockReset()
 })
@@ -95,6 +97,18 @@ it('handles startup rejection immediately and reports the failure', async () => 
     await expect(health(route)).resolves.toEqual({
       status: 500,
       body: { ok: false, error: 'Draft Patch reload failed' },
+    })
+  })
+})
+
+it('registers the health route before reporting a synchronous Draft construction failure', async () => {
+  previewDraft.construct.mockImplementation(() => { throw new Error('Draft package resolution failed') })
+  const route = workerRoute()
+
+  await vi.waitFor(async () => {
+    await expect(health(route)).resolves.toEqual({
+      status: 500,
+      body: { ok: false, error: 'Draft package resolution failed' },
     })
   })
 })

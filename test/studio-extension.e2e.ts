@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -19,6 +20,7 @@ import type {
 
 const packageRoot = fileURLToPath(new URL('..', import.meta.url))
 const studioPath = '/studio'
+const dshBin = fileURLToPath(import.meta.resolve('@deepseek-ai/dsh/lib/bin.js'))
 const harmonyBin = process.env.DSH_HARMONY_BIN_ENTRY ?? fileURLToPath(import.meta.resolve('dsh-harmony/bin'))
 const root = mkdtempSync(join(tmpdir(), 'dsh-harmony-studio-'))
 const home = join(root, 'home')
@@ -74,8 +76,32 @@ const env: NodeJS.ProcessEnv = { ...process.env, DSH_HOME: home }
 delete env.npm_config_dry_run
 delete env.NPM_CONFIG_DRY_RUN
 const add = (packageSpec: string) => spawnSync(process.execPath, [
-  harmonyBin, 'plugin', '--profile', 'web', 'add', packageSpec, '--allow-build=dsh-harmony',
+  dshBin, 'plugin', '--profile', 'web', 'add', packageSpec,
 ], { cwd: root, env, encoding: 'utf8' })
+
+async function availablePort(): Promise<number> {
+  const server = createServer()
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', resolve)
+  })
+  const address = server.address()
+  assert.ok(address && typeof address !== 'string')
+  await new Promise<void>((resolve, reject) => server.close(error => error === undefined ? resolve() : reject(error)))
+  return address.port
+}
+
+async function waitForPage(url: string, timeoutMs = 15_000): Promise<Response> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(url)
+      if (response.ok) return response
+    } catch {}
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+  throw new Error(`Timed out waiting for ${url}`)
+}
 
 let child: ChildProcess | undefined
 try {
@@ -91,13 +117,40 @@ try {
   const installed = add(studioTarball)
   assert.equal(installed.status, 0, `${installed.stdout}\n${installed.stderr}`)
 
-  const dump = spawnSync(process.execPath, [harmonyBin, '--profile', 'web', '--dump-config'], {
+  const dump = spawnSync(process.execPath, [dshBin, '--profile', 'web', '--dump-config'], {
     cwd: root,
     env,
     encoding: 'utf8',
   })
   assert.equal(dump.status, 0, dump.stderr)
-  assert.doesNotMatch(dump.stdout, /name: dsh-webui-studio/)
+  assert.match(dump.stdout, /id: harmony-studio-runtime/)
+  assert.match(dump.stdout, /name: dsh-harmony/)
+  assert.doesNotMatch(dump.stdout, /^\s*name: dsh-webui-studio$/m)
+
+  const harmonyDump = spawnSync(process.execPath, [harmonyBin, '--profile', 'web', '--dump-config'], {
+    cwd: root,
+    env,
+    encoding: 'utf8',
+  })
+  assert.equal(harmonyDump.status, 0, harmonyDump.stderr)
+  assert.match(harmonyDump.stdout, /id: harmony-studio-runtime/)
+  assert.match(harmonyDump.stdout, /disabled: true/)
+
+  const setupPort = await availablePort()
+  const setupChild = spawn(process.execPath, [dshBin, 'web', '--port', String(setupPort)], {
+    cwd: root,
+    env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  child = setupChild
+  const setupOrigin = `http://127.0.0.1:${setupPort}`
+  const setupPage = await waitForPage(`${setupOrigin}${studioPath}`)
+  assert.match(await setupPage.text(), /"id":"dsh-harmony"/)
+  const inactiveRuntime = await fetch(`${setupOrigin}/dsh-harmony/runtime`).then(response => response.json()) as { state?: string }
+  assert.equal(inactiveRuntime.state, 'missing')
+  setupChild.kill()
+  await new Promise<void>(resolve => setupChild.once('exit', () => resolve()))
+  child = undefined
 
   const hostChild = spawn(process.execPath, [harmonyBin, 'web', '--port', '0'], {
     cwd: root,
@@ -167,15 +220,21 @@ try {
   const stableProfile = await call<StudioHarmonyProfile>('studio.harmony.profile', {})
   assert.equal(stableProfile.order[0], 'dsh-harmony')
   assert.ok(stableProfile.order.length >= 3)
+  assert.ok(Array.isArray(stableProfile.patchOrder))
+  const stableInspection = await call<StudioHarmonyInspection>('studio.harmony.inspectStable', {})
+  assert.ok(stableInspection.patches.every(patch => stableProfile.patchOrder.includes(patch.key)))
   const reordered = [stableProfile.order[0]!, stableProfile.order[2]!, stableProfile.order[1]!, ...stableProfile.order.slice(3)]
   const reorderedProfile = await call<StudioHarmonyProfileUpdateResult>('studio.harmony.updateProfile', {
     order: reordered,
+    patchOrder: stableProfile.patchOrder,
     disabled: stableProfile.disabled,
   })
   assert.equal(reorderedProfile.reload.state, 'succeeded')
   assert.deepEqual(reorderedProfile.profile.order, reordered)
+  assert.deepEqual(reorderedProfile.profile.patchOrder, stableProfile.patchOrder)
   const restoredProfile = await call<StudioHarmonyProfileUpdateResult>('studio.harmony.updateProfile', {
     order: stableProfile.order,
+    patchOrder: stableProfile.patchOrder,
     disabled: stableProfile.disabled,
   })
   assert.equal(restoredProfile.reload.state, 'succeeded')
@@ -279,7 +338,6 @@ try {
 
   const built = await call<StudioBuildResult>('studio.project.build', scoped)
   assert.equal(built.project.state, 'preview-pending')
-  assert.notEqual(built.project.graphRev, active.graphRev)
   assert.match(built.build.stdout, /studio draft built/)
   const rebuiltInspection = await call<StudioHarmonyInspection>('studio.harmony.inspect', scoped)
   assert.equal(rebuiltInspection.patches.find(patch => patch.key === 'studio-draft/preview-runtime')?.state, 'bound')

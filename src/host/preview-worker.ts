@@ -35,14 +35,17 @@ async function readJson(request: IncomingMessage): Promise<Record<string, unknow
   return JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>
 }
 
-export function applyPreviewWorker(ctx: Context, harmony: StudioHarmonyService, options: PreviewWorkerOptions): void {
+export function applyPreviewWorker(
+  ctx: Context,
+  harmony: StudioHarmonyService,
+  options: PreviewWorkerOptions,
+): void {
   ctx.effect(() => {
-    const draft = new StudioPreviewDraft(ctx, harmony, options.root)
     let readiness:
       | { state: 'starting' }
       | { state: 'ready' }
       | { state: 'failed'; error: unknown } = { state: 'starting' }
-    const ready = draft.open()
+    const ready = Promise.resolve().then(() => new StudioPreviewDraft(ctx, harmony, options.root).open())
     void ready.then(
       () => { readiness = { state: 'ready' } },
       error => { readiness = { state: 'failed', error } },

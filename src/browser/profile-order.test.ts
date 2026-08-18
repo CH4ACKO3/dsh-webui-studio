@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isProfilePluginEnabled, moveProfilePlugin, setProfilePluginEnabled } from './profile-order.js'
+import { isProfilePatchEnabled, isProfilePluginEnabled, moveProfilePatch, moveProfilePlugin, setProfilePatchEnabled, setProfilePluginEnabled } from './profile-order.js'
 
 describe('Harmony profile editing', () => {
   it('moves plugins while keeping Harmony pinned first', () => {
@@ -20,5 +20,12 @@ describe('Harmony profile editing', () => {
       '@scope/plugin/only',
       'plugin-b/keep',
     ])
+  })
+
+  it('reorders and toggles individual patches, including one patch under a disabled provider', () => {
+    expect(moveProfilePatch(['a/one', 'b/two'], 'b/two', 0)).toEqual(['b/two', 'a/one'])
+    expect(isProfilePatchEnabled(['a/*'], 'a', 'a/one')).toBe(false)
+    expect(setProfilePatchEnabled(['a/*'], 'a', 'a/one', true, ['a/one', 'a/two'])).toEqual(['a/two'])
+    expect(setProfilePatchEnabled([], 'a', 'a/one', false, ['a/one', 'a/two'])).toEqual(['a/one'])
   })
 })

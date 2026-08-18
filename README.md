@@ -51,7 +51,9 @@ not depend on Studio.
 - [x] Give every Draft its own Git worktree, `DSH_HOME`, profile, dependencies, and child Host
 - [x] Preview the official WebUI without loading Draft code into the stable Host
 - [x] Browse normally or inspect DOM, React owners, source candidates, and Patch traces
-- [x] Surface plugin-registered Element controls automatically and save supported values back as source defaults
+- [x] Surface plugin-registered Element controls automatically; save defaults and subtree-scoped CSS back to Draft source
+- [x] Review Component declaration matches and generate CSS decorators without changing existing call-site props
+- [x] Reorder and toggle both Harmony providers and individual Patches through one transactional reload
 - [x] Edit Draft source with CodeMirror and protect installed dependency sources as read-only
 - [x] Build, apply through Harmony, reload, and confirm the live Client graph revision
 - [x] Run Draft-scoped DSH Agents with explicit Studio tools
@@ -123,16 +125,17 @@ workspace and never stops or deletes the Draft. Unsaved Source changes must be s
 > [!IMPORTANT]
 > Studio requires the public Harmony extension and service APIs documented in
 > [`docs/harmony-api-requirements.md`](docs/harmony-api-requirements.md).
-> `dsh-harmony@0.3.2` is the minimum compatible release.
+> `dsh-harmony@0.4.2` is the minimum compatible release.
 
 ```sh
-dsh plugin --profile web add dsh-webui-studio --allow-build=dsh-harmony
+dsh plugin --profile web add dsh-webui-studio
 dsh web
 ```
 
-Harmony is resolved transitively and does not need to be installed as a second
-plugin. The build permission allows its global-only DSH shim installer; normal
-profile installs do not modify the global command.
+Studio includes Harmony as a transitive dependency. On the first visit to
+`/studio`, approve **Install Harmony and restart**; the page installs the
+launcher and returns to Studio after the local DSH process restarts. No second
+package command is required. An existing Harmony launcher skips this setup.
 
 To develop Studio itself from source:
 
@@ -150,8 +153,7 @@ To exercise the same single-package installation path as a release artifact:
 
 ```sh
 studio_tarball="$(npm pack --silent --ignore-scripts)"
-dsh plugin --profile web add "file:$(pwd)/${studio_tarball}" \
-  --allow-build=dsh-harmony
+dsh plugin --profile web add "file:$(pwd)/${studio_tarball}"
 ```
 
 Open the Studio URL printed by the local `dsh web` process, create or import a
@@ -183,7 +185,8 @@ in the compatibility note above.
 - Preview DOM, React, source, Patch, and comment data is treated as untrusted evidence.
 - Source writes stay inside the selected Draft package and never follow symbolic links outside it.
 - Registered element boundaries and Patch traces are candidate evidence, not claims of exact DOM ownership.
-- Element controls change the live Preview through plugin bindings. **Save default to source** only replaces a plugin-declared default initializer; it never rewrites component use sites or freezes the runtime binding.
+- Element controls change the live Preview through plugin bindings. **Save to plugin source** updates declared default initializers and generated subtree-scoped CSS inside the Draft worktree; it never rewrites component use sites or freezes the runtime binding.
+- Automatic CSS Patch creation uses a Harmony React Component decorator. Studio shows every matching declaration before writing, adds an immediately available Draft client export, and leaves all existing JSX calls and Props intact.
 
 ## Frequently asked questions
 

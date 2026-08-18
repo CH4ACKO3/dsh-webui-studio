@@ -2,7 +2,7 @@ import { createRequire } from 'node:module'
 import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import type { StudioDraftRecord } from '../contracts.js'
-import { resolvePackageManager } from './build.js'
+import { resolveBuildArgv, resolvePackageManager } from './build.js'
 import type { StudioCommandRunner } from './drafts.js'
 
 const PROFILE_FILES = ['cordis.patch.yml', 'cordis.yml', 'harmony.json', 'pnpm-workspace.yaml'] as const
@@ -59,7 +59,7 @@ export async function installDraftDependencies(
   const manifest = await assertDraftPackageIdentity(draft)
   if (!hasDependencies(manifest)) return
   const manager = resolvePackageManager(draft.root, manifest)
-  const [command, args] = manager === 'pnpm' ? bundledPnpmCommand(['install']) : [manager, ['install']]
+  const [command, args] = manager === 'pnpm' ? bundledPnpmCommand(['install', '--prefer-offline']) : [manager, ['install']]
   onOutput?.(terminalCommandLine(draft.root, command, args))
   try {
     await commands.run(command, args, draft.root, onOutput, signal)
@@ -68,6 +68,26 @@ export async function installDraftDependencies(
     const message = (error instanceof Error ? error.message : String(error)).split('\n', 1)[0]
     onOutput?.(`[studio] ${message}\n`)
     throw new Error('Draft dependency installation failed. Check the startup terminal for details.')
+  }
+}
+
+export async function buildDraft(
+  draft: StudioDraftRecord,
+  commands: StudioCommandRunner,
+  onOutput?: (chunk: string) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  signal?.throwIfAborted()
+  const [manager, ...args] = resolveBuildArgv(draft.root)
+  const [command, commandArgs] = manager === 'pnpm' ? bundledPnpmCommand(args) : [manager, args]
+  onOutput?.(terminalCommandLine(draft.root, command, commandArgs))
+  try {
+    await commands.run(command, commandArgs, draft.root, onOutput, signal)
+  } catch (error) {
+    signal?.throwIfAborted()
+    const message = (error instanceof Error ? error.message : String(error)).split('\n', 1)[0]
+    onOutput?.(`[studio] ${message}\n`)
+    throw new Error('Initial Draft build failed. Check the startup terminal for details.')
   }
 }
 

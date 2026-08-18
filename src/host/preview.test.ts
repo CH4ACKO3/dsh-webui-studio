@@ -25,7 +25,9 @@ it('publishes profile installation progress and a failed runtime snapshot', asyn
   const draftRoot = join(root, 'draft')
   await Promise.all([mkdir(mainProfile, { recursive: true }), mkdir(draftRoot)])
   await writeFile(join(mainProfile, 'package.json'), JSON.stringify({ name: 'dsh-profile-web', private: true }))
-  await writeFile(join(draftRoot, 'package.json'), JSON.stringify({ name: 'draft-plugin', packageManager: 'npm@11' }))
+  await writeFile(join(draftRoot, 'package.json'), JSON.stringify({
+    name: 'draft-plugin', packageManager: 'npm@11', scripts: { build: 'echo built' },
+  }))
   await writeFile(join(mainProfile, 'pnpm-workspace.yaml'), 'packages:\n  - .\n')
   const draft: StudioDraftRecord = {
     id: 'id', name: 'draft-plugin', label: 'Draft plugin', source: { kind: 'new', packageName: 'draft-plugin' },
@@ -38,6 +40,7 @@ it('publishes profile installation progress and a failed runtime snapshot', asyn
   const install = new Promise<void>((_resolve, reject) => { rejectInstall = reject })
   const commands: StudioCommandRunner = {
     async run(_command, _args, _cwd, onOutput) {
+      if (_args.includes('build')) return
       onOutput?.('Resolving packages\n')
       commandStarted()
       await install
@@ -81,7 +84,7 @@ it('forcefully reaps a Preview Host that ignores SIGTERM', async () => {
     'http://127.0.0.1:3081',
     { async run() {} },
     '/unused/dsh.js',
-    20,
+    500,
   )
   const mutablePreview = preview as unknown as { child: ChildProcess }
   mutablePreview.child = child

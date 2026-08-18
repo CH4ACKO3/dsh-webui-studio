@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { StudioDraftRecord } from '../contracts.js'
-import { bundledPnpmCommand, installDraftDependencies, materializeDraftProfile } from './runtime-profile.js'
+import { buildDraft, bundledPnpmCommand, installDraftDependencies, materializeDraftProfile } from './runtime-profile.js'
 
 const roots: string[] = []
 const exec = promisify(execFile)
@@ -121,9 +121,32 @@ it('installs Draft dependencies in the worktree with its declared package manage
 
   await installDraftDependencies(draft, { run }, output)
 
-  const [command, args] = bundledPnpmCommand(['install'])
+  const [command, args] = bundledPnpmCommand(['install', '--prefer-offline'])
   expect(run).toHaveBeenCalledWith(command, args, root, output, undefined)
   expect(output).toHaveBeenCalledWith(expect.stringContaining(`${root}\n$ `))
+})
+
+it('builds a pnpm Draft with the bundled package manager', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-studio-draft-build-'))
+  roots.push(root)
+  await writeFile(join(root, 'package.json'), JSON.stringify({
+    name: 'draft-plugin',
+    packageManager: 'pnpm@10.34.5',
+    scripts: { build: 'tsdown' },
+  }))
+  const draft: StudioDraftRecord = {
+    id: 'id', name: 'draft-plugin', label: 'Draft plugin', source: { kind: 'new', packageName: 'draft-plugin' },
+    repositoryDir: root, worktreeDir: root, root,
+    runtimeHome: join(root, 'runtime-home'), profileMode: 'main-home', createdAt: 'now',
+  }
+  const run = vi.fn(async () => {})
+  const output = vi.fn()
+
+  await buildDraft(draft, { run }, output)
+
+  const [command, args] = bundledPnpmCommand(['run', 'build'])
+  expect(run).toHaveBeenCalledWith(command, args, root, output, undefined)
+  expect(output).toHaveBeenCalledWith(expect.stringContaining(' run build\n'))
 })
 
 it('skips a Draft install when its manifest has no dependencies', async () => {

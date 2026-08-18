@@ -1,0 +1,7 @@
+# Ordinary DSH loads Harmony's existing approval dialog. The Harmony launcher
+# supplies the active runtime itself, so this installer entry is disabled after
+# installation.
+- insert:
+    - id: harmony-studio-runtime
+      name: dsh-harmony
+      disabled: !!js process.env.DSH_HARMONY_ACTIVE === '1'

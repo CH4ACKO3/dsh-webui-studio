@@ -1,15 +1,13 @@
-import { createRequire } from 'node:module'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, test } from 'vitest'
 import ts from 'typescript'
-import type { StudioAutomaticPatchRequest, StudioElementSnapshot } from '../contracts.js'
+import { component } from 'dsh-harmony-react'
+import type { StudioAutomaticPatchRequest } from '../contracts.js'
 import { analyzeAutomaticPatch, writeAutomaticPatch, type AutomaticPatchSource } from './automatic-patch.js'
-import { saveElementsDefaults } from './element-source.js'
 
 const roots: string[] = []
-const require = createRequire(import.meta.url)
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
@@ -25,7 +23,8 @@ function source(packageName: string, file: string, value: string): AutomaticPatc
 
 function cssRequest(targets: StudioAutomaticPatchRequest['targets']): StudioAutomaticPatchRequest {
   return {
-    kind: 'css-style', targets, select: 'CallExpression', elementId: 'hero', elementLabel: 'Hero',
+    kind: 'css-style', targets, component: 'Hero', clientFile: 'src/client.tsx',
+    boundary: { surfaceId: 'home', path: ['hero'] }, selector: '& .hero', elementId: 'hero', elementLabel: 'Hero',
     variables: [{ id: 'accent', label: 'Accent', property: 'color', control: 'color', value: '#235be6' },
       { id: 'radius', label: 'Radius', property: 'border-radius', control: 'length', value: '8px' }],
   }
@@ -74,68 +73,65 @@ test('returns a non-applicable analysis instead of hiding zero-match targets', (
 test('generates a CSS Patch that registers the same Element variable contract', async () => {
   const targets = [{ package: 'plugin-a', file: 'lib/client.js' }]
   const plan = analyzeAutomaticPatch(cssRequest(targets), [
-    source('plugin-a', 'lib/client.js', 'const view = (0, jsxRuntime.jsx)(Hero, { children: "Original" });\n'),
+    source('plugin-a', 'lib/client.js', 'const Hero = () => (0, jsxRuntime.jsx)("h1", { children: "Original" });\nconst view = (0, jsxRuntime.jsx)(Hero, {});\n'),
   ], 'draft-plugin')
 
   expect(plan.canApply).toBe(true)
   expect(plan.targets[0]?.matches).toMatchObject([{ applicable: true, line: 1 }])
-  expect(plan.provider.source).toContain("'data-dsh-studio-auto'")
-  expect(plan.provider.source).toContain('registerElement')
-  expect(plan.provider.source).toContain('border-radius')
+  expect(plan.provider.source).toContain("const { component } = require('dsh-harmony-react')")
+  expect(plan.provider.source).toContain("operation: { kind: 'decorate'")
+  expect(plan.provider.source).toContain('select: { name: "Hero" }')
+  expect(plan.provider.source).not.toContain('edit.overwrite')
   expect(plan.provider.source).toContain('expect: 1')
-  expect(plan.provider.source).toContain('dsh-studio-default:')
+  expect(plan.client?.source).toContain('registerStudioElement')
+  expect(plan.client?.source).toContain('border-radius')
+  expect(plan.client?.source).toContain('return React.createElement(Original, props)')
+  expect(plan.client?.source).toContain('dsh-studio-default:')
+  const generatedClient = ts.createSourceFile('generated.js', plan.client!.source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS)
+  expect(generatedClient.parseDiagnostics).toEqual([])
+  const providerModule: { exports: unknown } = { exports: {} }
+  Function('require', 'module', 'exports', plan.provider.source)(
+    (specifier: string) => specifier === 'dsh-harmony-react' ? { component } : undefined,
+    providerModule,
+    providerModule.exports,
+  )
+  const [componentPatch] = providerModule.exports as Array<{ apply(context: unknown): void }>
+  const targetSource = 'const Hero = () => null;\nconst view = jsx(Hero, { title: "unchanged" });\n'
+  const targetFile = ts.createSourceFile('lib/client.js', targetSource, ts.ScriptTarget.Latest, true)
+  let declaration: ts.VariableDeclaration | undefined
+  const visit = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === 'Hero') declaration = node
+    ts.forEachChild(node, visit)
+  }
+  visit(targetFile)
+  let overwrite: { start: number; end: number; value: string } | undefined
+  componentPatch!.apply({ patch: { key: plan.provider.patchIds[0], owner: 'draft-plugin' }, source: targetSource,
+    sourceFile: targetFile, node: declaration, ts, edit: { overwrite(start: number, end: number, value: string) { overwrite = { start, end, value } } } })
+  expect(overwrite?.value).toContain(`require("draft-plugin")[${JSON.stringify(plan.client!.export)}]`)
+  expect(targetSource.slice(overwrite!.end)).toContain('jsx(Hero, { title: "unchanged" })')
 
   const root = await mkdtemp(join(tmpdir(), 'dsh-studio-auto-css-'))
   roots.push(root)
+  await mkdir(join(root, 'src'))
   await writeFile(join(root, 'package.json'), JSON.stringify({ name: 'draft-plugin', dsh: { harmony: { patches: [] } } }))
+  await writeFile(join(root, 'src/client.tsx'), "export const Existing = () => null\n")
   await writeAutomaticPatch(root, plan)
-  const patches = require(join(root, plan.provider.file)) as Array<{ apply(context: unknown): void }>
-  const sourceText = 'const view = (0, jsxRuntime.jsx)(Hero, { children: "Original" });\n'
-  const sourceFile = ts.createSourceFile('lib/client.js', sourceText, ts.ScriptTarget.Latest, true)
-  let replacement = ''
-  let node: ts.Node | undefined
-  const visit = (candidate: ts.Node): void => {
-    if (ts.isCallExpression(candidate) && node === undefined) node = candidate
-    ts.forEachChild(candidate, visit)
-  }
-  visit(sourceFile)
-  patches[0]!.apply({
-    node,
-    source: sourceText,
-    sourceFile,
-    ts,
-    edit: { overwrite(_start: number, _end: number, value: string) { replacement = value } },
-  })
-  expect(replacement).toContain('data-dsh-studio-auto')
-  expect(replacement).toContain('border-radius')
-  expect(replacement).not.toContain('SOURCE_PROPS')
-  expect(replacement).not.toContain('DEFAULT_VALUES')
-
-  const element: StudioElementSnapshot = {
-    owner: 'draft-plugin',
-    element: {
-      id: 'generated', label: 'Generated', boundary: { surfaceId: 'dsh-studio-auto', path: ['hero'] },
-      source: { file: plan.provider.file },
-      variables: [{ kind: 'group', id: 'css', label: 'CSS', children: [
-        { kind: 'variable', id: 'accent', label: 'Accent', control: 'color', defaultSource: { file: plan.provider.file, before: `        "accent": /* dsh-studio-default:${plan.provider.patchIds[0]}:accent */ `, after: ',\n' } },
-      ] }],
-    },
-    values: { accent: '#ff8800' },
-  }
-  await saveElementsDefaults(root, [element])
-  await expect(readFile(join(root, plan.provider.file), 'utf8')).resolves.toContain('#ff8800')
+  await expect(readFile(join(root, plan.client!.file), 'utf8')).resolves.toContain('React.createElement(Original, props)')
+  await expect(readFile(join(root, 'src/client.tsx'), 'utf8')).resolves.toContain(`export { ${plan.client!.export} }`)
+  const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8')) as { dependencies: Record<string, string>; dsh: { client: { immediately: boolean } } }
+  expect(manifest.dependencies['dsh-harmony-react']).toBe('^0.2.1')
+  expect(manifest.dsh.client.immediately).toBe(true)
 })
 
-test('keeps CSS selector matches visible when a selector also catches a non-React node', () => {
+test('keeps invalid component declarations visible instead of hiding them', () => {
   const targets = [{ package: 'plugin-a', file: 'lib/client.js' }]
   const plan = analyzeAutomaticPatch(cssRequest(targets), [
-    source('plugin-a', 'lib/client.js', 'const value = call();\nconst view = (0, jsxRuntime.jsx)(Hero, {});\n'),
+    source('plugin-a', 'lib/client.js', 'let Hero;\n'),
   ], 'draft-plugin')
 
   expect(plan.canApply).toBe(false)
   expect(plan.targets[0]?.matches).toMatchObject([
-    { applicable: false, reason: 'selector match is not a compiled React jsx/jsxs call' },
-    { applicable: true },
+    { applicable: false, reason: 'component variable declaration has no initializer' },
   ])
 })
 

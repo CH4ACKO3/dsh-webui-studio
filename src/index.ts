@@ -42,7 +42,13 @@ export function apply(ctx: Context): void {
       if (controlToken === undefined || parentOrigin === undefined || bridgeCapability === undefined) {
         throw new Error('harmony-studio: Preview worker environment is incomplete')
       }
-      applyPreviewWorker(ctx, harmony, { root: previewRoot, controlToken, parentOrigin, bridgeCapability, bridge: assets.bridge })
+      applyPreviewWorker(ctx, harmony, {
+        root: previewRoot,
+        controlToken,
+        parentOrigin,
+        bridgeCapability,
+        bridge: assets.bridge,
+      })
       return () => {}
     }
     const token = randomBytes(32).toString('hex')
