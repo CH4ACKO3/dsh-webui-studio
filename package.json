@@ -100,7 +100,7 @@
     "@phenomnomnominal/tsquery": "^6.2.0",
     "dsh-harmony": "^0.4.2",
     "dsh-harmony-react": "^0.2.1",
-    "pnpm": "^10.34.5"
+    "pnpm": "^11.22.0"
   },
   "devDependencies": {
     "@codemirror/lang-javascript": "^6.2.4",
