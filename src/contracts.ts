@@ -87,6 +87,17 @@ export interface StudioPreviewStatus {
   registry?: StudioRegistrySnapshot
 }
 
+export interface StudioAgentContext {
+  selection: StudioDomSelection | null
+  project: StudioProjectState
+  preview: StudioPreviewStatus
+  projectFiles: StudioProjectFile[]
+  harmony: StudioHarmonyInspection | null
+  targetRefs: Array<{ package: string; file: string }>
+  targetRefsTruncated: boolean
+  readiness: { findings: StudioReadinessFinding[] }
+}
+
 export interface StudioPreviewUpdate {
   connected: boolean
   graphRev?: string

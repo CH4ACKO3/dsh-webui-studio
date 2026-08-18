@@ -2,6 +2,7 @@ import type { AgentRegistry } from '@deepseek-ai/dsh-agent'
 import type { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 import type {
   StudioBuildResult,
+  StudioAgentContext,
   StudioClientRequest,
   StudioCreateDraftInput,
   StudioDraftRecord,
@@ -21,6 +22,7 @@ import type {
 import { StudioAgentController, type StudioAgentWorkspace } from './agent.js'
 import { StudioBuildError, StudioBuildRunner } from './build.js'
 import type { StudioCommandRunner, StudioDraftRegistry } from './drafts.js'
+import { saveElementDefaults as saveElementDefaultsToProject } from './element-source.js'
 import { StudioPreviewSupervisor } from './preview.js'
 import { applyProjectPatch, listProjectFiles, readProjectFile, writeProjectFile } from './project-files.js'
 import { inspectReadiness, StudioPackRunner } from './readiness.js'
@@ -128,6 +130,40 @@ class StudioDraftController implements StudioAgentWorkspace {
     return this.previewState.selection
   }
 
+  async context(): Promise<StudioAgentContext> {
+    const selection = this.selection()
+    const refs = new Map<string, { package: string; file: string }>()
+    for (const patch of selection?.react?.patches ?? []) {
+      const key = `${patch.target.package}\0${patch.target.file}`
+      refs.set(key, patch.target)
+    }
+    const source = selection?.react?.source?.resolved
+    if (source?.package !== undefined) {
+      const key = `${source.package}\0${source.file}`
+      refs.set(key, { package: source.package, file: source.file })
+    }
+    const allTargetRefs = [...refs.values()]
+    const targetRefs = allTargetRefs.slice(0, 8)
+    const inspections = await Promise.all(targetRefs.map(ref => this.inspectHarmony(ref)))
+    const inspectedHarmony = inspections.length === 0 ? null : {
+      patches: [...new Map(inspections.flatMap(item => item.patches).map(patch => [patch.key, patch])).values()],
+      targets: [...new Map(inspections.flatMap(item => item.targets).map(target => [`${target.package}\0${target.file}`, target])).values()],
+    }
+    const harmony = inspectedHarmony !== null && Buffer.byteLength(JSON.stringify(inspectedHarmony)) <= 256 * 1024
+      ? inspectedHarmony : null
+    const readiness = await this.readiness()
+    return {
+      selection: selection ?? null,
+      project: this.project(),
+      preview: this.previewStatus(),
+      projectFiles: await listProjectFiles(this.record.root),
+      harmony,
+      targetRefs,
+      targetRefsTruncated: targetRefs.length < allTargetRefs.length,
+      readiness: { findings: readiness.findings },
+    }
+  }
+
   updatePreview(update: StudioPreviewUpdate): StudioPreviewStatus {
     const next = { ...this.previewState, ...update } as StudioPreviewStatus & {
       selection?: StudioPreviewStatus['selection'] | null
@@ -178,6 +214,14 @@ class StudioDraftController implements StudioAgentWorkspace {
 
   async applyPatch(path: string, before: string, after: string): Promise<'created' | 'updated'> {
     return applyProjectPatch(this.record.root, path, before, after)
+  }
+
+  async saveElementDefaults(elementId: string): Promise<{ files: string[] }> {
+    const element = this.previewStatus().registry?.elements.find(
+      item => item.owner === this.record.name && item.element.id === elementId,
+    )
+    if (element === undefined) throw new Error('Element is not registered by the active Draft')
+    return saveElementDefaultsToProject(this.record.root, element)
   }
 
   async build(signal: AbortSignal): Promise<StudioBuildResult> {
@@ -276,6 +320,11 @@ export class StudioBackend {
         if (typeof path !== 'string' || typeof content !== 'string') throw new Error('path and content are required')
         await writeProjectFile(controller.record.root, path, content)
         return success(rpcId, { path, saved: true })
+      }
+      if (method === 'studio.elements.saveDefaults') {
+        const elementId = objectPayload(payload).elementId
+        if (typeof elementId !== 'string' || elementId === '') throw new Error('elementId is required')
+        return success(rpcId, await controller.saveElementDefaults(elementId))
       }
       if (method === 'studio.project.build') return success(rpcId, await controller.build(new AbortController().signal))
       if (method === 'studio.project.cancelBuild') return success(rpcId, { canceled: await controller.cancelBuild() })

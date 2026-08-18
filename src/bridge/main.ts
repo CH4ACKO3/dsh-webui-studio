@@ -14,6 +14,7 @@ import {
 } from '../contracts'
 import { StudioPreviewRegistry, type StudioVariableTarget } from './registry'
 import { patchTraces, type FiberSnapshot } from './provenance'
+import { pointInsideSelection } from './selection'
 
 const MAX_TEXT = 2_000
 const MAX_HTML = 16_000
@@ -246,7 +247,11 @@ async function click(event: MouseEvent): Promise<void> {
   event.preventDefault()
   event.stopImmediatePropagation()
   const selected = elementAtPointer(event)
-  if (locked && selected !== candidate) unlockSelection()
+  const lockedCandidate = candidate
+  const clickedInsideLockedSelection = locked
+    && lockedCandidate?.isConnected === true
+    && pointInsideSelection(getElementBounds(lockedCandidate), event.clientX, event.clientY)
+  if (locked && !clickedInsideLockedSelection) unlockSelection()
   if (selected === undefined) return
   const request = ++selectionRequest
   try {

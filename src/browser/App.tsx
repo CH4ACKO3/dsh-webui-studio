@@ -66,6 +66,7 @@ import {
   Textarea,
 } from './ui'
 import { CreateDraftDialog } from './CreateDraftDialog'
+import { HarmonyTargets } from './HarmonyTargets'
 import { PluginManagement } from './PluginManagement'
 import { SettingsDialog, SettingsIcon } from './SettingsDialog'
 import {
@@ -405,6 +406,8 @@ export function App(): JSX.Element {
   const [source, setSource] = useState('')
   const [savedSource, setSavedSource] = useState('')
   const [fileBusy, setFileBusy] = useState(false)
+  const [elementSourceBusyId, setElementSourceBusyId] = useState<string>()
+  const [elementSourceMessage, setElementSourceMessage] = useState<string>()
   const [inspection, setInspection] = useState<StudioHarmonyInspection>({ patches: [], targets: [] })
   const [readiness, setReadiness] = useState<StudioReadinessReport>({ findings: [] })
   const [packingDraftId, setPackingDraftId] = useState<string>()
@@ -425,6 +428,8 @@ export function App(): JSX.Element {
   const previewTransformRef = useRef({ scale: previewScale, origin: previewOrigin })
   const previewLockedAspectRatioRef = useRef(initialViewport.width / initialViewport.height)
   const previewUpdateQueue = useRef<Promise<void>>(Promise.resolve())
+  const variableUpdateTail = useRef<Promise<void>>(Promise.resolve())
+  const pendingVariableResults = useRef(new Map<string, { resolve(): void; reject(error: Error): void }>())
   const workspaceUpdateQueue = useRef<Promise<void>>(Promise.resolve())
   const suppressDraftTabClickRef = useRef<string>()
   const selectionResolve = useRef(0)
@@ -463,6 +468,9 @@ export function App(): JSX.Element {
   const focusedElement = draftElements.find(item => item.element.id === focusedElementId)
     ?? matchedElement
     ?? draftElements[0]
+  const focusedElementSourceVariables = focusedElement?.element.variables?.filter(
+    variable => variable.defaultSource !== undefined,
+  ) ?? []
   const previewInsets = previewFullscreen
     ? { left: 0, right: 0 }
     : {
@@ -667,7 +675,13 @@ export function App(): JSX.Element {
   }, [matchedElement?.element.id, selection])
 
   useEffect(() => {
+    setElementSourceMessage(undefined)
+  }, [focusedElement?.element.id, selectedDraftId])
+
+  useEffect(() => {
     const currentDraft = selectedDraftId
+    for (const pending of pendingVariableResults.current.values()) pending.reject(new Error('Preview bridge changed'))
+    pendingVariableResults.current.clear()
     previewPort.current?.close()
     previewPort.current = undefined
     previewNonce.current = crypto.randomUUID()
@@ -1054,7 +1068,15 @@ export function App(): JSX.Element {
         setError(message.error)
       }
       if (message.type === 'selection-error' && boundedBridgeText(message.error)) setError(message.error)
-      if (message.type === 'variable-result' && message.ok === false && boundedBridgeText(message.error)) setError(message.error)
+      if (message.type === 'variable-result' && boundedBridgeText(message.requestId)) {
+        const pending = pendingVariableResults.current.get(message.requestId)
+        if (pending !== undefined) {
+          pendingVariableResults.current.delete(message.requestId)
+          if (message.ok === true) pending.resolve()
+          else pending.reject(new Error(boundedBridgeText(message.error) ? message.error : 'Preview variable update failed'))
+        }
+        if (message.ok === false && boundedBridgeText(message.error)) setError(message.error)
+      }
       if (message.type === 'mode' && (message.mode === 'browse' || message.mode === 'inspect')) {
         previewModeRef.current = message.mode
         setPreviewMode(message.mode)
@@ -1116,6 +1138,40 @@ export function App(): JSX.Element {
     }
   }
 
+  const saveElementDefaults = async (): Promise<void> => {
+    if (selectedDraftId === undefined || focusedElement === undefined) return
+    if (hasUnsavedSource) {
+      setPanel('source')
+      setError(t('errorUnsavedElementSave'))
+      return
+    }
+    const draftId = selectedDraftId
+    const elementId = focusedElement.element.id
+    setElementSourceBusyId(elementId)
+    setElementSourceMessage(undefined)
+    setError(undefined)
+    try {
+      await variableUpdateTail.current
+      await previewUpdateQueue.current
+      const result = await callStudio<{ files: string[] }>('studio.elements.saveDefaults', { draftId, elementId })
+      setElementSourceMessage(t('elementSourceSaved', { count: result.files.length }))
+      if (filePath !== '' && result.files.includes(filePath)) {
+        const file = await callStudio<{ path: string; content: string }>('studio.project.readFile', { draftId, path: filePath })
+        if (draftIdRef.current === draftId && file.path === filePath) {
+          setSource(file.content)
+          setSavedSource(file.content)
+        }
+      }
+      void callStudio<StudioReadinessReport>('studio.readiness.inspect', { draftId }).then(next => {
+        if (draftIdRef.current === draftId) setReadiness(next)
+      }).catch(() => undefined)
+    } catch (cause) {
+      if (draftIdRef.current === draftId) setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+    } finally {
+      setElementSourceBusyId(current => current === elementId ? undefined : current)
+    }
+  }
+
   useEffect(() => {
     const save = (event: KeyboardEvent): void => {
       if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 's') return
@@ -1151,9 +1207,17 @@ export function App(): JSX.Element {
       | { scope: 'global'; owner: string; variableId: string; value: StudioVariableValue },
   ): void => {
     setError(undefined)
-    previewPort.current?.postMessage({
+    const port = previewPort.current
+    if (port === undefined) return
+    const requestId = crypto.randomUUID()
+    const result = new Promise<void>((resolve, reject) => {
+      pendingVariableResults.current.set(requestId, { resolve, reject })
+    })
+    variableUpdateTail.current = variableUpdateTail.current.catch(() => undefined).then(() => result)
+    void variableUpdateTail.current.catch(() => undefined)
+    port.postMessage({
       type: 'set-variable',
-      requestId: crypto.randomUUID(),
+      requestId,
       sessionId: previewSession,
       nonce: previewNonce.current,
       target,
@@ -1565,14 +1629,6 @@ export function App(): JSX.Element {
     })
   }
 
-  const unlockPreviewSelection = (): void => {
-    previewPort.current?.postMessage({
-      type: 'unlock-selection',
-      sessionId: previewSession,
-      nonce: previewNonce.current,
-    })
-  }
-
   const terminalViewportBounds = (): LayoutRect => ({
     x: 8,
     y: 8,
@@ -1673,10 +1729,7 @@ export function App(): JSX.Element {
     {terminalExpanded && !terminalMinimized && <ResizeHandles kind="terminal" onPointerDown={beginTerminalResize} />}
   </section>
 
-  return <div className="studio-shell studio-ui-root" onPointerDownCapture={event => {
-    const target = event.target instanceof Element ? event.target : undefined
-    if (previewMode === 'inspect' && target?.closest('.preview-viewport') === null) unlockPreviewSelection()
-  }}>
+  return <div className="studio-shell studio-ui-root">
     <header className="studio-header">
       <div className="studio-brand">
         <span className="studio-mark" aria-hidden="true">
@@ -2013,12 +2066,20 @@ export function App(): JSX.Element {
                 {focusedElement !== undefined && <section className="element-detail" aria-label={t('elementControls', { name: focusedElement.element.label })}>
                   <div className="element-source-row">
                     <div><strong>{focusedElement.element.label}</strong><code>{focusedElement.element.source.file}</code></div>
-                    <Button className="source-link" variant="ghost" size="small" disabled={!files.some(file => file.path === focusedElement.element.source.file)}
-                      onClick={() => {
-                        setPanel('source')
-                        void openFile(focusedElement.element.source.file)
-                      }}>{t('openElementSource')}</Button>
+                    <div className="element-source-actions">
+                      <Button className="source-link" variant="ghost" size="small" disabled={!files.some(file => file.path === focusedElement.element.source.file)}
+                        onClick={() => {
+                          setPanel('source')
+                          void openFile(focusedElement.element.source.file)
+                        }}>{t('openElementSource')}</Button>
+                      {focusedElementSourceVariables.length > 0 && <Button className="source-link" variant="primary" size="small"
+                        loading={elementSourceBusyId === focusedElement.element.id}
+                        loadingLabel={t('savingElementToSource')}
+                        disabled={elementSourceBusyId !== undefined}
+                        onClick={() => void saveElementDefaults()}>{t('saveElementToSource')}</Button>}
+                    </div>
                   </div>
+                  {elementSourceMessage !== undefined && <Notice tone="success">{elementSourceMessage}</Notice>}
                   {matchedElement?.element.id === focusedElement.element.id
                     ? <p className="element-match" data-state="matched">{t('elementMatched')}</p>
                     : selection !== undefined && <p className="element-match">{t('elementNotMatched')}</p>}
@@ -2035,6 +2096,8 @@ export function App(): JSX.Element {
                           variableId: definition.id, value,
                         })}
                       />)}</div>}
+                  {focusedElement.element.variables?.some(variable => variable.defaultSource === undefined) === true
+                    && <p className="variable-note">{t('elementSourceSaveNote')}</p>}
                 </section>}
 
                 {draftVariables.map(group => <section className="global-variables" key={group.owner}>
@@ -2098,23 +2161,7 @@ export function App(): JSX.Element {
                 </details>
               </section>}
 
-          <section className="harmony-inspection" aria-label={t('harmonyTargets')}>
-            <div className="section-heading"><strong>{t('materializedTargets')}</strong><span>{inspection.targets.length}</span></div>
-            {inspection.targets.length === 0
-              ? <p className="inspection-empty">{t('materializedTargetsEmpty')}</p>
-              : inspection.targets.map(target => <details className="harmony-target" key={`${target.package}:${target.file}`}>
-                  <summary><span>{target.package}</span><code>{target.file}</code></summary>
-                  <div className="harmony-target-body">
-                    <p>{t('patchSteps', { count: target.steps.length })}</p>
-                    {target.steps.map(step => <details key={`${step.owner}:${step.key}`}>
-                      <summary>{step.owner} / {step.key} · {step.matches} {t('matches')}</summary>
-                      <pre className="selection-code">{step.source}</pre>
-                    </details>)}
-                    <details><summary>{t('original')}</summary><pre className="selection-code">{target.original}</pre></details>
-                    <details><summary>{t('final')}</summary><pre className="selection-code">{target.final}</pre></details>
-                  </div>
-                </details>)}
-          </section>
+          <HarmonyTargets targets={inspection.targets} t={t} />
         </PanelBody>}
 
         {panel === 'source' && <PanelBody id="studio-panel-source" aria-labelledby="studio-tab-source" className="panel-content source-panel" role="tabpanel">

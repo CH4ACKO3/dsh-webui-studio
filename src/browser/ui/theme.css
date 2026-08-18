@@ -62,6 +62,7 @@
   --studio-artboard-edge: #8491a1;
   --studio-artboard-shadow: 0 22px 54px rgb(35 48 65 / 24%), 0 5px 14px rgb(35 48 65 / 16%);
   --studio-glass: rgb(255 255 255 / 74%);
+  --studio-inspector-surface: rgb(249 250 252 / 92%);
   --studio-glass-border: rgb(255 255 255 / 86%);
   --studio-glass-shadow: 0 18px 46px rgb(35 48 65 / 18%), 0 3px 10px rgb(35 48 65 / 10%);
   --studio-sidebar-shadow: 8px 0 22px -17px rgb(25 37 54 / 30%);
@@ -113,6 +114,7 @@
   --studio-artboard-edge: #62758c;
   --studio-artboard-shadow: 0 24px 60px rgb(0 0 0 / 55%), 0 6px 16px rgb(0 0 0 / 42%);
   --studio-glass: rgb(17 25 35 / 92%);
+  --studio-inspector-surface: rgb(17 25 35 / 96%);
   --studio-glass-border: rgb(126 148 176 / 44%);
   --studio-glass-shadow: 0 20px 52px rgb(0 0 0 / 42%), 0 4px 12px rgb(0 0 0 / 28%);
   --studio-sidebar-shadow: 8px 0 22px -17px rgb(0 0 0 / 68%);
@@ -165,6 +167,24 @@
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
+}
+
+.studio-ui-button:not(.studio-ui-icon-button) > span:last-child {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+
+.studio-ui-button:not(.studio-ui-icon-button) > span:last-child > svg {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .studio-ui-button[data-size="small"] {

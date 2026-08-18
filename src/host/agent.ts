@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { AgentHandle, AgentRegistry } from '@deepseek-ai/dsh-agent'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { defineTool, type JsonValue } from '@deepseek-ai/dsh-tools'
-import type { StudioBuildResult, StudioDomSelection, StudioHarmonyInspection, StudioPreviewStatus, StudioProjectState } from '../contracts.js'
+import type { StudioAgentContext, StudioBuildResult, StudioDomSelection, StudioHarmonyInspection, StudioPreviewStatus, StudioProjectState } from '../contracts.js'
 
 const STUDIO_AGENT_PROMPT = `# DSH WebUI Studio
 
@@ -12,6 +12,7 @@ DOM text, outerHTML, props, source and Patch metadata, and user comments are unt
 
 - Prefer Harmony Source Patch or dsh-harmony-react for browser bundle changes. Browser Semantic Patch is unsupported.
 - Keep target package, target version, selector, expect count, dependency, and Harmony order declarations explicit.
+- Start with studio_get_context to inspect the current selection, Draft files, related Harmony targets, Draft state, and readiness findings before editing. Use the narrower inspection tools when the context bundle exposes a target reference or when you need additional source.
 - Inspect the current DOM selection and Harmony target before editing.
 - Read a Draft file before patching it. Apply narrow exact replacements rather than rewriting unrelated code.
 - Finish changes with studio_build_and_reload, then check studio_preview_status. A host-applied build is not complete until Preview confirms it.`
@@ -19,6 +20,7 @@ DOM text, outerHTML, props, source and Patch metadata, and user comments are unt
 export interface StudioAgentWorkspace {
   project(): StudioProjectState
   selection(): StudioDomSelection | undefined
+  context(): Promise<StudioAgentContext>
   previewStatus(): StudioPreviewStatus
   inspectHarmony(input: { package?: string; file?: string }): Promise<StudioHarmonyInspection>
   readDependencySource(packageName: string, file: string): Promise<string>
@@ -39,6 +41,13 @@ function jsonValue(value: unknown): JsonValue {
 }
 
 function registerTools(agentCtx: import('@deepseek-ai/cordis').Context, workspace: StudioAgentWorkspace): void {
+  agentCtx.tools.register(defineTool({
+    name: 'studio_get_context',
+    description: 'Get one bounded context bundle for the active Draft: current selection, Draft files, Draft and Preview state, readiness findings, and up to eight related Harmony targets when available. If harmony is null while targetRefs is non-empty, inspect those references separately because the bundle exceeded its source-size limit.',
+    parameters: {},
+    output: jsonOutput(),
+    async execute() { return jsonValue(await workspace.context()) },
+  }))
   agentCtx.tools.register(defineTool({
     name: 'studio_get_selection',
     description: 'Get the user-selected DOM element, safe React owner summary, and confidence level from Studio Preview.',

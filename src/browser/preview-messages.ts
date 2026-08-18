@@ -87,6 +87,11 @@ function variableDefinition(value: unknown): value is StudioVariableDefinition {
   if (!record(value) || !string(value.id, 500) || value.id === '' || !string(value.label, 1_000)
     || !controls.has(value.control as string)) return false
   if (value.options !== undefined && !stringArray(value.options)) return false
+  if (value.defaultSource !== undefined) {
+    if (!record(value.defaultSource) || !sourceLocation(value.defaultSource)
+      || !string(value.defaultSource.before, 4_000) || value.defaultSource.before === ''
+      || !string(value.defaultSource.after, 4_000) || value.defaultSource.after === '') return false
+  }
   if (value.constraints === undefined) return true
   if (!record(value.constraints)) return false
   const constraints = value.constraints as UnknownRecord

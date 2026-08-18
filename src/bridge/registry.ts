@@ -77,6 +77,11 @@ function variables(
     if (definition.options !== undefined && new Set(definition.options).size !== definition.options.length) {
       throw new Error(`Studio variable ${definition.id} has duplicate options`)
     }
+    if (definition.defaultSource !== undefined) {
+      sourceLocation(definition.defaultSource.file)
+      text(definition.defaultSource.before, `Studio variable ${definition.id} default source prefix`)
+      text(definition.defaultSource.after, `Studio variable ${definition.id} default source suffix`)
+    }
     const constraints = definition.constraints
     if (constraints !== undefined) {
       for (const value of [constraints.min, constraints.max, constraints.step]) {

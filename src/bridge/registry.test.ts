@@ -14,12 +14,19 @@ describe('StudioPreviewRegistry', () => {
         id: 'toolbar', label: 'Toolbar',
         boundary: { surfaceId: 'draft.surface', path: ['root', 'toolbar/one'] },
         source: { file: 'src/Toolbar.tsx' },
-        variables: [{ id: 'accent', label: 'Accent', control: 'color' }],
+        variables: [{
+          id: 'accent', label: 'Accent', control: 'color',
+          defaultSource: { file: 'src/Toolbar.tsx', before: 'const accent = ', after: ';' },
+        }],
       },
       bindings: { accent: { get: () => accent, set: value => { accent = String(value) }, subscribe: next => { listener = next; return stop } } },
     })
 
-    expect(registry.snapshot().elements[0]).toMatchObject({ owner: 'draft', values: { accent: '#235be6' } })
+    expect(registry.snapshot().elements[0]).toMatchObject({
+      owner: 'draft',
+      element: { variables: [{ defaultSource: { file: 'src/Toolbar.tsx' } }] },
+      values: { accent: '#235be6' },
+    })
     listener?.()
     expect(changed).toHaveBeenCalledTimes(2)
     unregister()

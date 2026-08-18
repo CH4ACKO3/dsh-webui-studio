@@ -22,4 +22,7 @@ Studio and Harmony releases must keep this service contract aligned.
 `dsh-harmony-react@0.1.2` exposes the generic `./studio` React element and
 variable registration API used by the browser and Preview bridge. Studio uses
 the package published on the npm registry and resolves it exclusively through
-the `dsh-harmony-react/studio` package export.
+the `dsh-harmony-react/studio` package export. Source persistence additionally
+requires the `StudioVariableDefinition.defaultSource` anchors introduced by the
+corresponding React package release; bindings without those anchors remain
+Preview-only.

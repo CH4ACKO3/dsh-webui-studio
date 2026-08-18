@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AgentRegistry } from '@deepseek-ai/dsh-agent'
@@ -246,6 +246,47 @@ describe('StudioBackend', () => {
 
     expect(read.result).toMatchObject({ ok: true, value: { content: 'before\n' } })
     expect(saved.result).toMatchObject({ ok: true, value: { saved: true } })
+  })
+
+  it('persists registered Element values only into their source defaults', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-studio-backend-'))
+    temporaryDirectories.push(root)
+    await mkdir(join(root, 'src'))
+    await writeFile(join(root, 'src/theme.ts'), "const accent = '#235be6';\nexport { accent };\n")
+    const draft = record(root)
+    const studio = backend(draft)
+    await studio.call(request('studio.drafts.start', { draftId: draft.id }))
+    await studio.call(request('studio.preview.update', {
+      draftId: draft.id,
+      connected: true,
+      mode: 'browse',
+      registry: {
+        elements: [{
+          owner: draft.name,
+          element: {
+            id: 'theme',
+            label: 'Theme',
+            boundary: { surfaceId: 'settings', path: ['theme'] },
+            source: { file: 'src/theme.ts' },
+            variables: [{
+              id: 'accent',
+              label: 'Accent',
+              control: 'color',
+              defaultSource: { file: 'src/theme.ts', before: 'const accent = ', after: ';' },
+            }],
+          },
+          values: { accent: '#ff8800' },
+        }],
+        variables: [],
+      },
+    }))
+
+    const saved = await studio.call(request('studio.elements.saveDefaults', { draftId: draft.id, elementId: 'theme' }))
+
+    expect(saved.result).toEqual({ ok: true, value: { files: ['src/theme.ts'] } })
+    await expect(readFile(join(root, 'src/theme.ts'), 'utf8')).resolves.toBe(
+      "const accent = '#ff8800';\nexport { accent };\n",
+    )
   })
 
   it('exports a Draft only through its explicit folder action', async () => {

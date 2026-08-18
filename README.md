@@ -51,6 +51,7 @@ not depend on Studio.
 - [x] Give every Draft its own Git worktree, `DSH_HOME`, profile, dependencies, and child Host
 - [x] Preview the official WebUI without loading Draft code into the stable Host
 - [x] Browse normally or inspect DOM, React owners, source candidates, and Patch traces
+- [x] Surface plugin-registered Element controls automatically and save supported values back as source defaults
 - [x] Edit Draft source with CodeMirror and protect installed dependency sources as read-only
 - [x] Build, apply through Harmony, reload, and confirm the live Client graph revision
 - [x] Run Draft-scoped DSH Agents with explicit Studio tools
@@ -182,6 +183,7 @@ in the compatibility note above.
 - Preview DOM, React, source, Patch, and comment data is treated as untrusted evidence.
 - Source writes stay inside the selected Draft package and never follow symbolic links outside it.
 - Registered element boundaries and Patch traces are candidate evidence, not claims of exact DOM ownership.
+- Element controls change the live Preview through plugin bindings. **Save default to source** only replaces a plugin-declared default initializer; it never rewrites component use sites or freezes the runtime binding.
 
 ## Frequently asked questions
 

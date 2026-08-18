@@ -43,7 +43,10 @@ describe('Preview bridge message validation', () => {
         element: {
           id: 'toolbar', label: 'Toolbar', boundary: { surfaceId: 'main', path: ['toolbar'] },
           source: { file: 'src/client.tsx', line: 2 },
-          variables: [{ id: 'dense', label: 'Dense', control: 'boolean' }],
+          variables: [{
+            id: 'dense', label: 'Dense', control: 'boolean',
+            defaultSource: { file: 'src/client.tsx', before: 'const dense = ', after: ';' },
+          }],
         },
         values: { dense: true },
       }],
