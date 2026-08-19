@@ -12,6 +12,7 @@ import {
   useState,
 } from 'react'
 import { createPortal } from 'react-dom'
+import type { SessionSummary } from '@deepseek-ai/dsh-host-apiproxy/api'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {
   StudioVariableDefinition,
@@ -20,7 +21,7 @@ import type {
   StudioVariableValue,
 } from 'dsh-harmony-react/studio'
 import {
-  type StudioCreateAgentResult,
+  type StudioAgentBinding,
   type StudioCreateDraftInput,
   type StudioBuildOutput,
   type StudioBuildResult,
@@ -30,7 +31,6 @@ import {
   type StudioElementStyleRule,
   type StudioElementStyleSource,
   type StudioElementStyleTarget,
-  type StudioHarmonyInspection,
   type StudioProjectFile,
   type StudioProjectState,
   type StudioPreviewStatus,
@@ -76,7 +76,6 @@ import {
   Textarea,
 } from './ui'
 import { CreateDraftDialog } from './CreateDraftDialog'
-import { HarmonyTargets } from './HarmonyTargets'
 import { PluginManagement } from './PluginManagement'
 import { SettingsDialog, SettingsIcon } from './SettingsDialog'
 import { AutomaticPatchDialog, automaticPatchScope } from './AutomaticPatchDialog'
@@ -657,6 +656,14 @@ function eventSessionId(envelope: StudioServerRequest<Record<string, unknown>>):
   return typeof envelope.payload.sessionId === 'string' ? envelope.payload.sessionId : undefined
 }
 
+function sessionTitle(session: SessionSummary): string {
+  const values = session.projections?.values as Record<string, unknown> | undefined
+  const title = values?.title
+  if (typeof title === 'string' && title.trim() !== '') return title.trim()
+  const directory = session.cwd?.split('/').filter(Boolean).at(-1)
+  return directory === undefined ? String(session.sessionId).slice(0, 8) : directory
+}
+
 export function App(): JSX.Element {
   const { t } = useStudioLocale()
   const initialViewport = useMemo(deviceViewport, [])
@@ -676,6 +683,11 @@ export function App(): JSX.Element {
   const [running, setRunning] = useState(false)
   const [connected, setConnected] = useState(false)
   const [creatingAgentDraftId, setCreatingAgentDraftId] = useState<string>()
+  const [attachingAgentDraftId, setAttachingAgentDraftId] = useState<string>()
+  const [leavingAgentDraftId, setLeavingAgentDraftId] = useState<string>()
+  const [agentSessions, setAgentSessions] = useState<SessionSummary[]>([])
+  const [selectedAgentSessionId, setSelectedAgentSessionId] = useState('')
+  const [loadingAgentSessions, setLoadingAgentSessions] = useState(false)
   const [exportingDraftId, setExportingDraftId] = useState<string>()
   const [instanceOperations, setInstanceOperations] = useState<Record<string, InstanceOperation>>({})
   const [buildOperations, setBuildOperations] = useState<Record<string, true>>({})
@@ -717,7 +729,6 @@ export function App(): JSX.Element {
   const [modifiedElementDefaults, setModifiedElementDefaults] = useState<ReadonlySet<string>>(() => new Set())
   const [elementStyles, setElementStyles] = useState<Record<string, StudioElementStyleRule[]>>({})
   const [elementSelectorCandidates, setElementSelectorCandidates] = useState<Record<string, string[]>>({})
-  const [inspection, setInspection] = useState<StudioHarmonyInspection>({ patches: [], targets: [] })
   const [readiness, setReadiness] = useState<StudioReadinessReport>({ findings: [] })
   const [packingDraftId, setPackingDraftId] = useState<string>()
   const sessionRef = useRef<string>()
@@ -755,6 +766,8 @@ export function App(): JSX.Element {
     return draft === undefined ? [] : [draft]
   })
   const selectedDraft = drafts.find(draft => draft.id === selectedDraftId)
+  const attachedAgentSessionIds = drafts.flatMap(draft => draft.agent === undefined ? [] : [draft.agent.sessionId]).sort().join('\0')
+  const selectedAgentSession = agentSessions.find(session => String(session.sessionId) === selectedAgentSessionId)
   const hasUnsavedSource = filePath !== '' && source !== savedSource
   const selectedInstanceOperation = selectedDraftId === undefined ? undefined : instanceOperations[selectedDraftId]
   const selectedInstanceStarting = selectedInstanceOperation === 'start' || selectedInstanceOperation === 'restart'
@@ -840,7 +853,6 @@ export function App(): JSX.Element {
     setFilePath('')
     setSource('')
     setSavedSource('')
-    setInspection({ patches: [], targets: [] })
     setReadiness({ findings: [] })
     setSelectedDraftId(draftId)
   }
@@ -931,6 +943,30 @@ export function App(): JSX.Element {
       })
     return () => { current = false }
   }, [sessionId])
+
+  useEffect(() => {
+    if (panel !== 'agent' || project?.state !== 'active' || sessionId !== undefined) return
+    let current = true
+    const attached = new Set(attachedAgentSessionIds.split('\0').filter(Boolean))
+    setLoadingAgentSessions(true)
+    const load = (): void => {
+      void studioApi.sessions.list({}).then(response => {
+        if (!current) return
+        const sessions = apiValue(response).items.filter(session => (
+          session.origin !== 'subagent' && !session.blank && !attached.has(String(session.sessionId))
+        ))
+        setAgentSessions(sessions)
+        setSelectedAgentSessionId(selected => sessions.some(session => String(session.sessionId) === selected) ? selected : '')
+      }).catch(cause => {
+        if (current) setError(cause instanceof Error ? cause.message : String(cause))
+      }).finally(() => {
+        if (current) setLoadingAgentSessions(false)
+      })
+    }
+    load()
+    const interval = window.setInterval(load, 3_000)
+    return () => { current = false; window.clearInterval(interval) }
+  }, [panel, project?.state, sessionId, attachedAgentSessionIds])
 
   useEffect(() => {
     projectRef.current = project
@@ -1126,15 +1162,13 @@ export function App(): JSX.Element {
       void Promise.all([
         callStudio<StudioProjectState>('studio.project.state', { draftId: currentDraft }),
         callStudio<StudioProjectFile[]>('studio.project.files', { draftId: currentDraft }),
-        callStudio<StudioHarmonyInspection>('studio.harmony.inspect', { draftId: currentDraft }),
         callStudio<StudioReadinessReport>('studio.readiness.inspect', { draftId: currentDraft }),
-      ]).then(([next, nextFiles, nextInspection, nextReadiness]) => {
+      ]).then(([next, nextFiles, nextReadiness]) => {
         if (draftViewRequest.current !== request || draftIdRef.current !== currentDraft) return
         const previous = projectRef.current
         projectRef.current = next
         setProject(next)
         setFiles(nextFiles)
-        setInspection(nextInspection)
         setReadiness(nextReadiness)
         if (next.state === 'preview-pending'
           && (previous?.state !== 'preview-pending' || previous.graphRev !== next.graphRev)) {
@@ -1151,7 +1185,6 @@ export function App(): JSX.Element {
       setFilePath('')
       setSource('')
       setSavedSource('')
-      setInspection({ patches: [], targets: [] })
       setReadiness({ findings: [] })
       return
     }
@@ -1159,12 +1192,10 @@ export function App(): JSX.Element {
     const request = ++draftViewRequest.current
     void Promise.all([
       callStudio<StudioProjectFile[]>('studio.project.files', { draftId }),
-      callStudio<StudioHarmonyInspection>('studio.harmony.inspect', { draftId }),
       callStudio<StudioReadinessReport>('studio.readiness.inspect', { draftId }),
-    ]).then(([nextFiles, nextInspection, nextReadiness]) => {
+    ]).then(([nextFiles, nextReadiness]) => {
       if (draftViewRequest.current !== request || draftIdRef.current !== draftId) return
       setFiles(nextFiles)
-      setInspection(nextInspection)
       setReadiness(nextReadiness)
     }).catch(cause => {
       if (draftViewRequest.current === request && draftIdRef.current === draftId) {
@@ -1328,10 +1359,8 @@ export function App(): JSX.Element {
 
   const applyDraftBuild = async (draftId: string, preserveElementState = false): Promise<StudioBuildResult> => {
     const result = await callStudio<StudioBuildResult>('studio.project.build', { draftId })
-    const nextInspection = await callStudio<StudioHarmonyInspection>('studio.harmony.inspect', { draftId })
     setBuildOutputs(current => ({ ...current, [draftId]: result.build }))
     updateDraftProject(draftId, result.project)
-    if (draftIdRef.current === draftId) setInspection(nextInspection)
     if (!preserveElementState) clearElementModifications(draftId)
     reloadPreview(draftId)
     return result
@@ -1779,7 +1808,7 @@ export function App(): JSX.Element {
     setError(undefined)
     setInteraction(undefined)
     try {
-      const result = await callStudio<StudioCreateAgentResult>('studio.agent.create', { draftId })
+      const result = await callStudio<StudioAgentBinding>('studio.agent.create', { draftId })
       setDrafts(current => current.map(draft => draft.id === draftId ? { ...draft, agent: result } : draft))
       if (draftIdRef.current === draftId) setSessionId(result.sessionId)
       const studioSession = result.sessionId as SessionId
@@ -1788,6 +1817,48 @@ export function App(): JSX.Element {
       if (draftIdRef.current === draftId) setError(cause instanceof StudioRpcError ? cause.message : String(cause))
     } finally {
       setCreatingAgentDraftId(current => current === draftId ? undefined : current)
+    }
+  }
+
+  const attachAgent = async (): Promise<void> => {
+    if (selectedDraftId === undefined || selectedAgentSessionId === '') return
+    const draftId = selectedDraftId
+    setAttachingAgentDraftId(draftId)
+    setError(undefined)
+    setInteraction(undefined)
+    try {
+      const result = await callStudio<StudioAgentBinding>('studio.agent.attach', {
+        draftId,
+        sessionId: selectedAgentSessionId,
+      })
+      setDrafts(current => current.map(draft => draft.id === draftId ? { ...draft, agent: result } : draft))
+      if (draftIdRef.current === draftId) setSessionId(result.sessionId)
+    } catch (cause) {
+      if (draftIdRef.current === draftId) setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+    } finally {
+      setAttachingAgentDraftId(current => current === draftId ? undefined : current)
+    }
+  }
+
+  const leaveAgent = async (): Promise<void> => {
+    if (selectedDraftId === undefined || sessionId === undefined || running) return
+    const draftId = selectedDraftId
+    setLeavingAgentDraftId(draftId)
+    setError(undefined)
+    try {
+      const view = await callStudio<StudioDraftView>('studio.agent.leave', { draftId })
+      setDrafts(current => current.map(draft => draft.id === draftId ? view : draft))
+      if (draftIdRef.current === draftId) {
+        setSessionId(undefined)
+        setEvents([])
+        setStreaming('')
+        setRunning(false)
+        setInteraction(undefined)
+      }
+    } catch (cause) {
+      if (draftIdRef.current === draftId) setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+    } finally {
+      setLeavingAgentDraftId(current => current === draftId ? undefined : current)
     }
   }
 
@@ -2668,8 +2739,6 @@ export function App(): JSX.Element {
                   <pre className="selection-code">{selection.outerHTML}</pre>
                 </details>
               </section>}
-
-          <HarmonyTargets targets={inspection.targets} t={t} />
         </PanelBody>}
 
         {panel === 'source' && <PanelBody id="studio-panel-source" aria-labelledby="studio-tab-source" className="panel-content source-panel" role="tabpanel">
@@ -2757,7 +2826,12 @@ export function App(): JSX.Element {
         {panel === 'agent' && <PanelBody id="studio-panel-agent" aria-labelledby="studio-tab-agent" className="agent-panel" role="tabpanel">
           <div className="panel-heading agent-heading">
             <div><h2>{t('agentTitle')}</h2><p>{running ? t('agentWorking') : sessionId === undefined ? t('agentWaiting') : t('agentReady')}</p></div>
-            {running && <Button variant="danger" size="small" onClick={() => void cancel()}>{t('agentCancel')}</Button>}
+            <div className="agent-heading-actions">
+              {running && <Button variant="danger" size="small" onClick={() => void cancel()}>{t('agentCancel')}</Button>}
+              {sessionId !== undefined && <Button size="small" loading={leavingAgentDraftId === selectedDraftId}
+                loadingLabel={t('agentLeaving')} disabled={running} title={running ? t('agentLeaveRunning') : t('agentLeaveDescription')}
+                onClick={() => void leaveAgent()}>{t('agentLeave')}</Button>}
+            </div>
           </div>
           <p className="agent-scope">{t('agentScope')}</p>
           <div className="conversation" aria-live="polite">
@@ -2765,8 +2839,24 @@ export function App(): JSX.Element {
               title={project?.state === 'active' ? t('agentStartFromDraft') : t('agentOpenDraftFirst')}
               description={t('agentDescription')}
               action={project?.state === 'active' && sessionId === undefined
-                ? <Button variant="primary" loading={creatingAgentDraftId === selectedDraftId} loadingLabel={t('agentStarting')}
-                    onClick={() => void createAgent()}>{t('agentStart')}</Button>
+                ? <div className="agent-entry-actions">
+                    <Button variant="primary" loading={creatingAgentDraftId === selectedDraftId} loadingLabel={t('agentStarting')}
+                      onClick={() => void createAgent()}>{t('agentStart')}</Button>
+                    <div className="agent-entry-divider"><span>{t('agentOrExisting')}</span></div>
+                    <Select aria-label={t('agentExistingSession')} value={selectedAgentSessionId}
+                      disabled={loadingAgentSessions || attachingAgentDraftId === selectedDraftId}
+                      onChange={event => setSelectedAgentSessionId(event.target.value)}>
+                      <option value="">{loadingAgentSessions ? t('agentSessionsLoading') : agentSessions.length === 0
+                        ? t('agentSessionsEmpty') : t('agentChooseSession')}</option>
+                      {agentSessions.map(session => <option key={String(session.sessionId)} value={String(session.sessionId)} disabled={session.running}>
+                        {sessionTitle(session)}{session.running ? ` · ${t('agentSessionRunning')}` : ''}
+                      </option>)}
+                    </Select>
+                    <Button loading={attachingAgentDraftId === selectedDraftId} loadingLabel={t('agentAttaching')}
+                      disabled={selectedAgentSession === undefined || selectedAgentSession.running}
+                      onClick={() => void attachAgent()}>{t('agentAttach')}</Button>
+                    <small>{t('agentAttachDescription')}</small>
+                  </div>
                 : undefined} />}
             {messages.map(message => <article key={message.id} className={`message ${message.role}`}>
               <span>{message.role === 'user' ? t('you') : t('panelAgent')}</span><p>{message.text}</p>

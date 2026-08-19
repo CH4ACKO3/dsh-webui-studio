@@ -49,22 +49,18 @@ export function PluginManagement({ selectedDraft, view }: {
   const running = selectedDraft?.runtime.state === 'running'
   const plugins = useMemo(() => new Map(profile?.plugins.map(plugin => [plugin.name, plugin]) ?? []), [profile])
   const patches = useMemo(() => new Map(inspection.patches.map(patch => [patch.key, patch])), [inspection])
-  const managedProviders = useMemo(() => {
-    const owners = new Set(inspection.patches.map(patch => patch.owner))
-    return order.filter(name => name === 'dsh-harmony' || plugins.get(name)?.harmony === true || owners.has(name))
-  }, [inspection.patches, order, plugins])
   const ownerPatchKeys = (owner: string): string[] => patchOrder.filter(key => patches.get(key)?.owner === owner)
   const dirty = profile !== undefined && (!sameStringList(order, profile.order)
     || !sameStringList(patchOrder, profile.patchOrder) || !sameStringList(disabled, profile.disabled))
 
-  const visibleProviders = useMemo(() => {
+  const visiblePlugins = useMemo(() => {
     const query = pluginQuery.trim().toLocaleLowerCase()
-    if (query === '') return managedProviders
-    return managedProviders.filter(name => {
+    if (query === '') return order
+    return order.filter(name => {
       const plugin = plugins.get(name)
       return `${name}\n${plugin?.description ?? ''}\n${plugin?.version ?? ''}`.toLocaleLowerCase().includes(query)
     })
-  }, [managedProviders, pluginQuery, plugins])
+  }, [order, pluginQuery, plugins])
   const draftPatches = useMemo(() => selectedDraft === undefined ? []
     : inspection.patches.filter(patch => patch.owner === selectedDraft.name),
   [inspection.patches, selectedDraft])
@@ -184,13 +180,13 @@ export function PluginManagement({ selectedDraft, view }: {
             {(profile?.incompatibilities.length ?? 0) > 0
               && <Notice tone="warning">{t('profileConflictWarning', { count: profile?.incompatibilities.length ?? 0 })}</Notice>}
             <div className="plugin-management-list-heading"><strong>{t('profileProviderOrder')}</strong>
-              <span>{visibleProviders.length === managedProviders.length ? managedProviders.length
-                : `${visibleProviders.length}/${managedProviders.length}`}</span></div>
-            {visibleProviders.length === 0 ? <p className="profile-management-status">{pluginQuery === ''
-                ? t('patchManagementNoProviders') : t('pluginManagementNoResults')}</p>
+              <span>{visiblePlugins.length === order.length ? order.length
+                : `${visiblePlugins.length}/${order.length}`}</span></div>
+            {visiblePlugins.length === 0 ? <p className="profile-management-status">{pluginQuery === ''
+                ? t('pluginManagementEmpty') : t('pluginManagementNoResults')}</p>
               : <div className="profile-plugin-list profile-provider-list" role="listbox" aria-label={t('profileProviderOrder')}
                   onDragOver={event => event.preventDefault()} onDrop={() => setDragging(undefined)}>
-                  {visibleProviders.map(name => {
+                  {visiblePlugins.map(name => {
                     const index = order.indexOf(name)
                     const plugin = plugins.get(name)
                     const fixed = name === 'dsh-harmony'

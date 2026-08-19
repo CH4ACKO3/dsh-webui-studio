@@ -38,9 +38,10 @@ export interface StudioServerRequest<T = unknown> {
   payload: T
 }
 
-export interface StudioCreateAgentResult {
+export interface StudioAgentBinding {
   sessionId: string
   agentPreset?: string
+  source: 'created' | 'existing'
 }
 
 export interface StudioReactSnapshot {
@@ -244,7 +245,7 @@ export interface StudioDraftView extends StudioDraftRecord {
     log: string
   }
   project?: StudioProjectState
-  agent?: StudioCreateAgentResult
+  agent?: StudioAgentBinding
 }
 
 export interface StudioCreateDraftInput {

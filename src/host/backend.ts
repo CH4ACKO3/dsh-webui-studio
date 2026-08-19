@@ -2,6 +2,7 @@ import type { AgentRegistry } from '@deepseek-ai/dsh-agent'
 import type { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 import type {
   StudioBuildResult,
+  StudioAgentBinding,
   StudioAgentContext,
   StudioAutomaticCssVariable,
   StudioAutomaticPatchPlan,
@@ -177,7 +178,7 @@ class StudioDraftController implements StudioAgentWorkspace {
   }
 
   async stop(): Promise<StudioDraftView> {
-    await this.agent.dispose()
+    await this.agent.leave()
     await this.builds.cancel()
     await this.preview.stop()
     this.projectState = undefined
@@ -186,7 +187,7 @@ class StudioDraftController implements StudioAgentWorkspace {
   }
 
   async dispose(): Promise<void> {
-    await this.agent.dispose()
+    await this.agent.leave()
     await this.builds.dispose()
     await this.packs.dispose()
     await this.preview.dispose()
@@ -348,12 +349,17 @@ class StudioDraftController implements StudioAgentWorkspace {
     return this.builds.cancel()
   }
 
-  createAgent(agentPreset?: string): Promise<{ sessionId: string; agentPreset?: string }> {
+  createAgent(agentPreset?: string): Promise<StudioAgentBinding> {
     return this.agent.create(agentPreset)
   }
 
-  async disposeAgent(): Promise<void> {
-    await this.agent.dispose()
+  attachAgent(sessionId: string): Promise<StudioAgentBinding> {
+    return this.agent.attach(sessionId)
+  }
+
+  async leaveAgent(): Promise<StudioDraftView> {
+    await this.agent.leave()
+    return this.view()
   }
 }
 
@@ -466,9 +472,17 @@ export class StudioBackend {
         if (preset !== undefined && typeof preset !== 'string') throw new Error('agentPreset must be a string')
         return success(rpcId, await controller.createAgent(preset))
       }
-      if (method === 'studio.agent.dispose') {
-        await controller.disposeAgent()
-        return success(rpcId, { disposed: true })
+      if (method === 'studio.agent.attach') {
+        const sessionId = objectPayload(payload).sessionId
+        if (typeof sessionId !== 'string' || sessionId.trim() === '') throw new Error('sessionId is required')
+        const other = [...this.controllers.entries()].find(([draftId, candidate]) => (
+          draftId !== controller.record.id && candidate.view().agent?.sessionId === sessionId
+        ))
+        if (other !== undefined) throw new Error('the selected session is already attached to another Draft')
+        return success(rpcId, await controller.attachAgent(sessionId))
+      }
+      if (method === 'studio.agent.leave') {
+        return success(rpcId, await controller.leaveAgent())
       }
       return failure(rpcId, 'studio-method-forbidden', `method ${method} is not exposed by Studio`)
     } catch (error) {

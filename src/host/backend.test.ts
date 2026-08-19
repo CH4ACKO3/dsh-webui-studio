@@ -79,9 +79,10 @@ function backend(
   draft: StudioDraftRecord,
   get = vi.fn(async () => draft),
   harmony = { profileDir: '/home/profiles/web' } as StudioHarmonyService,
+  agentRegistry?: AgentRegistry,
 ): StudioBackend {
   previewState.project = { name: draft.name, root: draft.root, state: 'preview-pending', graphRev: 'graph-1' }
-  const agents = { create: vi.fn(async () => ({ dispose: vi.fn(async () => {}) })) } as unknown as AgentRegistry
+  const agents = agentRegistry ?? ({ create: vi.fn(async () => ({ dispose: vi.fn(async () => {}) })) } as unknown as AgentRegistry)
   const subprocess = {} as SubprocessRuntime
   const registry = {
     list: vi.fn(async () => [draft]),
@@ -392,7 +393,57 @@ describe('StudioBackend', () => {
     const created = await studio.call(request('studio.agent.create', { draftId: draft.id }))
     const listed = await studio.call(request('studio.drafts.list', {}))
 
-    expect(created.result).toMatchObject({ ok: true, value: { sessionId: expect.any(String) } })
+    expect(created.result).toMatchObject({ ok: true, value: { sessionId: expect.any(String), source: 'created' } })
     expect(listed.result).toMatchObject({ ok: true, value: [{ agent: created.result.ok ? created.result.value : undefined }] })
+  })
+
+  it('attaches an existing idle session and leaves Studio mode without stopping the Draft', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-studio-backend-'))
+    temporaryDirectories.push(root)
+    const draft = record(root)
+    const cleanup = vi.fn()
+    const agent = {
+      status: 'idle',
+      session: { header: { agentPreset: 'ordinary' } },
+    } as Record<string, unknown>
+    const agentCtx = {
+      agent,
+      inject: vi.fn((_dependencies: string[], callback: (ctx: unknown) => unknown) => {
+        const dispose = callback(agentCtx)
+        return {
+          dispose: vi.fn(async () => { if (typeof dispose === 'function') dispose() }),
+          then: (resolve: (value?: unknown) => unknown) => Promise.resolve(resolve()),
+        }
+      }),
+      tools: {
+        schemas: vi.fn(() => []),
+        restrict: vi.fn(() => cleanup),
+        register: vi.fn(() => cleanup),
+      },
+      systemPrompt: { section: vi.fn(() => cleanup), context: vi.fn(() => cleanup) },
+      skills: { register: vi.fn(() => cleanup) },
+    }
+    agent.ctx = agentCtx
+    const agents = {
+      get: vi.fn(() => agent),
+      resume: vi.fn(),
+    } as unknown as AgentRegistry
+    const studio = backend(draft, undefined, undefined, agents)
+    await studio.call(request('studio.drafts.start', { draftId: draft.id }))
+    await studio.call(request('studio.project.activate', { draftId: draft.id, graphRev: 'graph-1' }))
+
+    const attached = await studio.call(request('studio.agent.attach', {
+      draftId: draft.id,
+      sessionId: 'c33dc5b3-5bcd-4168-bd6b-c86ad54412b1',
+    }))
+    const left = await studio.call(request('studio.agent.leave', { draftId: draft.id }))
+
+    expect(attached.result).toMatchObject({ ok: true, value: {
+      sessionId: 'c33dc5b3-5bcd-4168-bd6b-c86ad54412b1', agentPreset: 'ordinary', source: 'existing',
+    } })
+    expect(left.result).toMatchObject({ ok: true, value: { runtime: { state: 'running' } } })
+    if (left.result.ok) expect(left.result.value).not.toHaveProperty('agent')
+    expect(cleanup).toHaveBeenCalledTimes(11)
+    expect(agents.resume).not.toHaveBeenCalled()
   })
 })

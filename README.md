@@ -56,7 +56,7 @@ not depend on Studio.
 - [x] Reorder and toggle both Harmony providers and individual Patches through one transactional reload
 - [x] Edit Draft source with CodeMirror and protect installed dependency sources as read-only
 - [x] Build, apply through Harmony, reload, and confirm the live Client graph revision
-- [x] Run Draft-scoped DSH Agents with explicit Studio tools
+- [x] Start a Draft-scoped Agent or continue an existing DSH session with temporary Studio tools, skill, and context
 - [x] Check package exports, artifacts, Patch state, ordering, dependencies, and pack output
 - [x] Run multiple isolated Draft Preview Hosts at the same time
 - [x] Snapshot the current WebUI profile or another local profile into each isolated Draft runtime
@@ -79,6 +79,9 @@ The stable Host owns the Studio interface, Draft registry, and Agent sessions.
 Each Draft owns an isolated worktree and child Preview Host. A build becomes
 active only after the Preview confirms the new live Client graph revision.
 Stopping a Draft terminates its child Host but preserves its files and state.
+An existing ordinary DSH session can enter Studio mode without losing its
+history or identity. Leaving Studio removes the scoped Draft tools, skill, and
+context so the session resumes through its ordinary DSH composition.
 
 Studio is served locally at:
 

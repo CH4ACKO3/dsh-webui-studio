@@ -53,7 +53,7 @@ Patch engine 与 service API，并使用
 - [x] 通过一次事务热重载调整 Harmony Provider 与单个 Patch 的顺序和启停状态
 - [x] 使用 CodeMirror 编辑 Draft 源码，并保持已安装依赖源码只读
 - [x] 构建、经 Harmony 应用、重载，并确认实时 Client graph revision
-- [x] 运行带显式 Studio tools 的 Draft 级 DSH Agent
+- [x] 新建 Draft 级 Agent，或让已有 DSH 会话临时挂载 Studio tools、Skill 与上下文后继续工作
 - [x] 检查 package exports、构建产物、Patch 状态、顺序、依赖和 pack 输出
 - [x] 同时运行多个相互隔离的 Draft Preview Host
 - [x] 将当前 WebUI profile 或其它本地 profile 复制到每个 Draft 的隔离运行环境
@@ -75,6 +75,8 @@ flowchart LR
 稳定 Host 负责 Studio 界面、Draft registry 和 Agent session。每个 Draft 拥有隔离的
 worktree 与 child Preview Host。只有在 Preview 确认新的实时 Client graph revision 后，
 构建结果才会激活。停止 Draft 只终止 child Host，不会删除文件和状态。
+已有普通 DSH 会话可以在不丢失历史或会话身份的情况下进入 Studio 模式。退出 Studio
+会移除 Draft 专属的工具、Skill 与上下文，让会话恢复为普通 DSH 组合。
 
 Studio 的本地地址为：
 

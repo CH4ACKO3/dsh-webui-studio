@@ -6,6 +6,7 @@ import '@deepseek-ai/dsh-client-modules'
 import '@deepseek-ai/dsh-agent'
 import '@deepseek-ai/dsh-host-apiproxy'
 import '@deepseek-ai/dsh-host-webserver'
+import '@deepseek-ai/dsh-skill'
 import '@deepseek-ai/dsh-system-prompt'
 import '@deepseek-ai/dsh-subprocess'
 import '@deepseek-ai/dsh-tools'
@@ -18,7 +19,7 @@ import { createStudioRoutes } from './host/routes.js'
 import { StudioWorkspaceStore } from './host/workspace.js'
 
 export const name = 'harmony-studio'
-export const inject = ['harmony', 'agents', 'tools', 'systemPrompt', 'webServer', 'subprocess', 'loader', 'clientModules']
+export const inject = ['harmony', 'agents', 'tools', 'skills', 'systemPrompt', 'webServer', 'subprocess', 'loader', 'clientModules']
 
 export function apply(ctx: Context): void {
   ctx.effect(() => {
