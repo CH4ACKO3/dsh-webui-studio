@@ -100,7 +100,7 @@
   },
   "dependencies": {
     "@phenomnomnominal/tsquery": "^6.2.0",
-    "dsh-harmony": "^0.4.2",
+    "dsh-harmony": "^0.4.3",
     "dsh-harmony-react": "^0.2.1",
     "pnpm": "^10.34.5"
   },
