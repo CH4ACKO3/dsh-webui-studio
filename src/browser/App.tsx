@@ -1,6 +1,5 @@
 import {
   type CSSProperties,
-  FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
@@ -12,7 +11,7 @@ import {
   useState,
 } from 'react'
 import { createPortal } from 'react-dom'
-import type { SessionSummary } from '@deepseek-ai/dsh-host-apiproxy/api'
+import type { HistoryEntry, SessionSummary } from '@deepseek-ai/dsh-host-apiproxy/api'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {
   StudioVariableDefinition,
@@ -75,12 +74,18 @@ import {
   Select,
   Status,
   Tabs,
-  Textarea,
 } from './ui'
 import { CreateDraftDialog } from './CreateDraftDialog'
 import { PluginManagement } from './PluginManagement'
 import { SettingsDialog, SettingsIcon } from './SettingsDialog'
 import { AutomaticPatchDialog, automaticPatchScope } from './AutomaticPatchDialog'
+import { AgentSession } from './AgentSession'
+import {
+  agentStreamingContent,
+  agentQueueItems,
+  type AgentQueueItem,
+  type StudioConversationEntry,
+} from './agent-conversation'
 import {
   boundedBridgeText,
   isBridgeEnvelope,
@@ -90,23 +95,6 @@ import {
   isStudioDomSelection,
   isStudioRegistrySnapshot,
 } from './preview-messages'
-
-interface SessionEvent {
-  type: string
-  seq: number
-  time: number
-  data: Record<string, unknown>
-}
-
-interface HistoryEntry {
-  event: SessionEvent
-}
-
-interface ConversationRow {
-  id: string
-  role: 'user' | 'assistant'
-  text: string
-}
 
 const panels = ['elements', 'selection', 'source', 'build', 'agent'] as const
 type Panel = typeof panels[number]
@@ -627,33 +615,6 @@ function ElementTreeNode({
   </details>
 }
 
-function textFromContent(value: unknown): string {
-  if (!Array.isArray(value)) return ''
-  return value.flatMap(block => {
-    if (typeof block !== 'object' || block === null) return []
-    const candidate = block as { type?: unknown; text?: unknown }
-    return (candidate.type === 'text' || candidate.type === 'reasoning') && typeof candidate.text === 'string'
-      ? [candidate.text]
-      : []
-  }).join('\n')
-}
-
-function conversation(events: SessionEvent[]): ConversationRow[] {
-  const rows: ConversationRow[] = []
-  for (const event of events) {
-    if (event.type === 'user/message') {
-      const text = textFromContent(event.data.content)
-      if (text !== '') rows.push({ id: String(event.seq), role: 'user', text })
-    }
-    if (event.type === 'assistant/message') {
-      const message = event.data.message as { content?: unknown } | undefined
-      const text = textFromContent(message?.content)
-      if (text !== '') rows.push({ id: String(event.seq), role: 'assistant', text })
-    }
-  }
-  return rows
-}
-
 function eventSessionId(envelope: StudioServerRequest<Record<string, unknown>>): string | undefined {
   return typeof envelope.payload.sessionId === 'string' ? envelope.payload.sessionId : undefined
 }
@@ -679,9 +640,11 @@ export function App(): JSX.Element {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [project, setProject] = useState<StudioProjectState>()
   const [sessionId, setSessionId] = useState<string>()
-  const [events, setEvents] = useState<SessionEvent[]>([])
+  const [events, setEvents] = useState<StudioConversationEntry[]>([])
   const [prompt, setPrompt] = useState('')
-  const [streaming, setStreaming] = useState('')
+  const [agentQueues, setAgentQueues] = useState<Record<string, AgentQueueItem[]>>({})
+  const [hasOlderMessages, setHasOlderMessages] = useState(false)
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false)
   const [running, setRunning] = useState(false)
   const [connected, setConnected] = useState(false)
   const [creatingAgentDraftId, setCreatingAgentDraftId] = useState<string>()
@@ -696,7 +659,7 @@ export function App(): JSX.Element {
   const [buildOutputs, setBuildOutputs] = useState<Record<string, StudioBuildOutput>>({})
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string>()
-  const [interaction, setInteraction] = useState<string>()
+  const [agentInteractions, setAgentInteractions] = useState<Record<string, 'approval' | 'question'>>({})
   const [previewVersions, setPreviewVersions] = useState<Record<string, number>>({})
   const [previewMode, setPreviewMode] = useState<'browse' | 'inspect'>('browse')
   const [previewAspectRatio, setPreviewAspectRatio] = useState<PreviewAspectRatio>(
@@ -772,6 +735,10 @@ export function App(): JSX.Element {
   const selectedDraft = drafts.find(draft => draft.id === selectedDraftId)
   const attachedAgentSessionIds = drafts.flatMap(draft => draft.agent === undefined ? [] : [draft.agent.sessionId]).sort().join('\0')
   const selectedAgentSession = agentSessions.find(session => String(session.sessionId) === selectedAgentSessionId)
+  const queuedPrompts = sessionId === undefined ? [] : agentQueues[sessionId] ?? []
+  const interactionKind = sessionId === undefined ? undefined : agentInteractions[sessionId]
+  const interaction = interactionKind === 'approval' ? t('interactionApproval')
+    : interactionKind === 'question' ? t('interactionQuestion') : undefined
   const hasUnsavedSource = filePath !== '' && source !== savedSource
   const selectedInstanceOperation = selectedDraftId === undefined ? undefined : instanceOperations[selectedDraftId]
   const selectedInstanceStarting = selectedInstanceOperation === 'start' || selectedInstanceOperation === 'restart'
@@ -788,7 +755,7 @@ export function App(): JSX.Element {
   const hasLiveDraft = drafts.some(draft => draft.runtime.state === 'starting' || draft.runtime.state === 'running')
   const previewSession = selectedDraft?.runtime.bridgeCapability
   const previewUrl = selectedDraft?.runtime.previewUrl
-  const messages = useMemo(() => conversation(events), [events])
+  const streaming = useMemo(() => agentStreamingContent(events), [events])
   const draftElements = useMemo(() => registry.elements.filter(item => item.owner === selectedDraft?.name), [registry, selectedDraft?.name])
   const draftVariables = useMemo(() => registry.variables.filter(item => item.owner === selectedDraft?.name), [registry, selectedDraft?.name])
   const matchedElement = useMemo(
@@ -847,8 +814,10 @@ export function App(): JSX.Element {
     setPreviewOrigin(origin)
   }
 
-  const activateDraft = (draftId: string | undefined): void => {
+  const activateDraft = (draftId: string | undefined, sourceDrafts = draftsRef.current): void => {
+    const nextSessionId = sourceDrafts.find(draft => draft.id === draftId)?.agent?.sessionId
     draftIdRef.current = draftId
+    sessionRef.current = nextSessionId
     fileRequest.current += 1
     draftViewRequest.current += 1
     packRequest.current += 1
@@ -859,6 +828,12 @@ export function App(): JSX.Element {
     setSavedSource('')
     setReadiness({ findings: [] })
     setSelectedDraftId(draftId)
+    setSessionId(nextSessionId)
+    setEvents([])
+    setHasOlderMessages(false)
+    setLoadingOlderMessages(false)
+    runningVersion.current += 1
+    setRunning(false)
   }
 
   useEffect(() => {
@@ -869,12 +844,6 @@ export function App(): JSX.Element {
     setProject(selectedDraft?.project)
     setDraftLabelInput(selectedDraft?.label ?? '')
     terminalPinnedRef.current = true
-    setSessionId(selectedDraft?.agent?.sessionId)
-    setEvents([])
-    setStreaming('')
-    runningVersion.current += 1
-    setRunning(false)
-    setInteraction(undefined)
   }, [selectedDraftId])
 
   useEffect(() => {
@@ -935,9 +904,10 @@ export function App(): JSX.Element {
       if (!current) return
       const history = apiValue(historyResponse)
       const sessions = apiValue(listResponse)
-      const restored = history.events.map(entry => entry.event as unknown as SessionEvent)
-      setEvents(live => [...restored, ...live.filter(event => !restored.some(item => item.seq === event.seq))]
-        .sort((a, b) => a.seq - b.seq))
+      const restored = history.events as HistoryEntry[]
+      setEvents(live => [...restored, ...live.filter(entry => !restored.some(item => item.event.seq === entry.event.seq))]
+        .sort((a, b) => a.event.seq - b.event.seq))
+      setHasOlderMessages(history.hasMore)
       if (runningVersion.current === initialRunningVersion) {
         setRunning(sessions.items.some(item => item.sessionId === sessionId && item.running))
       }
@@ -1121,7 +1091,7 @@ export function App(): JSX.Element {
     ]).then(([next, workspace]) => {
       setDrafts(next)
       setOpenDraftIds(workspace.openDraftIds)
-      activateDraft(workspace.selectedDraftId)
+      activateDraft(workspace.selectedDraftId, next)
       if (next.length === 0) setCreateDialogOpen(true)
     }).catch(cause => setError(cause instanceof Error ? cause.message : String(cause)))
       .finally(() => setLoadingDrafts(false))
@@ -1155,26 +1125,58 @@ export function App(): JSX.Element {
       || frame.type === 'host/session-status') {
       refreshAgentSessionsRef.current?.()
     }
+    const frameSessionId = eventSessionId(envelope)
+    if (frame.type === 'session/subscribed' && frameSessionId !== undefined) {
+      setAgentInteractions(current => {
+        const next = { ...current }
+        delete next[frameSessionId]
+        return next
+      })
+    }
+    if (frame.type === 'host/session-removed' && frameSessionId !== undefined) {
+      setAgentQueues(current => {
+        const next = { ...current }
+        delete next[frameSessionId]
+        return next
+      })
+      setAgentInteractions(current => {
+        const next = { ...current }
+        delete next[frameSessionId]
+        return next
+      })
+    }
+    if (frame.type === 'session/queue' && frameSessionId !== undefined && Array.isArray(frame.items)) {
+      const items = agentQueueItems(frame.items)
+      setAgentQueues(current => ({ ...current, [frameSessionId]: items }))
+    }
+    if (frameSessionId !== undefined && (frame.type === 'approval/requested' || frame.type === 'question/requested')) {
+      setAgentInteractions(current => ({
+        ...current,
+        [frameSessionId]: frame.type === 'approval/requested' ? 'approval' : 'question',
+      }))
+    }
+    if (frameSessionId !== undefined && (frame.type === 'approval/resolved' || frame.type === 'question/resolved')) {
+      setAgentInteractions(current => {
+        const next = { ...current }
+        delete next[frameSessionId]
+        return next
+      })
+    }
     const current = sessionRef.current
-    if (current === undefined || eventSessionId(envelope) !== current) return
+    if (current === undefined || frameSessionId !== current) return
     if (frame.type === 'host/session-status') {
       runningVersion.current += 1
       setRunning(frame.running === true)
     }
-    if (frame.type === 'approval/requested') setInteraction(t('interactionApproval'))
-    if (frame.type === 'question/requested') setInteraction(t('interactionQuestion'))
-    if (frame.type === 'approval/resolved' || frame.type === 'question/resolved') setInteraction(undefined)
     if (frame.type !== 'session/event' || typeof frame.event !== 'object' || frame.event === null) return
-    const event = frame.event as unknown as SessionEvent
-    if (event.type === 'assistant/chunk') {
-      const chunk = event.data.chunk as { type?: unknown; text?: unknown } | undefined
-      if (chunk?.type === 'text-delta' && typeof chunk.text === 'string') setStreaming(value => value + chunk.text)
-      return
+    const event = frame.event as HistoryEntry['event']
+    const entry: StudioConversationEntry = {
+      event,
+      view: frame.view as HistoryEntry['view'],
     }
-    if (event.type === 'assistant/message') setStreaming('')
-    setEvents(previous => previous.some(item => item.seq === event.seq)
+    setEvents(previous => previous.some(item => item.event.seq === event.seq)
       ? previous
-      : [...previous, event].sort((a, b) => a.seq - b.seq))
+      : [...previous, entry].sort((a, b) => a.event.seq - b.event.seq))
     if (event.type === 'tool/result') {
       const currentDraft = draftIdRef.current
       if (currentDraft === undefined) return
@@ -1298,11 +1300,11 @@ export function App(): JSX.Element {
 
   const clearSelectedRuntime = (draftId: string): void => {
     if (draftIdRef.current !== draftId) return
+    sessionRef.current = undefined
     setSessionId(undefined)
     setEvents([])
-    setStreaming('')
+    setHasOlderMessages(false)
     setRunning(false)
-    setInteraction(undefined)
     setSelection(undefined)
     setReadiness({ findings: [] })
   }
@@ -1826,11 +1828,13 @@ export function App(): JSX.Element {
     const projectName = project?.name ?? 'Draft'
     setCreatingAgentDraftId(draftId)
     setError(undefined)
-    setInteraction(undefined)
     try {
       const result = await callStudio<StudioAgentBinding>('studio.agent.create', { draftId })
       setDrafts(current => current.map(draft => draft.id === draftId ? { ...draft, agent: result } : draft))
-      if (draftIdRef.current === draftId) setSessionId(result.sessionId)
+      if (draftIdRef.current === draftId) {
+        sessionRef.current = result.sessionId
+        setSessionId(result.sessionId)
+      }
       const studioSession = result.sessionId as SessionId
       await studioApi.sessions.rename({ sessionId: studioSession, title: `Studio: ${projectName}` })
     } catch (cause) {
@@ -1845,14 +1849,16 @@ export function App(): JSX.Element {
     const draftId = selectedDraftId
     setAttachingAgentDraftId(draftId)
     setError(undefined)
-    setInteraction(undefined)
     try {
       const result = await callStudio<StudioAgentBinding>('studio.agent.attach', {
         draftId,
         sessionId: selectedAgentSessionId,
       })
       setDrafts(current => current.map(draft => draft.id === draftId ? { ...draft, agent: result } : draft))
-      if (draftIdRef.current === draftId) setSessionId(result.sessionId)
+      if (draftIdRef.current === draftId) {
+        sessionRef.current = result.sessionId
+        setSessionId(result.sessionId)
+      }
     } catch (cause) {
       if (draftIdRef.current === draftId) setError(cause instanceof StudioRpcError ? cause.message : String(cause))
     } finally {
@@ -1869,11 +1875,11 @@ export function App(): JSX.Element {
       const view = await callStudio<StudioDraftView>('studio.agent.leave', { draftId })
       setDrafts(current => current.map(draft => draft.id === draftId ? view : draft))
       if (draftIdRef.current === draftId) {
+        sessionRef.current = undefined
         setSessionId(undefined)
         setEvents([])
-        setStreaming('')
+        setHasOlderMessages(false)
         setRunning(false)
-        setInteraction(undefined)
       }
     } catch (cause) {
       if (draftIdRef.current === draftId) setError(cause instanceof StudioRpcError ? cause.message : String(cause))
@@ -1882,8 +1888,30 @@ export function App(): JSX.Element {
     }
   }
 
-  const sendPrompt = async (event: FormEvent): Promise<void> => {
-    event.preventDefault()
+  const loadOlderAgentMessages = async (): Promise<void> => {
+    const beforeSeq = events[0]?.event.seq
+    if (sessionId === undefined || beforeSeq === undefined || loadingOlderMessages || !hasOlderMessages) return
+    const targetSessionId = sessionId
+    setLoadingOlderMessages(true)
+    try {
+      const page = apiValue(await studioApi.sessions.history({
+        sessionId: targetSessionId as SessionId,
+        beforeSeq,
+        maxMessages: 50,
+      }))
+      if (sessionRef.current !== targetSessionId) return
+      const older = page.events as HistoryEntry[]
+      setEvents(current => [...older, ...current.filter(entry => !older.some(item => item.event.seq === entry.event.seq))]
+        .sort((a, b) => a.event.seq - b.event.seq))
+      setHasOlderMessages(page.hasMore)
+    } catch (cause) {
+      if (sessionRef.current === targetSessionId) setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      if (sessionRef.current === targetSessionId) setLoadingOlderMessages(false)
+    }
+  }
+
+  const sendPrompt = async (): Promise<void> => {
     const text = prompt.trim()
     if (sessionId === undefined || text === '') return
     setSending(true)
@@ -2852,9 +2880,17 @@ export function App(): JSX.Element {
                 onClick={() => void leaveAgent()}>{t('agentLeave')}</Button>}
             </div>
           </div>
-          <p className="agent-scope">{t('agentScope')}</p>
-          <div className="conversation" aria-live="polite">
-            {messages.length === 0 && streaming === '' && <EmptyState className="agent-empty"
+          <div className="agent-mode-strip" data-active={sessionId !== undefined || undefined}>
+            <span><i />{sessionId === undefined ? t('agentNoSession') : t('agentStudioMode')}</span>
+            <p>{t('agentScope')}</p>
+          </div>
+          <AgentSession entries={events} streaming={streaming} queue={queuedPrompts} prompt={prompt}
+            sessionActive={sessionId !== undefined} sending={sending} loadingOlder={loadingOlderMessages}
+            hasOlder={hasOlderMessages} t={t} onPromptChange={setPrompt} onSubmit={() => void sendPrompt()}
+            onLoadOlder={() => void loadOlderAgentMessages()}
+            notice={interaction === undefined ? undefined
+              : <Notice className="interaction-notice" tone="warning">{interaction}</Notice>}
+            empty={<EmptyState className="agent-empty"
               title={project?.state === 'active' ? t('agentStartFromDraft') : t('agentOpenDraftFirst')}
               description={t('agentDescription')}
               action={project?.state === 'active' && sessionId === undefined
@@ -2876,20 +2912,7 @@ export function App(): JSX.Element {
                       onClick={() => void attachAgent()}>{t('agentAttach')}</Button>
                     <small>{t('agentAttachDescription')}</small>
                   </div>
-                : undefined} />}
-            {messages.map(message => <article key={message.id} className={`message ${message.role}`}>
-              <span>{message.role === 'user' ? t('you') : t('panelAgent')}</span><p>{message.text}</p>
-            </article>)}
-            {streaming !== '' && <article className="message assistant streaming"><span>{t('panelAgent')}</span><p>{streaming}</p></article>}
-          </div>
-          {interaction !== undefined && <Notice className="interaction-notice" tone="warning">{interaction}</Notice>}
-          <form className="composer" onSubmit={event => void sendPrompt(event)}>
-            <Textarea aria-label={t('agentMessage')} value={prompt} onChange={event => setPrompt(event.target.value)}
-              placeholder={sessionId === undefined ? t('agentPlaceholderStart') : t('agentPlaceholder')}
-              disabled={sessionId === undefined || sending} rows={3} />
-            <Button variant="primary" type="submit" loading={sending} loadingLabel={t('sending')}
-              disabled={sessionId === undefined || prompt.trim() === ''}>{t('send')}</Button>
-          </form>
+                : undefined} />} />
         </PanelBody>}
       </Panel>
       </aside>
