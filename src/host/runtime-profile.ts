@@ -8,6 +8,7 @@ import type { StudioCommandRunner } from './drafts.js'
 const PROFILE_FILES = ['cordis.patch.yml', 'cordis.yml', 'harmony.json', 'pnpm-workspace.yaml'] as const
 const require = createRequire(import.meta.url)
 const PNPM_ENTRY = join(dirname(require.resolve('pnpm')), 'bin', 'pnpm.cjs')
+const BINDING_PACKAGE_ROOT = dirname(require.resolve('the-binding-of-dsh/package.json'))
 
 interface ProfileManifest {
   dependencies?: Record<string, string>
@@ -120,6 +121,7 @@ export async function materializeDraftProfile(
   )
   dependencies[draft.name] = `link:${draft.root}`
   dependencies['dsh-webui-studio'] = `link:${studioPackageRoot}`
+  dependencies['the-binding-of-dsh'] = `link:${BINDING_PACKAGE_ROOT}`
   await writeFile(join(profileDir, 'package.json'), `${JSON.stringify({ ...manifest, dependencies }, null, 2)}\n`)
   for (const file of PROFILE_FILES) {
     try {

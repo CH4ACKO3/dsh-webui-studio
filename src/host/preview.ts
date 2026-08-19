@@ -1,8 +1,10 @@
-import { randomBytes } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
+import { NodePeerClient } from 'the-binding-of-dsh'
 import type {
   StudioDraftRecord,
   StudioHarmonyProfile,
@@ -12,12 +14,15 @@ import type {
   StudioSourceCandidate,
   StudioSourceLocation,
 } from '../contracts.js'
-import { STUDIO_PREVIEW_API_PATH } from '../contracts.js'
 import type { StudioCommandRunner } from './drafts.js'
+import {
+  STUDIO_PREVIEW_REMOTE,
+  type StudioPreviewWorkerRemote,
+} from './preview-worker.js'
 import { studioPreviewPortPool, type StudioPreviewPortPool } from './preview-port.js'
 import { buildDraft, installDraftDependencies, materializeDraftProfile, terminalCommandLine } from './runtime-profile.js'
 
-const START_TIMEOUT_MS = 30_000
+const START_TIMEOUT_MS = 60_000
 const LOG_LIMIT = 64_000
 
 export interface StudioPreviewRuntime {
@@ -26,17 +31,6 @@ export interface StudioPreviewRuntime {
   bridgeCapability?: string
   error?: string
   log: string
-}
-
-interface WorkerState {
-  project: StudioProjectState
-}
-
-class StudioWorkerResponseError extends Error {
-  constructor(readonly status: number, message: string) {
-    super(message)
-    this.name = 'StudioWorkerResponseError'
-  }
 }
 
 function appendLog(current: string, chunk: Buffer | string): string {
@@ -72,7 +66,7 @@ function waitForExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
 
 export class StudioPreviewSupervisor {
   private child?: ChildProcess
-  private controlToken?: string
+  private peerClient?: NodePeerClient
   private runtime: StudioPreviewRuntime = { state: 'stopped', log: '' }
   private startAbort?: AbortController
   private startPromise?: Promise<StudioPreviewRuntime>
@@ -137,16 +131,13 @@ export class StudioPreviewSupervisor {
       const hostArgs = [this.harmonyBinEntry, 'web', '--port', String(this.previewPort ?? 0)]
       this.runtime.log = appendLog(this.runtime.log,
         `[studio] Profile dependencies ready\n[studio] Starting Preview Host\nDSH_HOME=${this.draft.runtimeHome}\n${terminalCommandLine(this.draft.worktreeDir, process.execPath, hostArgs)}`)
-      const controlToken = randomBytes(32).toString('hex')
       const bridgeCapability = randomBytes(24).toString('base64url')
-      this.controlToken = controlToken
       const child = spawn(process.execPath, hostArgs, {
         cwd: this.draft.worktreeDir,
         env: {
           ...process.env,
           DSH_HOME: this.draft.runtimeHome,
           DSH_STUDIO_PREVIEW_DRAFT_ROOT: this.draft.root,
-          DSH_STUDIO_PREVIEW_CONTROL_TOKEN: controlToken,
           DSH_STUDIO_PREVIEW_PARENT_ORIGIN: this.parentOrigin,
           DSH_STUDIO_PREVIEW_BRIDGE_CAPABILITY: bridgeCapability,
           DSH_STUDIO_PREVIEW_PACKAGE_DIRS: JSON.stringify([dshPackageModules(this.harmonyBinEntry)]),
@@ -159,12 +150,12 @@ export class StudioPreviewSupervisor {
         this.runtime.log = appendLog(this.runtime.log, chunk)
         const match = this.runtime.log.match(/dsh web:\s+(http:\/\/127\.0\.0\.1:\d+)/)
         if (match?.[1] !== undefined) {
+          const { error: _error, ...runtime } = this.runtime
           this.runtime = {
-            ...this.runtime,
+            ...runtime,
             state: 'running',
             previewUrl: `${match[1]}/#dsh-studio-preview=${encodeURIComponent(bridgeCapability)}`,
             bridgeCapability,
-            error: undefined,
           }
         }
       })
@@ -172,17 +163,26 @@ export class StudioPreviewSupervisor {
       child.once('exit', (code, signal) => {
         if (this.child !== child) return
         this.child = undefined
-        this.controlToken = undefined
+        const peerClient = this.peerClient
+        this.peerClient = undefined
+        void peerClient?.close()
         this.releasePreviewPort()
         if (this.runtime.state === 'stopped') return
         const error = `Preview Host exited (${signal ?? code ?? 'unknown'})`
         this.runtime = { state: 'failed', error, log: this.runtime.log }
       })
       await this.waitUntilRunning(child, signal)
+      const peerClient = new NodePeerClient({
+        baseUrl: new URL('/', this.runtime.previewUrl),
+        contribution: STUDIO_PREVIEW_REMOTE,
+      })
+      this.peerClient = peerClient
+      await peerClient.connect(signal)
       await this.waitForWorker(child, signal)
-      await this.worker<WorkerState>('state', {}, signal)
+      await this.invoke(this.remote().state(signal))
       return this.snapshot()
     } catch (error) {
+      await this.closePeer()
       await this.terminateChild()
       if (signal.aborted) {
         this.runtime = { state: 'stopped', log: this.runtime.log }
@@ -196,15 +196,14 @@ export class StudioPreviewSupervisor {
   async stop(): Promise<StudioPreviewRuntime> {
     this.startAbort?.abort(new Error('Preview start canceled'))
     const start = this.startPromise
-    this.controlToken = undefined
     this.runtime = { state: 'stopped', log: this.runtime.log }
+    await this.closePeer()
     await this.terminateChild()
     if (start !== undefined) {
       try {
         await start
       } catch {}
     }
-    this.controlToken = undefined
     this.runtime = { state: 'stopped', log: this.runtime.log }
     return this.snapshot()
   }
@@ -232,35 +231,49 @@ export class StudioPreviewSupervisor {
   }
 
   async state(): Promise<StudioProjectState> {
-    return (await this.worker<WorkerState>('state', {})).project
+    return this.invoke(this.remote().state())
   }
 
   async activate(graphRev: string): Promise<StudioProjectState> {
-    return (await this.worker<WorkerState>('activate', { graphRev })).project
+    return this.invoke(this.remote().activate(graphRev))
   }
 
   async applyBuild(): Promise<StudioProjectState> {
-    return (await this.worker<WorkerState>('apply-build', {})).project
+    const operationId = randomUUID()
+    try {
+      return await this.invoke(this.remote().applyBuild(operationId))
+    } catch (error) {
+      if (!this.isGenerationLoss(error)) throw error
+    }
+    await this.reconnectPeer()
+    return this.invoke(this.remote().applyBuild(operationId))
   }
 
   async inspect(input: { package?: string; file?: string } = {}): Promise<StudioPreviewInspection> {
-    return this.worker<StudioPreviewInspection>('inspect', input)
+    return this.invoke(this.remote().inspect(input))
   }
 
   async profile(): Promise<StudioHarmonyProfile> {
-    return this.worker<StudioHarmonyProfile>('profile', {})
+    return this.invoke(this.remote().profile())
   }
 
   async updateProfile(input: { order?: string[]; patchOrder?: string[]; disabled?: string[] }): Promise<StudioHarmonyProfileUpdateResult> {
-    return this.worker<StudioHarmonyProfileUpdateResult>('update-profile', input)
+    const operation = { ...input, operationId: randomUUID() }
+    try {
+      return await this.invoke(this.remote().updateProfile(operation))
+    } catch (error) {
+      if (!this.isGenerationLoss(error)) throw error
+    }
+    await this.reconnectPeer()
+    return this.invoke(this.remote().updateProfile(operation))
   }
 
   async resolveSource(source: StudioSourceLocation): Promise<StudioSourceCandidate> {
-    return this.worker<StudioSourceCandidate>('resolve-source', { source })
+    return this.invoke(this.remote().resolveSource(source))
   }
 
   async readDependencySource(packageName: string, file: string): Promise<string> {
-    return this.worker<string>('read-source', { package: packageName, file })
+    return this.invoke(this.remote().readSource(packageName, file))
   }
 
   async readPatchTarget(packageName: string, file: string): Promise<{
@@ -269,7 +282,7 @@ export class StudioPreviewSupervisor {
     version: string
     source: string
   }> {
-    return this.worker('read-patch-target', { package: packageName, file })
+    return this.invoke(this.remote().readPatchTarget(packageName, file))
   }
 
   async dispose(): Promise<void> {
@@ -282,44 +295,68 @@ export class StudioPreviewSupervisor {
       await this.delay(50, signal)
     }
     signal.throwIfAborted()
-    if (this.runtime.state !== 'running') throw new Error(this.runtime.error ?? 'Preview Host did not publish its URL before timeout')
+    if (this.runtime.state !== 'running') {
+      throw new Error(`${this.runtime.error ?? 'Preview Host did not publish its URL before timeout'}\n${this.runtime.log}`)
+    }
   }
 
   private async waitForWorker(child: ChildProcess, signal: AbortSignal): Promise<void> {
     const started = Date.now()
-    let lastError = 'worker route was not reachable'
+    let lastError = 'Preview worker is still preparing the Draft'
     while (this.child === child && Date.now() - started < START_TIMEOUT_MS) {
       try {
         const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(1_000)])
-        await this.worker<{ ready: true }>('health', {}, requestSignal)
-        return
+        const health = await this.invoke(this.remote().health(requestSignal))
+        if (health.ready) return
+        if (health.error !== undefined) throw new Error(health.error)
       } catch (error) {
         signal.throwIfAborted()
-        if (error instanceof StudioWorkerResponseError && error.status !== 503) throw error
         lastError = error instanceof Error ? error.message : String(error)
-        await this.delay(50, signal)
       }
+      await this.delay(50, signal)
     }
     signal.throwIfAborted()
     throw new Error(`Preview worker did not become ready before timeout: ${lastError}`)
   }
 
-  private async worker<T>(method: string, payload: unknown, signal?: AbortSignal): Promise<T> {
-    if (this.runtime.previewUrl === undefined || this.controlToken === undefined) throw new Error('Preview Host is not running')
-    const endpoint = new URL(`${STUDIO_PREVIEW_API_PATH}/${method}`, this.runtime.previewUrl)
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${this.controlToken}`, 'content-type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal,
-    })
-    const text = await response.text()
-    if (text === '') throw new Error(`Preview worker returned an empty HTTP ${response.status} response`)
-    const body = JSON.parse(text) as { ok: true; value: T } | { ok: false; error: string }
-    if (!response.ok || !body.ok) {
-      throw new StudioWorkerResponseError(response.status, body.ok ? `Preview worker failed with HTTP ${response.status}` : body.error)
+  private remote(): StudioPreviewWorkerRemote {
+    if (this.peerClient === undefined) throw new Error('Preview Host is not running')
+    return (this.peerClient.remote as unknown as { studioPreviewWorker: StudioPreviewWorkerRemote }).studioPreviewWorker
+  }
+
+  private async invoke<T>(result: Promise<RemoteResult<T>>): Promise<T> {
+    const settled = await result
+    if (settled.ok) return settled.value
+    throw new Error(`${settled.error.code}: ${settled.error.message}`)
+  }
+
+  private async closePeer(): Promise<void> {
+    const peerClient = this.peerClient
+    this.peerClient = undefined
+    await peerClient?.close()
+  }
+
+  private isGenerationLoss(error: unknown): boolean {
+    return error instanceof Error && error.message.includes('Node peer connection closed')
+  }
+
+  private async reconnectPeer(): Promise<void> {
+    const peerClient = this.peerClient
+    if (peerClient === undefined || this.runtime.state !== 'running') {
+      throw new Error('Preview Host is not running')
     }
-    return body.value
+    const signal = AbortSignal.timeout(START_TIMEOUT_MS)
+    let lastError: unknown
+    while (!signal.aborted) {
+      try {
+        await peerClient.connect(signal)
+        return
+      } catch (error) {
+        lastError = error
+      }
+      await this.delay(50, signal)
+    }
+    throw new Error('Preview peer did not reconnect after Harmony reload', { cause: lastError })
   }
 
   private async delay(milliseconds: number, signal: AbortSignal): Promise<void> {

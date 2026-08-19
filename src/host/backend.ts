@@ -8,7 +8,6 @@ import type {
   StudioAutomaticPatchPlan,
   StudioAutomaticPatchRequest,
   StudioAutomaticPatchWriteResult,
-  StudioClientRequest,
   StudioCreateDraftInput,
   StudioDraftRecord,
   StudioDraftView,
@@ -22,13 +21,12 @@ import type {
   StudioProjectFile,
   StudioProjectState,
   StudioReadinessReport,
-  StudioServerResponse,
   StudioSourceLocation,
   StudioWorkspaceState,
 } from '../contracts.js'
 import { StudioAgentController, type StudioAgentWorkspace } from './agent.js'
 import { analyzeAutomaticPatch, writeAutomaticPatch } from './automatic-patch.js'
-import { StudioBuildError, StudioBuildRunner } from './build.js'
+import { StudioBuildRunner } from './build.js'
 import type { StudioCommandRunner, StudioDraftRegistry } from './drafts.js'
 import { readElementsStyles, saveElementsSource } from './element-source.js'
 import { StudioPreviewSupervisor } from './preview.js'
@@ -36,14 +34,6 @@ import { applyProjectPatch, listProjectFiles, readProjectFile, writeProjectFile 
 import { inspectReadiness, StudioPackRunner } from './readiness.js'
 import { assertDraftPackageIdentity, installDraftDependencies } from './runtime-profile.js'
 import type { StudioWorkspaceStore } from './workspace.js'
-
-function failure<T = never>(rpcId: string, code: string, message: string, details: unknown = {}): StudioServerResponse<T> {
-  return { type: 'server-response', rpcId, result: { ok: false, error: { code, message, details } } }
-}
-
-function success<T>(rpcId: string, value: T): StudioServerResponse<T> {
-  return { type: 'server-response', rpcId, result: { ok: true, value } }
-}
 
 function objectPayload(payload: unknown): Record<string, unknown> {
   if (typeof payload !== 'object' || payload === null) throw new Error('request payload must be an object')
@@ -378,118 +368,163 @@ export class StudioBackend {
     private readonly parentOrigin: string,
   ) {}
 
-  async call(message: StudioClientRequest): Promise<StudioServerResponse> {
-    const { method, payload, rpcId } = message
-    try {
-      if (method === 'studio.drafts.list') return success(rpcId, await this.list())
-      if (method === 'studio.drafts.create') return success(rpcId, await this.create(payload))
-      if (method === 'studio.workspace.get') {
-        const records = await this.registry.list()
-        return success(rpcId, await this.workspace.read(records.map(record => record.id)))
-      }
-      if (method === 'studio.workspace.update') {
-        const records = await this.registry.list()
-        return success(rpcId, await this.workspace.write(
-          objectPayload(payload) as unknown as StudioWorkspaceState,
-          records.map(record => record.id),
-        ))
-      }
-      const controller = await this.controller(draftId(payload))
-      if (method === 'studio.drafts.harmony.profile') return success(rpcId, await controller.profile())
-      if (method === 'studio.drafts.harmony.inspect') return success(rpcId, await controller.inspectHarmony({}))
-      if (method === 'studio.drafts.harmony.updateProfile') {
-        const input = objectPayload(payload)
-        const order = optionalStringList(input.order, 'order')
-        const patchOrder = optionalStringList(input.patchOrder, 'patchOrder')
-        const disabled = optionalStringList(input.disabled, 'disabled')
-        const update: { order?: string[]; patchOrder?: string[]; disabled?: string[] } = {
-          ...(order === undefined ? {} : { order }),
-          ...(patchOrder === undefined ? {} : { patchOrder }),
-          ...(disabled === undefined ? {} : { disabled }),
-        }
-        return success<StudioHarmonyProfileUpdateResult>(rpcId, await controller.updateProfile(update))
-      }
-      if (method === 'studio.drafts.rename') {
-        const label = objectPayload(payload).label
-        if (typeof label !== 'string') throw new Error('Draft name is required')
-        const record = await this.registry.rename(controller.record.id, label)
-        controller.record = record
-        return success(rpcId, controller.view())
-      }
-      if (method === 'studio.drafts.export') {
-        const record = await this.registry.export(controller.record.id)
-        controller.record = record
-        return success(rpcId, controller.view())
-      }
-      if (method === 'studio.drafts.start') return success(rpcId, await controller.start())
-      if (method === 'studio.drafts.stop') return success(rpcId, await controller.stop())
-      if (method === 'studio.project.state') return success(rpcId, await controller.refreshProject())
-      if (method === 'studio.project.activate') {
-        const graphRev = objectPayload(payload).graphRev
-        if (typeof graphRev !== 'string') throw new Error('graphRev is required')
-        return success(rpcId, await controller.activate(graphRev))
-      }
-      if (method === 'studio.project.files') return success(rpcId, await listProjectFiles(controller.record.root))
-      if (method === 'studio.project.readFile') {
-        const path = objectPayload(payload).path
-        if (typeof path !== 'string') throw new Error('path is required')
-        return success(rpcId, { path, content: await controller.readFile(path) })
-      }
-      if (method === 'studio.project.writeFile') {
-        const { path, content } = objectPayload(payload)
-        if (typeof path !== 'string' || typeof content !== 'string') throw new Error('path and content are required')
-        await writeProjectFile(controller.record.root, path, content)
-        return success(rpcId, { path, saved: true })
-      }
-      if (method === 'studio.elements.styles') return success(rpcId, await controller.readElementStyles())
-      if (method === 'studio.elements.saveSource') return success(rpcId, await controller.saveElementSource(elementStyleSources(payload)))
-      if (method === 'studio.patches.analyzeAutomatic') {
-        return success(rpcId, await controller.analyzeAutomaticPatch(automaticPatchRequest(payload)))
-      }
-      if (method === 'studio.patches.createAutomatic') {
-        return success(rpcId, await controller.createAutomaticPatch(automaticPatchRequest(payload)))
-      }
-      if (method === 'studio.project.build') return success(rpcId, await controller.build(new AbortController().signal))
-      if (method === 'studio.project.cancelBuild') return success(rpcId, { canceled: await controller.cancelBuild() })
-      if (method === 'studio.readiness.inspect') return success(rpcId, await controller.readiness())
-      if (method === 'studio.readiness.pack') return success(rpcId, await controller.pack())
-      if (method === 'studio.harmony.inspect') {
-        const input = objectPayload(payload)
-        return success(rpcId, await controller.inspectHarmony({
-          ...(typeof input.package === 'string' ? { package: input.package } : {}),
-          ...(typeof input.file === 'string' ? { file: input.file } : {}),
-        }))
-      }
-      if (method === 'studio.preview.status') return success(rpcId, controller.previewStatus())
-      if (method === 'studio.preview.update') return success(rpcId, controller.updatePreview(this.previewStatus(payload)))
-      if (method === 'studio.preview.resolveSource') {
-        const source = objectPayload(payload).source as Partial<StudioSourceLocation> | undefined
-        if (typeof source?.file !== 'string') throw new Error('source is required')
-        return success(rpcId, await controller.resolveSource(source as StudioSourceLocation))
-      }
-      if (method === 'studio.agent.create') {
-        const preset = objectPayload(payload).agentPreset
-        if (preset !== undefined && typeof preset !== 'string') throw new Error('agentPreset must be a string')
-        return success(rpcId, await controller.createAgent(preset))
-      }
-      if (method === 'studio.agent.attach') {
-        const sessionId = objectPayload(payload).sessionId
-        if (typeof sessionId !== 'string' || sessionId.trim() === '') throw new Error('sessionId is required')
-        const other = [...this.controllers.entries()].find(([draftId, candidate]) => (
-          draftId !== controller.record.id && candidate.view().agent?.sessionId === sessionId
-        ))
-        if (other !== undefined) throw new Error('the selected session is already attached to another Draft')
-        return success(rpcId, await controller.attachAgent(sessionId))
-      }
-      if (method === 'studio.agent.leave') {
-        return success(rpcId, await controller.leaveAgent())
-      }
-      return failure(rpcId, 'studio-method-forbidden', `method ${method} is not exposed by Studio`)
-    } catch (error) {
-      const code = error instanceof StudioBuildError ? error.code : 'studio-request-failed'
-      const details = error instanceof StudioBuildError ? error.output : undefined
-      return failure(rpcId, code, error instanceof Error ? error.message : String(error), details)
-    }
+  draftsList(): Promise<StudioDraftView[]> {
+    return this.list()
+  }
+
+  draftsCreate(input: StudioCreateDraftInput): Promise<StudioDraftView> {
+    return this.create(input)
+  }
+
+  async workspaceGet(): Promise<StudioWorkspaceState> {
+    const records = await this.registry.list()
+    return this.workspace.read(records.map(record => record.id))
+  }
+
+  async workspaceUpdate(input: StudioWorkspaceState): Promise<StudioWorkspaceState> {
+    const records = await this.registry.list()
+    return this.workspace.write(input, records.map(record => record.id))
+  }
+
+  async harmonyProfile(input: { draftId: string }): Promise<StudioHarmonyProfile> {
+    return (await this.controller(draftId(input))).profile()
+  }
+
+  async harmonyInspect(input: { draftId: string; package?: string; file?: string }): Promise<StudioHarmonyInspection> {
+    const controller = await this.controller(draftId(input))
+    return controller.inspectHarmony({
+      ...(input.package === undefined ? {} : { package: input.package }),
+      ...(input.file === undefined ? {} : { file: input.file }),
+    })
+  }
+
+  async harmonyUpdateProfile(input: {
+    draftId: string
+    order?: string[]
+    patchOrder?: string[]
+    disabled?: string[]
+  }): Promise<StudioHarmonyProfileUpdateResult> {
+    const controller = await this.controller(draftId(input))
+    const order = optionalStringList(input.order, 'order')
+    const patchOrder = optionalStringList(input.patchOrder, 'patchOrder')
+    const disabled = optionalStringList(input.disabled, 'disabled')
+    return controller.updateProfile({
+      ...(order === undefined ? {} : { order }),
+      ...(patchOrder === undefined ? {} : { patchOrder }),
+      ...(disabled === undefined ? {} : { disabled }),
+    })
+  }
+
+  async draftsRename(input: { draftId: string; label: string }): Promise<StudioDraftView> {
+    const controller = await this.controller(draftId(input))
+    if (typeof input.label !== 'string') throw new Error('Draft name is required')
+    controller.record = await this.registry.rename(controller.record.id, input.label)
+    return controller.view()
+  }
+
+  async draftsExport(input: { draftId: string }): Promise<StudioDraftView> {
+    const controller = await this.controller(draftId(input))
+    controller.record = await this.registry.export(controller.record.id)
+    return controller.view()
+  }
+
+  async draftsStart(input: { draftId: string }): Promise<StudioDraftView> {
+    return (await this.controller(draftId(input))).start()
+  }
+
+  async draftsStop(input: { draftId: string }): Promise<StudioDraftView> {
+    return (await this.controller(draftId(input))).stop()
+  }
+
+  async projectState(input: { draftId: string }): Promise<StudioProjectState> {
+    return (await this.controller(draftId(input))).refreshProject()
+  }
+
+  async projectActivate(input: { draftId: string; graphRev: string }): Promise<StudioProjectState> {
+    if (typeof input.graphRev !== 'string') throw new Error('graphRev is required')
+    return (await this.controller(draftId(input))).activate(input.graphRev)
+  }
+
+  async projectFiles(input: { draftId: string }): Promise<StudioProjectFile[]> {
+    const controller = await this.controller(draftId(input))
+    return listProjectFiles(controller.record.root)
+  }
+
+  async projectReadFile(input: { draftId: string; path: string }): Promise<{ path: string; content: string }> {
+    if (typeof input.path !== 'string') throw new Error('path is required')
+    const controller = await this.controller(draftId(input))
+    return { path: input.path, content: await controller.readFile(input.path) }
+  }
+
+  async projectWriteFile(input: { draftId: string; path: string; content: string }): Promise<{ path: string; saved: true }> {
+    if (typeof input.path !== 'string' || typeof input.content !== 'string') throw new Error('path and content are required')
+    const controller = await this.controller(draftId(input))
+    await writeProjectFile(controller.record.root, input.path, input.content)
+    return { path: input.path, saved: true }
+  }
+
+  async elementsStyles(input: { draftId: string }): Promise<StudioElementStyleSource[]> {
+    return (await this.controller(draftId(input))).readElementStyles()
+  }
+
+  async elementsSaveSource(input: { draftId: string; styles: StudioElementStyleSource[] }): Promise<{ files: string[] }> {
+    return (await this.controller(draftId(input))).saveElementSource(elementStyleSources(input))
+  }
+
+  async patchesAnalyzeAutomatic(input: StudioAutomaticPatchRequest & { draftId: string }): Promise<StudioAutomaticPatchPlan> {
+    return (await this.controller(draftId(input))).analyzeAutomaticPatch(automaticPatchRequest(input))
+  }
+
+  async patchesCreateAutomatic(input: StudioAutomaticPatchRequest & { draftId: string }): Promise<StudioAutomaticPatchWriteResult> {
+    return (await this.controller(draftId(input))).createAutomaticPatch(automaticPatchRequest(input))
+  }
+
+  async projectBuild(input: { draftId: string }, signal: AbortSignal): Promise<StudioBuildResult> {
+    return (await this.controller(draftId(input))).build(signal)
+  }
+
+  async projectCancelBuild(input: { draftId: string }): Promise<{ canceled: boolean }> {
+    return { canceled: await (await this.controller(draftId(input))).cancelBuild() }
+  }
+
+  async readinessInspect(input: { draftId: string }): Promise<StudioReadinessReport> {
+    return (await this.controller(draftId(input))).readiness()
+  }
+
+  async readinessPack(input: { draftId: string }): Promise<StudioReadinessReport> {
+    return (await this.controller(draftId(input))).pack()
+  }
+
+  async previewStatus(input: { draftId: string }): Promise<StudioPreviewStatus> {
+    return (await this.controller(draftId(input))).previewStatus()
+  }
+
+  async previewUpdate(input: StudioPreviewUpdate & { draftId: string }): Promise<StudioPreviewStatus> {
+    return (await this.controller(draftId(input))).updatePreview(this.parsePreviewStatus(input))
+  }
+
+  async previewResolveSource(input: { draftId: string; source: StudioSourceLocation }) {
+    if (typeof input.source?.file !== 'string') throw new Error('source is required')
+    return (await this.controller(draftId(input))).resolveSource(input.source)
+  }
+
+  async agentCreate(input: { draftId: string; agentPreset?: string }): Promise<StudioAgentBinding> {
+    if (input.agentPreset !== undefined && typeof input.agentPreset !== 'string') throw new Error('agentPreset must be a string')
+    return (await this.controller(draftId(input))).createAgent(input.agentPreset)
+  }
+
+  async agentAttach(input: { draftId: string; sessionId: string }): Promise<StudioAgentBinding> {
+    const controller = await this.controller(draftId(input))
+    if (typeof input.sessionId !== 'string' || input.sessionId.trim() === '') throw new Error('sessionId is required')
+    const other = [...this.controllers.entries()].find(([id, candidate]) => (
+      id !== controller.record.id && candidate.view().agent?.sessionId === input.sessionId
+    ))
+    if (other !== undefined) throw new Error('the selected session is already attached to another Draft')
+    return controller.attachAgent(input.sessionId)
+  }
+
+  async agentLeave(input: { draftId: string }): Promise<StudioDraftView> {
+    return (await this.controller(draftId(input))).leaveAgent()
   }
 
   async dispose(): Promise<void> {
@@ -548,7 +583,7 @@ export class StudioBackend {
     return controller
   }
 
-  private previewStatus(payload: unknown): StudioPreviewUpdate {
+  private parsePreviewStatus(payload: unknown): StudioPreviewUpdate {
     const candidate = objectPayload(payload) as unknown as Partial<StudioPreviewUpdate>
     if (typeof candidate.connected !== 'boolean' || (candidate.mode !== 'browse' && candidate.mode !== 'inspect')
       || (candidate.graphRev !== undefined && typeof candidate.graphRev !== 'string')) {

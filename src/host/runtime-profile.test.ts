@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { StudioDraftRecord } from '../contracts.js'
@@ -9,6 +10,8 @@ import { buildDraft, bundledPnpmCommand, installDraftDependencies, materializeDr
 
 const roots: string[] = []
 const exec = promisify(execFile)
+const require = createRequire(import.meta.url)
+const bindingRoot = dirname(require.resolve('the-binding-of-dsh/package.json'))
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
@@ -42,6 +45,7 @@ it('snapshots main profile declarations and links the Draft worktree', async () 
   expect(manifest.dependencies).toEqual({
     existing: `link:${join(root, 'plugin')}`,
     'dsh-webui-studio': `link:${studioRoot}`,
+    'the-binding-of-dsh': `link:${bindingRoot}`,
     'draft-plugin': `link:${draftRoot}`,
   })
   expect(manifest.dsh.profile.bundles).toEqual(['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'])
@@ -92,6 +96,7 @@ it('snapshots a selected custom profile and resolves its relative links from tha
     'custom-only': `link:${linkedPlugin}`,
     'draft-plugin': `link:${draftRoot}`,
     'dsh-webui-studio': `link:${studioRoot}`,
+    'the-binding-of-dsh': `link:${bindingRoot}`,
   })
   expect(await readFile(join(profile, 'cordis.yml'), 'utf8')).toBe('custom: true\n')
 })

@@ -5,3 +5,6 @@
     - id: harmony-studio-runtime
       name: dsh-harmony
       disabled: !!js process.env.DSH_HARMONY_ACTIVE === '1'
+    - id: harmony-studio-binding
+      name: the-binding-of-dsh
+      inject: [harmony]

@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import type { Context } from '@deepseek-ai/cordis'
 import '@deepseek-ai/cordis-plugin-loader'
@@ -16,10 +15,11 @@ import { StudioBackend } from './host/backend.js'
 import { dshHomeFromProfile, StudioDraftRegistry, studioCommands } from './host/drafts.js'
 import { applyPreviewWorker } from './host/preview-worker.js'
 import { createStudioRoutes } from './host/routes.js'
+import { STUDIO_LOCAL, StudioService } from './host/studio-service.js'
 import { StudioWorkspaceStore } from './host/workspace.js'
 
 export const name = 'harmony-studio'
-export const inject = ['harmony', 'agents', 'tools', 'skills', 'systemPrompt', 'webServer', 'subprocess', 'loader', 'clientModules']
+export const inject = ['harmony', 'agents', 'tools', 'skills', 'systemPrompt', 'webServer', 'subprocess', 'loader', 'clientModules', 'typert']
 
 export function apply(ctx: Context): void {
   ctx.effect(() => {
@@ -37,11 +37,10 @@ export function apply(ctx: Context): void {
     }
     const previewRoot = process.env.DSH_STUDIO_PREVIEW_DRAFT_ROOT
     if (previewRoot !== undefined) {
-      const controlToken = process.env.DSH_STUDIO_PREVIEW_CONTROL_TOKEN
       const parentOrigin = process.env.DSH_STUDIO_PREVIEW_PARENT_ORIGIN
       const bridgeCapability = process.env.DSH_STUDIO_PREVIEW_BRIDGE_CAPABILITY
       const packageDirsSource = process.env.DSH_STUDIO_PREVIEW_PACKAGE_DIRS
-      if (controlToken === undefined || parentOrigin === undefined || bridgeCapability === undefined || packageDirsSource === undefined) {
+      if (parentOrigin === undefined || bridgeCapability === undefined || packageDirsSource === undefined) {
         throw new Error('harmony-studio: Preview worker environment is incomplete')
       }
       const packageDirs = JSON.parse(packageDirsSource) as unknown
@@ -51,14 +50,12 @@ export function apply(ctx: Context): void {
       applyPreviewWorker(ctx, harmony, {
         root: previewRoot,
         packageDirs,
-        controlToken,
         parentOrigin,
         bridgeCapability,
         bridge: assets.bridge,
       })
       return () => {}
     }
-    const token = randomBytes(32).toString('hex')
     const host = `127.0.0.1:${ctx.webServer.port}`
     const dshHome = dshHomeFromProfile(harmony.profileDir)
     const backend = new StudioBackend(
@@ -70,8 +67,10 @@ export function apply(ctx: Context): void {
       studioCommands,
       `http://${host}`,
     )
+    new StudioService(ctx, backend)
     const dispose = [
-      ...createStudioRoutes(backend, assets, { token, host, origin: `http://${host}` }).map(route => ctx.webServer.register(route)),
+      ctx.typert.register(STUDIO_LOCAL),
+      ...createStudioRoutes(assets).map(route => ctx.webServer.register(route)),
       ctx.webServer.tapIndex(html => {
         const script = `<script src="${STUDIO_PATH}/bridge.js"></script>`
         const head = html.indexOf('<head>')

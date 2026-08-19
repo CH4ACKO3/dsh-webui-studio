@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import type { AgentRegistry } from '@deepseek-ai/dsh-agent'
 import type { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { StudioClientRequest, StudioDraftRecord, StudioHarmonyService } from '../contracts.js'
+import type { StudioDraftRecord, StudioHarmonyService } from '../contracts.js'
 import { StudioBackend } from './backend.js'
 import type { StudioCommandRunner, StudioDraftRegistry } from './drafts.js'
 import type { StudioWorkspaceStore } from './workspace.js'
@@ -55,10 +55,6 @@ const temporaryDirectories: string[] = []
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map(directory => rm(directory, { recursive: true, force: true })))
 })
-
-function request(method: string, payload: unknown): StudioClientRequest {
-  return { type: 'client-request', rpcId: 'rpc-1', method, payload }
-}
 
 function record(root: string): StudioDraftRecord {
   return {
@@ -113,23 +109,23 @@ describe('StudioBackend', () => {
     previewState.updateProfile.mockClear()
     const studio = backend(draft)
 
-    const current = await studio.call(request('studio.drafts.harmony.profile', { draftId: draft.id }))
-    const updated = await studio.call(request('studio.drafts.harmony.updateProfile', {
+    const current = await studio.harmonyProfile({ draftId: draft.id })
+    const updated = await studio.harmonyUpdateProfile({
       draftId: draft.id,
       order: ['dsh-harmony', draft.name],
       patchOrder: [`${draft.name}/one`],
       disabled: [`${draft.name}/*`],
-    }))
+    })
 
-    expect(current.result).toMatchObject({ ok: true, value: { dir: '/draft/profiles/web', disabled: [] } })
+    expect(current).toMatchObject({ dir: '/draft/profiles/web', disabled: [] })
     expect(previewState.updateProfile).toHaveBeenCalledWith({
       order: ['dsh-harmony', draft.name],
       patchOrder: [`${draft.name}/one`],
       disabled: [`${draft.name}/*`],
     })
-    expect(updated.result).toMatchObject({ ok: true, value: {
+    expect(updated).toMatchObject({
       profile: { disabled: [`${draft.name}/*`] }, generation: 2, clientGraphRev: 'graph-2',
-    } })
+    })
   })
 
   it('rejects malformed Draft Preview profile updates before calling the worker', async () => {
@@ -137,12 +133,12 @@ describe('StudioBackend', () => {
     temporaryDirectories.push(root)
     const draft = record(root)
     previewState.updateProfile.mockClear()
-    const response = await backend(draft).call(request('studio.drafts.harmony.updateProfile', {
+    const response = backend(draft).harmonyUpdateProfile({
       draftId: draft.id,
-      disabled: ['plugin-a/*', 1],
-    }))
+      disabled: ['plugin-a/*', 1] as unknown as string[],
+    })
 
-    expect(response.result).toMatchObject({ ok: false, error: { message: 'disabled must be an array of non-empty strings' } })
+    await expect(response).rejects.toThrow('disabled must be an array of non-empty strings')
     expect(previewState.updateProfile).not.toHaveBeenCalled()
   })
 
@@ -151,14 +147,14 @@ describe('StudioBackend', () => {
     temporaryDirectories.push(root)
     const studio = backend(record(root))
 
-    const listed = await studio.call(request('studio.drafts.list', {}))
-    const started = await studio.call(request('studio.drafts.start', { draftId: record(root).id }))
+    const listed = await studio.draftsList()
+    const started = await studio.draftsStart({ draftId: record(root).id })
 
-    expect(listed.result).toMatchObject({ ok: true, value: [{ runtime: { state: 'stopped' } }] })
-    expect(started.result).toMatchObject({ ok: true, value: {
+    expect(listed).toMatchObject([{ runtime: { state: 'stopped' } }])
+    expect(started).toMatchObject({
       runtime: { state: 'running', previewUrl: 'http://127.0.0.1:4000/' },
       project: { state: 'preview-pending', graphRev: 'graph-1' },
-    } })
+    })
   })
 
   it('creates one controller for concurrent first access to a persistent Draft', async () => {
@@ -169,11 +165,11 @@ describe('StudioBackend', () => {
     const studio = backend(draft, get)
 
     const responses = await Promise.all([
-      studio.call(request('studio.drafts.start', { draftId: draft.id })),
-      studio.call(request('studio.drafts.start', { draftId: draft.id })),
+      studio.draftsStart({ draftId: draft.id }),
+      studio.draftsStart({ draftId: draft.id }),
     ])
 
-    expect(responses.every(response => response.result.ok)).toBe(true)
+    expect(responses.every(response => response.runtime.state === 'running')).toBe(true)
     expect(get).toHaveBeenCalledTimes(1)
   })
 
@@ -183,14 +179,14 @@ describe('StudioBackend', () => {
     const draft = record(root)
     const studio = backend(draft)
 
-    const renamed = await studio.call(request('studio.drafts.rename', {
+    const renamed = await studio.draftsRename({
       draftId: draft.id,
       label: 'Header experiment',
-    }))
-    const listed = await studio.call(request('studio.drafts.list', {}))
+    })
+    const listed = await studio.draftsList()
 
-    expect(renamed.result).toMatchObject({ ok: true, value: { name: 'draft-plugin', label: 'Header experiment' } })
-    expect(listed.result).toMatchObject({ ok: true, value: [{ name: 'draft-plugin', label: 'Header experiment' }] })
+    expect(renamed).toMatchObject({ name: 'draft-plugin', label: 'Header experiment' })
+    expect(listed).toMatchObject([{ name: 'draft-plugin', label: 'Header experiment' }])
   })
 
   it('reads and updates the persistent workspace without requiring a Draft id', async () => {
@@ -199,14 +195,14 @@ describe('StudioBackend', () => {
     const draft = record(root)
     const studio = backend(draft)
 
-    const initial = await studio.call(request('studio.workspace.get', {}))
-    const updated = await studio.call(request('studio.workspace.update', {
+    const initial = await studio.workspaceGet()
+    const updated = await studio.workspaceUpdate({
       openDraftIds: [draft.id],
       selectedDraftId: draft.id,
-    }))
+    })
 
-    expect(initial.result).toEqual({ ok: true, value: { openDraftIds: [] } })
-    expect(updated.result).toEqual({ ok: true, value: { openDraftIds: [draft.id], selectedDraftId: draft.id } })
+    expect(initial).toEqual({ openDraftIds: [] })
+    expect(updated).toEqual({ openDraftIds: [draft.id], selectedDraftId: draft.id })
   })
 
   it('routes activation and Preview selection by Draft id', async () => {
@@ -214,7 +210,7 @@ describe('StudioBackend', () => {
     temporaryDirectories.push(root)
     const draft = record(root)
     const studio = backend(draft)
-    await studio.call(request('studio.drafts.start', { draftId: draft.id }))
+    await studio.draftsStart({ draftId: draft.id })
     const selection = {
       tag: 'button', classes: ['save'], attributes: {}, text: 'Save', outerHTML: '<button>Save</button>',
       rect: { x: 0, y: 0, width: 40, height: 20 }, style: {}, boundaries: [], confidence: 'dom-only',
@@ -231,19 +227,19 @@ describe('StudioBackend', () => {
       variables: [],
     }
 
-    const active = await studio.call(request('studio.project.activate', { draftId: draft.id, graphRev: 'graph-1' }))
-    await studio.call(request('studio.preview.update', {
+    const active = await studio.projectActivate({ draftId: draft.id, graphRev: 'graph-1' })
+    await studio.previewUpdate({
       draftId: draft.id, connected: true, mode: 'inspect', selection, registry,
-    }))
-    const connected = await studio.call(request('studio.preview.status', { draftId: draft.id }))
-    await studio.call(request('studio.preview.update', {
+    })
+    const connected = await studio.previewStatus({ draftId: draft.id })
+    await studio.previewUpdate({
       draftId: draft.id, connected: false, mode: 'browse', selection: null, registry: null,
-    }))
-    const disconnected = await studio.call(request('studio.preview.status', { draftId: draft.id }))
+    })
+    const disconnected = await studio.previewStatus({ draftId: draft.id })
 
-    expect(active.result).toMatchObject({ ok: true, value: { state: 'active' } })
-    expect(connected.result).toMatchObject({ ok: true, value: { selection, registry } })
-    expect(disconnected.result).toEqual({ ok: true, value: { connected: false, mode: 'browse' } })
+    expect(active).toMatchObject({ state: 'active' })
+    expect(connected).toMatchObject({ selection, registry })
+    expect(disconnected).toEqual({ connected: false, mode: 'browse' })
   })
 
   it('reads and writes files in the selected Draft worktree', async () => {
@@ -254,11 +250,11 @@ describe('StudioBackend', () => {
     const draft = record(root)
     const studio = backend(draft)
 
-    const read = await studio.call(request('studio.project.readFile', { draftId: draft.id, path: 'src/index.ts' }))
-    const saved = await studio.call(request('studio.project.writeFile', { draftId: draft.id, path: 'src/index.ts', content: 'after\n' }))
+    const read = await studio.projectReadFile({ draftId: draft.id, path: 'src/index.ts' })
+    const saved = await studio.projectWriteFile({ draftId: draft.id, path: 'src/index.ts', content: 'after\n' })
 
-    expect(read.result).toMatchObject({ ok: true, value: { content: 'before\n' } })
-    expect(saved.result).toMatchObject({ ok: true, value: { saved: true } })
+    expect(read).toMatchObject({ content: 'before\n' })
+    expect(saved).toMatchObject({ saved: true })
   })
 
   it('persists every registered Element value through one Draft-level save', async () => {
@@ -269,8 +265,8 @@ describe('StudioBackend', () => {
     await writeFile(join(root, 'src/layout.ts'), "const density = 1;\nexport { density };\n")
     const draft = record(root)
     const studio = backend(draft)
-    await studio.call(request('studio.drafts.start', { draftId: draft.id }))
-    await studio.call(request('studio.preview.update', {
+    await studio.draftsStart({ draftId: draft.id })
+    await studio.previewUpdate({
       draftId: draft.id,
       connected: true,
       mode: 'browse',
@@ -310,11 +306,11 @@ describe('StudioBackend', () => {
         }],
         variables: [],
       },
-    }))
+    })
 
-    const saved = await studio.call(request('studio.elements.saveSource', { draftId: draft.id, styles: [] }))
+    const saved = await studio.elementsSaveSource({ draftId: draft.id, styles: [] })
 
-    expect(saved.result).toEqual({ ok: true, value: { files: ['src/theme.ts', 'src/layout.ts'] } })
+    expect(saved).toEqual({ files: ['src/theme.ts', 'src/layout.ts'] })
     await expect(readFile(join(root, 'src/theme.ts'), 'utf8')).resolves.toBe(
       "const accent = '#ff8800';\nexport { accent };\n",
     )
@@ -346,18 +342,18 @@ describe('StudioBackend', () => {
       elementLabel: 'Hero',
     }
 
-    const analyzed = await studio.call(request('studio.patches.analyzeAutomatic', payload))
-    expect(analyzed.result).toMatchObject({ ok: true, value: {
+    const analyzed = await studio.patchesAnalyzeAutomatic(payload)
+    expect(analyzed).toMatchObject({
       canApply: true,
       targets: [{ package: 'target-plugin', file: 'lib/client.js', matches: [{ line: 1 }, { line: 2 }] }],
       provider: { patchIds: [expect.any(String)] },
-    } })
+    })
     await expect(readFile(join(root, 'package.json'), 'utf8')).resolves.not.toContain('patch.auto-')
 
-    const created = await studio.call(request('studio.patches.createAutomatic', payload))
-    expect(created.result).toMatchObject({ ok: true, value: { files: [
+    const created = await studio.patchesCreateAutomatic(payload)
+    expect(created).toMatchObject({ files: [
       expect.stringMatching(/^patch\.auto-/), expect.stringMatching(/^src\/client\.dsh-studio-auto-/), 'src/client.tsx', 'package.json',
-    ] } })
+    ] })
     await expect(readFile(join(root, 'package.json'), 'utf8')).resolves.toContain('patch.auto-')
   })
 
@@ -367,19 +363,19 @@ describe('StudioBackend', () => {
     const draft = { ...record(root), destinationDirectory: join(root, 'saved-plugin') }
     const studio = backend(draft)
 
-    const exported = await studio.call(request('studio.drafts.export', { draftId: draft.id }))
+    const exported = await studio.draftsExport({ draftId: draft.id })
 
-    expect(exported.result).toMatchObject({ ok: true, value: {
+    expect(exported).toMatchObject({
       destinationDirectory: draft.destinationDirectory,
       exportedAt: '2026-08-17T00:00:00.000Z',
-    } })
+    })
   })
 
   it('requires a Draft id for Draft-scoped methods', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-studio-backend-'))
     temporaryDirectories.push(root)
-    const response = await backend(record(root)).call(request('studio.project.state', {}))
-    expect(response.result).toMatchObject({ ok: false, error: { message: 'draftId is required' } })
+    const response = backend(record(root)).projectState({} as { draftId: string })
+    await expect(response).rejects.toThrow('draftId is required')
   })
 
   it('keeps the active Agent session attached to its Draft view', async () => {
@@ -387,14 +383,14 @@ describe('StudioBackend', () => {
     temporaryDirectories.push(root)
     const draft = record(root)
     const studio = backend(draft)
-    await studio.call(request('studio.drafts.start', { draftId: draft.id }))
-    await studio.call(request('studio.project.activate', { draftId: draft.id, graphRev: 'graph-1' }))
+    await studio.draftsStart({ draftId: draft.id })
+    await studio.projectActivate({ draftId: draft.id, graphRev: 'graph-1' })
 
-    const created = await studio.call(request('studio.agent.create', { draftId: draft.id }))
-    const listed = await studio.call(request('studio.drafts.list', {}))
+    const created = await studio.agentCreate({ draftId: draft.id })
+    const listed = await studio.draftsList()
 
-    expect(created.result).toMatchObject({ ok: true, value: { sessionId: expect.any(String), source: 'created' } })
-    expect(listed.result).toMatchObject({ ok: true, value: [{ agent: created.result.ok ? created.result.value : undefined }] })
+    expect(created).toMatchObject({ sessionId: expect.any(String), source: 'created' })
+    expect(listed).toMatchObject([{ agent: created }])
   })
 
   it('attaches an existing idle session and leaves Studio mode without stopping the Draft', async () => {
@@ -429,20 +425,20 @@ describe('StudioBackend', () => {
       resume: vi.fn(),
     } as unknown as AgentRegistry
     const studio = backend(draft, undefined, undefined, agents)
-    await studio.call(request('studio.drafts.start', { draftId: draft.id }))
-    await studio.call(request('studio.project.activate', { draftId: draft.id, graphRev: 'graph-1' }))
+    await studio.draftsStart({ draftId: draft.id })
+    await studio.projectActivate({ draftId: draft.id, graphRev: 'graph-1' })
 
-    const attached = await studio.call(request('studio.agent.attach', {
+    const attached = await studio.agentAttach({
       draftId: draft.id,
       sessionId: 'c33dc5b3-5bcd-4168-bd6b-c86ad54412b1',
-    }))
-    const left = await studio.call(request('studio.agent.leave', { draftId: draft.id }))
+    })
+    const left = await studio.agentLeave({ draftId: draft.id })
 
-    expect(attached.result).toMatchObject({ ok: true, value: {
+    expect(attached).toMatchObject({
       sessionId: 'c33dc5b3-5bcd-4168-bd6b-c86ad54412b1', agentPreset: 'ordinary', source: 'existing',
-    } })
-    expect(left.result).toMatchObject({ ok: true, value: { runtime: { state: 'running' } } })
-    if (left.result.ok) expect(left.result.value).not.toHaveProperty('agent')
+    })
+    expect(left).toMatchObject({ runtime: { state: 'running' } })
+    expect(left).not.toHaveProperty('agent')
     expect(cleanup).toHaveBeenCalledTimes(11)
     expect(agents.resume).not.toHaveBeenCalled()
   })

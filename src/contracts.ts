@@ -1,8 +1,8 @@
 import type {
   HarmonyInspection,
   HarmonyPatchDependency,
-  HarmonyRuntimeProfileUpdateResult,
   HarmonyProfileView,
+  HarmonyRuntimeProfileUpdateResult,
   HarmonyService,
 } from 'dsh-harmony'
 import type {
@@ -12,24 +12,7 @@ import type {
 } from 'dsh-harmony-react/studio'
 
 export const STUDIO_PATH = '/studio'
-export const STUDIO_API_PATH = `${STUDIO_PATH}/api`
 export const STUDIO_PREVIEW_FRAGMENT = 'dsh-studio-preview'
-export const STUDIO_PREVIEW_API_PATH = '/dsh-harmony/studio-preview/api'
-
-export interface StudioClientRequest {
-  type: 'client-request'
-  rpcId: string
-  method: string
-  payload: unknown
-}
-
-export interface StudioServerResponse<T = unknown> {
-  type: 'server-response'
-  rpcId: string
-  result:
-    | { ok: true; value: T }
-    | { ok: false; error: { code: string; message: string; details?: unknown } }
-}
 
 export interface StudioServerRequest<T = unknown> {
   type: 'server-request'

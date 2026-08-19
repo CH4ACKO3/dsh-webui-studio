@@ -5,6 +5,7 @@ import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { NodePeerClient } from 'the-binding-of-dsh'
 
 import type {
   StudioBuildResult,
@@ -14,9 +15,9 @@ import type {
   StudioHarmonyProfileUpdateResult,
   StudioProjectFile,
   StudioProjectState,
-  StudioServerResponse,
   StudioWorkspaceState,
 } from '../src/contracts.js'
+import { invokeStudioRemote, STUDIO_REMOTE, type StudioRemote } from '../lib/studio-remote.js'
 
 const packageRoot = fileURLToPath(new URL('..', import.meta.url))
 const studioPath = '/studio'
@@ -104,6 +105,7 @@ async function waitForPage(url: string, timeoutMs = 15_000): Promise<Response> {
 }
 
 let child: ChildProcess | undefined
+let peer: NodePeerClient | undefined
 try {
   const packed = spawnSync('npm', ['pack', '--ignore-scripts', '--pack-destination', root], {
     cwd: packageRoot,
@@ -180,13 +182,11 @@ try {
   assert.equal(studioPage.status, 200)
   const studioHtml = await studioPage.text()
   assert.match(studioHtml, /DeepSeek WebUI Studio/)
-  const token = studioHtml.match(/window\.__DSH_STUDIO__=\{token:"([a-f0-9]+)"\}/)?.[1]
-  assert.ok(token, 'Studio document did not contain its capability token')
+  assert.doesNotMatch(studioHtml, /__DSH_STUDIO__/)
 
   const bridge = await fetch(`${origin}${studioPath}/bridge.js`)
   assert.equal(bridge.status, 200)
   const bridgeScript = await bridge.text()
-  assert.doesNotMatch(bridgeScript, new RegExp(token))
   assert.match(bridgeScript, /dsh-studio-bridge/)
   assert.doesNotMatch(bridgeScript, /dsh-studio-connect/)
   const studioScript = await fetch(`${origin}${studioPath}/assets/studio.js`)
@@ -199,22 +199,22 @@ try {
     assert.ok((await response.arrayBuffer()).byteLength > 0)
   }
 
-  const call = async <T>(method: string, payload: unknown): Promise<T> => {
-    const rpcId = `e2e-${method}`
-    const response = await fetch(`${origin}${studioPath}/api/${method}`, {
+  const removedApi = await fetch(`${origin}${studioPath}/api/studio.workspace.get`, {
       method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        origin,
-        'x-dsh-studio-token': token,
-      },
-      body: JSON.stringify({ type: 'client-request', rpcId, method, payload }),
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
     })
-    assert.equal(response.status, 200)
-    const envelope = await response.json() as StudioServerResponse<T>
-    assert.equal(envelope.rpcId, rpcId)
-    if (!envelope.result.ok) assert.fail(`${JSON.stringify(envelope.result)}\n${output}`)
-    return envelope.result.value
+  assert.equal(removedApi.status, 404)
+
+  peer = new NodePeerClient({ baseUrl: origin, contribution: STUDIO_REMOTE })
+  await peer.connect()
+  const studioRemote = (peer.remote as unknown as { studio: StudioRemote }).studio
+  const call = async <T>(method: string, payload: unknown): Promise<T> => {
+    const invocation = invokeStudioRemote(studioRemote, method, payload)
+    assert.ok(invocation, `Studio method ${method} is not mapped`)
+    const result = await invocation
+    if (!result.ok) assert.fail(`${JSON.stringify(result)}\n${output}`)
+    return result.value as T
   }
 
   assert.deepEqual(await call<StudioWorkspaceState>('studio.workspace.get', {}), { openDraftIds: [] })
@@ -292,6 +292,12 @@ try {
   assert.ok(previewUrl)
   const previewOrigin = new URL(previewUrl).origin
   assert.notEqual(previewOrigin, origin)
+  const removedPreviewApi = await fetch(`${previewOrigin}/dsh-harmony/studio-preview/api/health`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{}',
+  })
+  assert.equal(removedPreviewApi.status, 404)
   const secondCreated = await call<StudioDraftView>('studio.drafts.create', {
     source: { kind: 'existing', directory: draftRoot },
     profileMode: 'custom',
@@ -368,6 +374,7 @@ try {
   assert.deepEqual(await call<StudioWorkspaceState>('studio.workspace.update', { openDraftIds: [] }), { openDraftIds: [] })
   assert.deepEqual(await call<StudioWorkspaceState>('studio.workspace.get', {}), { openDraftIds: [] })
 } finally {
+  await peer?.close()
   const runningChild = child
   if (runningChild?.exitCode === null) {
     runningChild.kill()
