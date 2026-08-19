@@ -12,6 +12,9 @@ updates:
       - dependency-name: '*'
         update-types:
           - version-update:semver-major
+      - dependency-name: react-grab
+        update-types:
+          - version-update:semver-minor
     labels:
       - dependencies
   - package-ecosystem: github-actions
