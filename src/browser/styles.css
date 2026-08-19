@@ -346,7 +346,6 @@ button, input, textarea, select, iframe { border: 0; }
 .draft-tab-add {
   flex: none;
   align-self: center;
-  margin-bottom: 3px;
   transform: translateX(var(--draft-tab-add-shift, 0));
 }
 .draft-tabs .draft-tab-add[data-empty="true"] { width: auto; padding-inline: 8px 10px; color: var(--studio-accent); }
@@ -491,6 +490,22 @@ button, input, textarea, select, iframe { border: 0; }
 .left-sidebar-tabs { min-height: 34px; flex: none; padding-inline: 12px; background: var(--studio-panel); }
 .left-sidebar-tabs button { flex: 1; padding-inline: 6px; font-size: var(--studio-font-size-xs); }
 .left-sidebar-page { min-height: 0; flex: 1; }
+.left-sidebar-empty-page { padding: 12px 14px; }
+.left-sidebar-empty {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--studio-radius-md);
+  background: var(--studio-control);
+}
+.left-sidebar-empty strong {
+  color: var(--studio-text-secondary);
+  font-size: var(--studio-font-size-sm);
+  font-weight: 600;
+  line-height: 16px;
+}
 .instance-control-panel {
   display: flex;
   flex-direction: column;

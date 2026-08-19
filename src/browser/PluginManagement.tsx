@@ -28,7 +28,7 @@ function CloseIcon(): JSX.Element {
 }
 
 export function PluginManagement({ selectedDraft, view }: {
-  selectedDraft?: StudioDraftView
+  selectedDraft: StudioDraftView
   view?: ManagementView
 }): JSX.Element {
   const { t } = useStudioLocale()
@@ -46,7 +46,7 @@ export function PluginManagement({ selectedDraft, view }: {
   const [patchDialogOpen, setPatchDialogOpen] = useState(false)
   const [error, setError] = useState<string>()
   const [appliedGeneration, setAppliedGeneration] = useState<number>()
-  const running = selectedDraft?.runtime.state === 'running'
+  const running = selectedDraft.runtime.state === 'running'
   const plugins = useMemo(() => new Map(profile?.plugins.map(plugin => [plugin.name, plugin]) ?? []), [profile])
   const patches = useMemo(() => new Map(inspection.patches.map(patch => [patch.key, patch])), [inspection])
   const ownerPatchKeys = (owner: string): string[] => patchOrder.filter(key => patches.get(key)?.owner === owner)
@@ -61,9 +61,8 @@ export function PluginManagement({ selectedDraft, view }: {
       return `${name}\n${plugin?.description ?? ''}\n${plugin?.version ?? ''}`.toLocaleLowerCase().includes(query)
     })
   }, [order, pluginQuery, plugins])
-  const draftPatches = useMemo(() => selectedDraft === undefined ? []
-    : inspection.patches.filter(patch => patch.owner === selectedDraft.name),
-  [inspection.patches, selectedDraft])
+  const draftPatches = useMemo(() => inspection.patches.filter(patch => patch.owner === selectedDraft.name),
+    [inspection.patches, selectedDraft.name])
 
   const setLoaded = (nextProfile: StudioHarmonyProfile, nextInspection: StudioHarmonyInspection): void => {
     setProfile(nextProfile)
@@ -75,7 +74,7 @@ export function PluginManagement({ selectedDraft, view }: {
   }
 
   const load = async (): Promise<void> => {
-    if (selectedDraft === undefined || selectedDraft.runtime.state !== 'running') {
+    if (selectedDraft.runtime.state !== 'running') {
       setProfile(undefined)
       setInspection({ patches: [], targets: [] })
       setLoading(false)
@@ -115,7 +114,6 @@ export function PluginManagement({ selectedDraft, view }: {
   }, [patchDialogOpen])
 
   const apply = async (): Promise<void> => {
-    if (selectedDraft === undefined) return
     setSaving(true)
     setError(undefined)
     try {
@@ -155,8 +153,7 @@ export function PluginManagement({ selectedDraft, view }: {
       onClick={() => void apply()}>{t('profileApply')}</Button></footer>
 
   const unavailable = !running
-    ? <EmptyState title={selectedDraft === undefined ? t('noActiveDraft') : t('profileDraftNotRunning')}
-        description={selectedDraft === undefined ? t('patchManagementDraftClosed') : t('profileDraftNotRunningDescription')} />
+    ? <EmptyState title={t('profileDraftNotRunning')} description={t('profileDraftNotRunningDescription')} />
     : loading ? <p className="profile-management-status">{t('profileLoading')}</p>
       : profile === undefined ? <EmptyState title={t('profileLoadError')} description={error}
           action={<Button size="small" onClick={() => void load()}>{t('retry')}</Button>} /> : undefined
@@ -177,8 +174,8 @@ export function PluginManagement({ selectedDraft, view }: {
           <div className="profile-management-scroll">
             {(profile?.orderViolations.length ?? 0) > 0
               && <Notice tone="warning">{t('profileOrderWarning', { count: profile?.orderViolations.length ?? 0 })}</Notice>}
-            {(profile?.incompatibilities.length ?? 0) > 0
-              && <Notice tone="warning">{t('profileConflictWarning', { count: profile?.incompatibilities.length ?? 0 })}</Notice>}
+            {(profile?.pluginConflicts.length ?? 0) > 0
+              && <Notice tone="warning">{t('profileConflictWarning', { count: profile?.pluginConflicts.length ?? 0 })}</Notice>}
             <div className="plugin-management-list-heading"><strong>{t('profileProviderOrder')}</strong>
               <span>{visiblePlugins.length === order.length ? order.length
                 : `${visiblePlugins.length}/${order.length}`}</span></div>

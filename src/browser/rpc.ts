@@ -1,4 +1,5 @@
 import { STUDIO_API_PATH, type StudioServerResponse } from '../contracts'
+import { nextBrowserId } from './id'
 
 declare global {
   interface Window {
@@ -14,7 +15,7 @@ export class StudioRpcError extends Error {
 }
 
 function rpcId(): string {
-  return crypto.randomUUID()
+  return nextBrowserId()
 }
 
 export async function callStudio<T>(method: string, payload: unknown, signal?: AbortSignal): Promise<T> {

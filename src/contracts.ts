@@ -1,7 +1,7 @@
 import type {
   HarmonyInspection,
   HarmonyPatchDependency,
-  HarmonyProfileUpdateResult,
+  HarmonyRuntimeProfileUpdateResult,
   HarmonyProfileView,
   HarmonyService,
 } from 'dsh-harmony'
@@ -181,7 +181,7 @@ export interface StudioProjectFile {
 
 export type StudioHarmonyInspection = HarmonyInspection
 export type StudioHarmonyProfile = HarmonyProfileView
-export type StudioHarmonyProfileUpdateResult = HarmonyProfileUpdateResult
+export type StudioHarmonyProfileUpdateResult = HarmonyRuntimeProfileUpdateResult
 
 export type StudioReadinessLevel = 'error' | 'warning' | 'info'
 

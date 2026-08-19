@@ -43,6 +43,8 @@ import {
   STUDIO_PATH,
 } from '../contracts'
 import { apiValue, studioApi, subscribeStudioEvents } from './events'
+import { availableAgentSessions, startAgentSessionLoader } from './agent-sessions'
+import { nextBrowserId } from './id'
 import { callStudio, StudioRpcError } from './rpc'
 import { CodeEditor } from './CodeEditor'
 import { useStudioLocale, type StudioTranslate } from './i18n'
@@ -733,6 +735,8 @@ export function App(): JSX.Element {
   const [packingDraftId, setPackingDraftId] = useState<string>()
   const sessionRef = useRef<string>()
   const runningVersion = useRef(0)
+  const refreshAgentSessionsRef = useRef<() => void>()
+  const agentSessionLoadErrorRef = useRef<string>()
   const draftIdRef = useRef<string>()
   const draftsRef = useRef<StudioDraftView[]>([])
   const projectRef = useRef<StudioProjectState>()
@@ -946,26 +950,37 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     if (panel !== 'agent' || project?.state !== 'active' || sessionId !== undefined) return
-    let current = true
     const attached = new Set(attachedAgentSessionIds.split('\0').filter(Boolean))
-    setLoadingAgentSessions(true)
-    const load = (): void => {
-      void studioApi.sessions.list({}).then(response => {
-        if (!current) return
-        const sessions = apiValue(response).items.filter(session => (
-          session.origin !== 'subagent' && !session.blank && !attached.has(String(session.sessionId))
-        ))
+    setAgentSessions([])
+    setSelectedAgentSessionId('')
+    const loader = startAgentSessionLoader({
+      async load() {
+        const response = await studioApi.sessions.list({})
+        return availableAgentSessions(apiValue(response).items, attached)
+      },
+      onData(sessions) {
+        const previousError = agentSessionLoadErrorRef.current
+        agentSessionLoadErrorRef.current = undefined
+        if (previousError !== undefined) {
+          setError(current => current === previousError ? undefined : current)
+        }
         setAgentSessions(sessions)
         setSelectedAgentSessionId(selected => sessions.some(session => String(session.sessionId) === selected) ? selected : '')
-      }).catch(cause => {
-        if (current) setError(cause instanceof Error ? cause.message : String(cause))
-      }).finally(() => {
-        if (current) setLoadingAgentSessions(false)
-      })
+      },
+      onError(cause) {
+        const message = cause instanceof Error ? cause.message : String(cause)
+        agentSessionLoadErrorRef.current = message
+        setError(message)
+      },
+      onInitialLoading: setLoadingAgentSessions,
+    })
+    refreshAgentSessionsRef.current = loader.refresh
+    window.addEventListener('focus', loader.refresh)
+    return () => {
+      if (refreshAgentSessionsRef.current === loader.refresh) refreshAgentSessionsRef.current = undefined
+      window.removeEventListener('focus', loader.refresh)
+      loader.dispose()
     }
-    load()
-    const interval = window.setInterval(load, 3_000)
-    return () => { current = false; window.clearInterval(interval) }
   }, [panel, project?.state, sessionId, attachedAgentSessionIds])
 
   useEffect(() => {
@@ -1134,9 +1149,14 @@ export function App(): JSX.Element {
   }, [hasLiveDraft])
 
   useEffect(() => subscribeStudioEvents(envelope => {
+    const frame = envelope.payload
+    if (frame.type === 'host/session-added'
+      || frame.type === 'host/session-removed'
+      || frame.type === 'host/session-status') {
+      refreshAgentSessionsRef.current?.()
+    }
     const current = sessionRef.current
     if (current === undefined || eventSessionId(envelope) !== current) return
-    const frame = envelope.payload
     if (frame.type === 'host/session-status') {
       runningVersion.current += 1
       setRunning(frame.running === true)
@@ -1412,7 +1432,7 @@ export function App(): JSX.Element {
     if (event.origin !== new URL(previewUrl).origin || event.ports.length !== 1 || !isBridgeOffer(event.data, sessionId)) return
     previewConnections.current.get(draft.id)?.port.close()
     const nextPort = event.ports[0]
-    const nonce = crypto.randomUUID()
+    const nonce = nextBrowserId()
     const connection = { port: nextPort, sessionId, nonce }
     previewConnections.current.set(draft.id, connection)
     nextPort.onmessage = portEvent => {
@@ -1676,7 +1696,7 @@ export function App(): JSX.Element {
     const draftId = selectedDraftId
     const connection = previewConnections.current.get(draftId)
     if (connection === undefined) return
-    const requestId = crypto.randomUUID()
+    const requestId = nextBrowserId()
     const result = new Promise<void>((resolve, reject) => {
       pendingVariableResults.current.set(requestId, { resolve, reject })
     })
@@ -1720,7 +1740,7 @@ export function App(): JSX.Element {
     if (selectedDraftId === undefined) return
     const connection = previewConnections.current.get(selectedDraftId)
     connection?.port.postMessage({
-      type: 'get-element-style-selectors', requestId: crypto.randomUUID(),
+      type: 'get-element-style-selectors', requestId: nextBrowserId(),
       sessionId: connection.sessionId, nonce: connection.nonce,
       target: {
         owner: element.owner,
@@ -1744,7 +1764,7 @@ export function App(): JSX.Element {
       ...(value === undefined ? {} : { value }),
     }
     connection.port.postMessage({
-      type: 'set-element-style', requestId: crypto.randomUUID(), sessionId: connection.sessionId, nonce: connection.nonce, target,
+      type: 'set-element-style', requestId: nextBrowserId(), sessionId: connection.sessionId, nonce: connection.nonce, target,
     })
     setElementStyles(current => {
       const key = elementStyleKey(draftId, element)
@@ -2428,13 +2448,12 @@ export function App(): JSX.Element {
               { value: 'plugins', label: t('pluginManagement') },
               { value: 'patches', label: t('patchManagement') },
             ]} />
-          {leftPanel === 'instance' && drafts.length === 0
-            ? <EmptyState title={t('createFirstDraft')} description={t('createFirstDraftDescription')}
-                action={<Button size="small" variant="primary" onClick={() => setCreateDialogOpen(true)}>{t('draftNew')}</Button>} />
-            : leftPanel === 'instance' && selectedDraft === undefined
-                ? <EmptyState title={t('noActiveDraft')} description={t('noActiveDraftDescription')}
-                    action={<Button size="small" onClick={() => setLeftPanel('plugins')}>{t('openPluginManagement')}</Button>} />
-                : leftPanel === 'instance' && selectedDraft !== undefined && <section id="left-sidebar-panel-instance" role="tabpanel"
+          {selectedDraft === undefined
+            ? <section id={`left-sidebar-panel-${leftPanel}`} role="tabpanel"
+                aria-labelledby={`left-sidebar-tab-${leftPanel}`} className="left-sidebar-page left-sidebar-empty-page">
+                <EmptyState className="left-sidebar-empty" title={t('noActiveDraft')} />
+              </section>
+            : leftPanel === 'instance' && <section id="left-sidebar-panel-instance" role="tabpanel"
                 aria-labelledby="left-sidebar-tab-instance" className="left-sidebar-page instance-control-panel">
                 <div className="instance-summary" data-state={selectedInstanceStarting ? 'starting' : selectedDraft.runtime.state}>
                   <span className="instance-status-dot" aria-hidden="true" />
@@ -2536,8 +2555,8 @@ export function App(): JSX.Element {
                 </section>
               </section>}
 
-          <PluginManagement selectedDraft={selectedDraft}
-            view={leftPanel === 'instance' ? undefined : leftPanel} />
+          {selectedDraft !== undefined && <PluginManagement selectedDraft={selectedDraft}
+            view={leftPanel === 'instance' ? undefined : leftPanel} />}
         </div>
         {!terminalExpanded && terminal}
         {!leftSidebarCollapsed && <span className="sidebar-resizer" data-side="left" role="separator" tabIndex={0}

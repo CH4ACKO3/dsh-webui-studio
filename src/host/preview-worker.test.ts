@@ -132,7 +132,7 @@ it('reads and transactionally updates the active Preview Harmony profile', async
   previewDraft.open.mockResolvedValue({ snapshot: () => ({ name: 'draft-plugin' }), async close() {} })
   const profile = {
     dir: '/draft/profile', order: ['dsh-harmony', 'draft-plugin'], patchOrder: ['draft-plugin/one'], disabled: [],
-    plugins: [], orderViolations: [], patchOrderViolations: [], incompatibilities: [],
+    plugins: [], orderViolations: [], patchOrderViolations: [], pluginConflicts: [],
   }
   const updateProfile = vi.fn(async (input: { disabled?: string[] }) => ({
     profile: { ...profile, ...input }, generation: 3, reload: { state: 'succeeded' as const }, clientGraphRev: 'graph-3',
