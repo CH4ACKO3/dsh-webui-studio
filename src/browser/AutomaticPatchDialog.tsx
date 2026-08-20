@@ -8,6 +8,7 @@ import type {
   StudioProjectFile,
 } from '../contracts'
 import { useStudioLocale } from './i18n'
+import { studioErrorMessage } from './error-message'
 import { callStudio } from './rpc'
 import { Badge, Button, FormField, IconButton, Input, Notice, SegmentedControl, Select, Textarea } from './ui'
 
@@ -149,7 +150,7 @@ export function AutomaticPatchDialog({ open, draftId, selection, files, existing
     try {
       setPlan(await callStudio<StudioAutomaticPatchPlan>('studio.patches.analyzeAutomatic', { draftId, ...request() }))
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError(studioErrorMessage(cause, t))
     } finally { setBusy(undefined) }
   }
 
@@ -161,7 +162,7 @@ export function AutomaticPatchDialog({ open, draftId, selection, files, existing
       await onCreated(result)
       onClose()
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError(studioErrorMessage(cause, t))
     } finally { setBusy(undefined) }
   }
 

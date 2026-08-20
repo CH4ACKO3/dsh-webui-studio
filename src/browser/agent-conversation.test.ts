@@ -64,6 +64,20 @@ describe('buildAgentConversation', () => {
     expect(items).toEqual([{ id: '7', kind: 'notice', time: 31, tone: 'error', text: 'Provider unavailable' }])
   })
 
+  it('keeps Studio-authored fallbacks semantic so the renderer can localize them', () => {
+    const items = buildAgentConversation([
+      entry({ type: 'user/message', seq: 8, time: 32, surfaceOp: 'append', data: {
+        content: [{ type: 'text', text: 'Injected context' }], source: { kind: 'plugin', form: 'snapshot', sections: [] },
+      } }),
+      entry({ type: 'turn/end', seq: 9, time: 33, data: { turn: 3, reason: { kind: 'max-tokens' } } }),
+    ])
+
+    expect(items).toEqual([
+      { id: '8', kind: 'context', time: 32, blocks: [{ kind: 'text', text: 'Injected context' }] },
+      { id: '9', kind: 'notice', time: 33, tone: 'neutral', reason: 'max-output' },
+    ])
+  })
+
   it('rebuilds the unfinished assistant prefix from durable chunk events', () => {
     const chunks = [
       entry({ type: 'assistant/chunk', seq: 8, time: 40, data: {

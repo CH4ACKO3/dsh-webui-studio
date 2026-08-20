@@ -74,6 +74,7 @@ describe('Studio routes', () => {
     const bridge = await invoke(registered.find(route => route.path.endsWith('/bridge.js'))!)
     expect(page.status).toBe(200)
     expect(page.body).not.toContain('__DSH_STUDIO__')
+    expect(page.body).toContain('<html lang="en">')
     expect(page.body).toContain('<title>DeepSeek WebUI Studio</title>')
     expect(page.body).toContain('<meta name="referrer" content="no-referrer"')
     expect(bridge.body).toBe('studio-bridge')

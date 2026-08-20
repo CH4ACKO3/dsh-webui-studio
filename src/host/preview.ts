@@ -128,7 +128,7 @@ export class StudioPreviewSupervisor {
       )
       signal.throwIfAborted()
       this.previewPort = this.portPool.claim()
-      const hostArgs = [this.harmonyBinEntry, 'web', '--port', String(this.previewPort ?? 0)]
+      const hostArgs = [this.harmonyBinEntry, 'web', '--port', String(this.previewPort ?? 0), '--no-open']
       this.runtime.log = appendLog(this.runtime.log,
         `[studio] Profile dependencies ready\n[studio] Starting Preview Host\nDSH_HOME=${this.draft.runtimeHome}\n${terminalCommandLine(this.draft.worktreeDir, process.execPath, hostArgs)}`)
       const bridgeCapability = randomBytes(24).toString('base64url')

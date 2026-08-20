@@ -74,7 +74,7 @@ function viewTitle(callView: ToolCallView | undefined, resultView: ToolResultVie
   return fallback
 }
 
-function structuredResult(view: ToolResultView | undefined): string {
+function structuredResult(view: ToolResultView | undefined, t: StudioTranslate): string {
   if (view === undefined) return ''
   if (view.card === 'terminal') return view.output ?? ''
   if (view.card === 'diff') return view.diffs.map(diff => `${diff.path}\n${diff.newText}`).join('\n\n')
@@ -84,8 +84,8 @@ function structuredResult(view: ToolResultView | undefined): string {
     return view.files.flatMap(file => [file.path, ...file.matches.map(match => `  ${match.lineNumber}: ${match.line}`)]).join('\n')
   }
   if (view.card === 'web') {
-    if (view.kind === 'fetch') return `${view.statusCode} · ${view.url}${view.truncated ? ' · truncated' : ''}`
-    return [view.answer, ...view.sources.map(source => `${source.title ?? source.url}\n${source.url}`), view.truncated ? 'truncated' : '']
+    if (view.kind === 'fetch') return `${view.statusCode} · ${view.url}${view.truncated ? ` · ${t('agentTruncated')}` : ''}`
+    return [view.answer, ...view.sources.map(source => `${source.title ?? source.url}\n${source.url}`), view.truncated ? t('agentTruncated') : '']
       .filter(value => value !== undefined && value !== '').join('\n\n')
   }
   return 'content' in view ? nativeBlocksText(view.content ?? []) : ''
@@ -120,7 +120,7 @@ function AgentToolCard({ item, t }: {
     if (item.status === 'error') setOpen(true)
   }, [item.status])
   const rawOutput = blocksText(item.result)
-  const presentedOutput = structuredResult(item.resultView)
+  const presentedOutput = structuredResult(item.resultView, t)
   const output = item.resultView?.card === 'web'
     ? [presentedOutput, rawOutput].filter(Boolean).join('\n\n')
     : presentedOutput || rawOutput
@@ -195,10 +195,12 @@ export function AgentSession({
           </div>
         </article>
         if (item.kind === 'context') return <details className="agent-context-row" key={item.id}>
-          <summary><span>{t('agentContext')}</span><strong>{item.summary ?? item.label}</strong></summary>
+          <summary><span>{t('agentContext')}</span><strong>{item.summary ?? item.label ?? t('agentContext')}</strong></summary>
           <div><ContentBlocks blocks={item.blocks} t={t} /></div>
         </details>
-        if (item.kind === 'notice') return <div className="agent-event-notice" data-tone={item.tone} key={item.id}>{item.text}</div>
+        if (item.kind === 'notice') return <div className="agent-event-notice" data-tone={item.tone} key={item.id}>
+          {item.reason === 'max-output' ? t('agentMaximumOutput') : item.text}
+        </div>
 
         return <AgentToolCard item={item} t={t} key={item.id} />
       })}

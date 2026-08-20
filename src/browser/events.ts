@@ -2,6 +2,7 @@ import type { RpcResponse } from '@deepseek-ai/dsh-host-apiproxy/api'
 import { AbstractApiClient } from '@deepseek-ai/dsh-host-apiproxy/client'
 import type { StudioServerRequest } from '../contracts'
 import { studioConnection } from './connection'
+import { StudioRpcError } from './rpc'
 
 export class StudioApiClient extends AbstractApiClient {
   protected doFetch(input: URL, init?: RequestInit): Promise<Response> {
@@ -12,7 +13,9 @@ export class StudioApiClient extends AbstractApiClient {
 export const studioApi = new StudioApiClient()
 
 export function apiValue<T>(response: RpcResponse<T>): T {
-  if (!response.result.ok) throw new Error(response.result.error.message)
+  if (!response.result.ok) {
+    throw new StudioRpcError(response.result.error.code, response.result.error.message, response.result.error.details)
+  }
   return response.result.value
 }
 

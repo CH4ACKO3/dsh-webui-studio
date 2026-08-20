@@ -37,7 +37,7 @@ export type AgentConversationItem =
     }
   | AgentConversationBase & {
       kind: 'context'
-      label: string
+      label?: string
       summary?: string
       blocks: AgentContentBlock[]
     }
@@ -54,7 +54,8 @@ export type AgentConversationItem =
   | AgentConversationBase & {
       kind: 'notice'
       tone: 'neutral' | 'error'
-      text: string
+      text?: string
+      reason?: 'max-output'
     }
 
 interface ContentRecord {
@@ -78,11 +79,11 @@ function contentBlocks(value: unknown): AgentContentBlock[] {
   })
 }
 
-function contextLabel(source: unknown): { label: string; summary?: string } {
-  if (typeof source !== 'object' || source === null) return { label: 'Context' }
+function contextLabel(source: unknown): { label?: string; summary?: string } {
+  if (typeof source !== 'object' || source === null) return {}
   const value = source as { kind?: unknown; plugin?: unknown; summary?: unknown }
   return {
-    label: typeof value.plugin === 'string' && value.plugin !== '' ? value.plugin : 'Context',
+    label: typeof value.plugin === 'string' && value.plugin !== '' ? value.plugin : undefined,
     summary: typeof value.summary === 'string' && value.summary !== '' ? value.summary : undefined,
   }
 }
@@ -190,7 +191,7 @@ export function buildAgentConversation(entries: readonly StudioConversationEntry
       if (reason.kind === 'error') {
         items.push({ id: String(event.seq), kind: 'notice', time: event.time, tone: 'error', text: reason.error.message })
       } else if (reason.kind === 'max-tokens') {
-        items.push({ id: String(event.seq), kind: 'notice', time: event.time, tone: 'neutral', text: 'Maximum output reached' })
+        items.push({ id: String(event.seq), kind: 'notice', time: event.time, tone: 'neutral', reason: 'max-output' })
       }
     }
   }

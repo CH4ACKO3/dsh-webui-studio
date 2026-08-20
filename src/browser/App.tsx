@@ -44,7 +44,8 @@ import {
 import { apiValue, studioApi, subscribeStudioEvents } from './events'
 import { availableAgentSessions, startAgentSessionLoader } from './agent-sessions'
 import { nextBrowserId } from './id'
-import { callStudio, StudioRpcError } from './rpc'
+import { callStudio } from './rpc'
+import { studioErrorCodeMessage, studioErrorMessage } from './error-message'
 import { CodeEditor } from './CodeEditor'
 import { useStudioLocale, type StudioTranslate } from './i18n'
 import { flattenVariableTree } from '../variable-tree'
@@ -629,6 +630,7 @@ function sessionTitle(session: SessionSummary): string {
 
 export function App(): JSX.Element {
   const { t } = useStudioLocale()
+  const localizeError = (cause: unknown): string => studioErrorMessage(cause, t)
   const initialViewport = useMemo(deviceViewport, [])
   const [drafts, setDrafts] = useState<StudioDraftView[]>([])
   const [openDraftIds, setOpenDraftIds] = useState<string[]>([])
@@ -913,7 +915,7 @@ export function App(): JSX.Element {
       }
     })
       .catch(cause => {
-        if (current) setError(cause instanceof Error ? cause.message : String(cause))
+        if (current) setError(localizeError(cause))
       })
     return () => { current = false }
   }, [sessionId])
@@ -938,7 +940,7 @@ export function App(): JSX.Element {
         setSelectedAgentSessionId(selected => sessions.some(session => String(session.sessionId) === selected) ? selected : '')
       },
       onError(cause) {
-        const message = cause instanceof Error ? cause.message : String(cause)
+        const message = localizeError(cause)
         agentSessionLoadErrorRef.current = message
         setError(message)
       },
@@ -1003,7 +1005,7 @@ export function App(): JSX.Element {
     workspaceUpdateQueue.current = workspaceUpdateQueue.current.then(async () => {
       await callStudio<StudioWorkspaceState>('studio.workspace.update', next)
     }).catch(cause => {
-      setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+      setError(localizeError(cause))
     })
   }
 
@@ -1058,7 +1060,7 @@ export function App(): JSX.Element {
           return next
         })
       }).catch(cause => {
-        if (draftIdRef.current === draftId) setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+        if (draftIdRef.current === draftId) setError(localizeError(cause))
       })
   }, [draftElementIdentity, selectedDraftId])
 
@@ -1093,7 +1095,7 @@ export function App(): JSX.Element {
       setOpenDraftIds(workspace.openDraftIds)
       activateDraft(workspace.selectedDraftId, next)
       if (next.length === 0) setCreateDialogOpen(true)
-    }).catch(cause => setError(cause instanceof Error ? cause.message : String(cause)))
+    }).catch(cause => setError(localizeError(cause)))
       .finally(() => setLoadingDrafts(false))
   }, [])
 
@@ -1221,7 +1223,7 @@ export function App(): JSX.Element {
       setReadiness(nextReadiness)
     }).catch(cause => {
       if (draftViewRequest.current === request && draftIdRef.current === draftId) {
-        setError(cause instanceof Error ? cause.message : String(cause))
+        setError(localizeError(cause))
       }
     })
   }, [project?.root, selectedDraftId, t])
@@ -1269,7 +1271,7 @@ export function App(): JSX.Element {
     try {
       updateDraft(await callStudio<StudioDraftView>('studio.drafts.export', { draftId }))
     } catch (cause) {
-      if (draftIdRef.current === draftId) setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+      if (draftIdRef.current === draftId) setError(localizeError(cause))
     } finally {
       setExportingDraftId(current => current === draftId ? undefined : current)
     }
@@ -1293,7 +1295,7 @@ export function App(): JSX.Element {
     } catch (cause) {
       if (draftIdRef.current === draftId) {
         setDraftLabelInput(previousLabel)
-        setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+        setError(localizeError(cause))
       }
     }
   }
@@ -1345,7 +1347,7 @@ export function App(): JSX.Element {
         const draft = next.find(candidate => candidate.id === id)
         if (draft !== undefined) updateDraft(draft)
       } catch {}
-      if (draftIdRef.current === id) setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+      if (draftIdRef.current === id) setError(localizeError(cause))
     } finally {
       polling = false
       await progress
@@ -1369,7 +1371,7 @@ export function App(): JSX.Element {
       updateDraft(await callStudio<StudioDraftView>('studio.drafts.stop', { draftId: id }))
       clearSelectedRuntime(id)
     } catch (cause) {
-      if (draftIdRef.current === id) setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+      if (draftIdRef.current === id) setError(localizeError(cause))
     } finally {
       setInstanceOperations(current => {
         const next = { ...current }
@@ -1401,7 +1403,7 @@ export function App(): JSX.Element {
     try {
       await applyDraftBuild(id)
     } catch (cause) {
-      if (draftIdRef.current === id) setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+      if (draftIdRef.current === id) setError(localizeError(cause))
     } finally {
       setBuildOperations(current => {
         const next = { ...current }
@@ -1420,7 +1422,7 @@ export function App(): JSX.Element {
       const active = await callStudio<StudioProjectState>('studio.project.activate', { draftId, graphRev })
       updateDraftProject(draftId, active)
     } catch (cause) {
-      if (draftIdRef.current === draftId) setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+      if (draftIdRef.current === draftId) setError(localizeError(cause))
     } finally {
       confirmingDrafts.current.delete(draftId)
     }
@@ -1473,7 +1475,7 @@ export function App(): JSX.Element {
           react: { ...raw.react!, source: { ...raw.react!.source!, resolved } },
         })).catch(cause => {
           if (request === selectionResolve.current && draftIdRef.current === draft.id) {
-            setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+            setError(localizeError(cause))
           }
         })
       }
@@ -1496,9 +1498,11 @@ export function App(): JSX.Element {
         })
       }
       if (active && message.type === 'registry-error' && boundedBridgeText(message.error)) {
-        setError(message.error)
+        setError(studioErrorCodeMessage(boundedBridgeText(message.code) ? message.code : 'preview-registry', message.error, t))
       }
-      if (active && message.type === 'selection-error' && boundedBridgeText(message.error)) setError(message.error)
+      if (active && message.type === 'selection-error' && boundedBridgeText(message.error)) {
+        setError(studioErrorCodeMessage(boundedBridgeText(message.code) ? message.code : 'preview-selection', message.error, t))
+      }
       if (message.type === 'variable-result' && boundedBridgeText(message.requestId)) {
         const pending = pendingVariableResults.current.get(message.requestId)
         if (pending !== undefined) {
@@ -1506,10 +1510,12 @@ export function App(): JSX.Element {
           if (message.ok === true) pending.resolve()
           else pending.reject(new Error(boundedBridgeText(message.error) ? message.error : 'Preview variable update failed'))
         }
-        if (active && message.ok === false && boundedBridgeText(message.error)) setError(message.error)
+        if (active && message.ok === false && boundedBridgeText(message.error)) {
+          setError(studioErrorCodeMessage(boundedBridgeText(message.code) ? message.code : 'preview-variable', message.error, t))
+        }
       }
       if (active && message.type === 'element-style-result' && message.ok === false && boundedBridgeText(message.error)) {
-        setError(message.error)
+        setError(studioErrorCodeMessage(boundedBridgeText(message.code) ? message.code : 'preview-style', message.error, t))
       }
       if (message.type === 'element-style-selectors' && boundedBridgeText(message.owner)
         && boundedBridgeText(message.elementId) && Array.isArray(message.candidates)
@@ -1572,7 +1578,7 @@ export function App(): JSX.Element {
       setSavedSource(file.content)
     } catch (cause) {
       if (fileRequest.current === request && draftIdRef.current === draftId) {
-        setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+        setError(localizeError(cause))
       }
     } finally {
       if (fileRequest.current === request && draftIdRef.current === draftId) setFileBusy(false)
@@ -1596,7 +1602,7 @@ export function App(): JSX.Element {
       }).catch(() => undefined)
     } catch (cause) {
       if (fileRequest.current === request && draftIdRef.current === draftId) {
-        setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+        setError(localizeError(cause))
       }
     } finally {
       if (fileRequest.current === request && draftIdRef.current === draftId) setFileBusy(false)
@@ -1653,7 +1659,7 @@ export function App(): JSX.Element {
         if (draftIdRef.current === draftId) setReadiness(next)
       }).catch(() => undefined)
     } catch (cause) {
-      if (draftIdRef.current === draftId) setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+      if (draftIdRef.current === draftId) setError(localizeError(cause))
     } finally {
       setElementSourceBusy(false)
       setBuildOperations(current => {
@@ -1815,7 +1821,7 @@ export function App(): JSX.Element {
       if (packRequest.current === request && draftIdRef.current === draftId) setReadiness(next)
     } catch (cause) {
       if (packRequest.current === request && draftIdRef.current === draftId) {
-        setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+        setError(localizeError(cause))
       }
     } finally {
       setPackingDraftId(current => current === draftId ? undefined : current)
@@ -1838,7 +1844,7 @@ export function App(): JSX.Element {
       const studioSession = result.sessionId as SessionId
       await studioApi.sessions.rename({ sessionId: studioSession, title: `Studio: ${projectName}` })
     } catch (cause) {
-      if (draftIdRef.current === draftId) setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+      if (draftIdRef.current === draftId) setError(localizeError(cause))
     } finally {
       setCreatingAgentDraftId(current => current === draftId ? undefined : current)
     }
@@ -1860,7 +1866,7 @@ export function App(): JSX.Element {
         setSessionId(result.sessionId)
       }
     } catch (cause) {
-      if (draftIdRef.current === draftId) setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+      if (draftIdRef.current === draftId) setError(localizeError(cause))
     } finally {
       setAttachingAgentDraftId(current => current === draftId ? undefined : current)
     }
@@ -1882,7 +1888,7 @@ export function App(): JSX.Element {
         setRunning(false)
       }
     } catch (cause) {
-      if (draftIdRef.current === draftId) setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+      if (draftIdRef.current === draftId) setError(localizeError(cause))
     } finally {
       setLeavingAgentDraftId(current => current === draftId ? undefined : current)
     }
@@ -1905,7 +1911,7 @@ export function App(): JSX.Element {
         .sort((a, b) => a.event.seq - b.event.seq))
       setHasOlderMessages(page.hasMore)
     } catch (cause) {
-      if (sessionRef.current === targetSessionId) setError(cause instanceof Error ? cause.message : String(cause))
+      if (sessionRef.current === targetSessionId) setError(localizeError(cause))
     } finally {
       if (sessionRef.current === targetSessionId) setLoadingOlderMessages(false)
     }
@@ -1924,7 +1930,7 @@ export function App(): JSX.Element {
       }))
       setPrompt('')
     } catch (cause) {
-      setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+      setError(localizeError(cause))
     } finally {
       setSending(false)
     }
@@ -1935,7 +1941,7 @@ export function App(): JSX.Element {
     try {
       apiValue(await studioApi.sessions.cancel({ sessionId: sessionId as SessionId }))
     } catch (cause) {
-      setError(cause instanceof StudioRpcError ? cause.message : String(cause))
+      setError(localizeError(cause))
     }
   }
 
@@ -2526,7 +2532,9 @@ export function App(): JSX.Element {
                   </Button>
                   <span>{selectedDraft.exportedAt === undefined ? t('draftDestinationPending') : t('draftDestinationSaved')}</span>
                 </div>}
-                {selectedDraft.runtime.error !== undefined && <Notice tone="danger">{selectedDraft.runtime.error}</Notice>}
+                {selectedDraft.runtime.error !== undefined && <Notice tone="danger">
+                  {studioErrorCodeMessage('internal', selectedDraft.runtime.error, t)}
+                </Notice>}
                 <section className="instance-preview-section" aria-labelledby="instance-preview-heading">
                   <div id="instance-preview-heading" className="control-section-heading">
                     <div><strong>{t('livePreview')}</strong><span>{t('previewInteractionCanvas')}</span></div>
@@ -2854,7 +2862,8 @@ export function App(): JSX.Element {
                   ? <p className="readiness-clear">{t('readinessClear')}</p>
                   : <div className="readiness-findings">{readiness.findings.map((item, index) => <article
                       key={`${item.code}:${item.patch ?? item.file ?? index}`} data-level={item.level}>
-                      <div><span>{item.level}</span><code>{item.code}</code></div>
+                      <div><span>{item.level === 'error' ? t('readinessError')
+                        : item.level === 'warning' ? t('readinessWarning') : t('readinessInfo')}</span><code>{item.code}</code></div>
                       <p>{item.message}</p>
                       {(item.file !== undefined || item.patch !== undefined) && <small>{[item.patch, item.file].filter(Boolean).join(' · ')}</small>}
                     </article>)}</div>}

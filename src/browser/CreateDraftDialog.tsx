@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useRef, useState } from 'react'
 import type { StudioCreateDraftInput, StudioDraftProfileMode, StudioDraftSource } from '../contracts'
 import { useStudioLocale } from './i18n'
+import { studioErrorMessage } from './error-message'
 import { Button, FormField, IconButton, Input, Notice, Select } from './ui'
 
 function CloseIcon(): JSX.Element {
@@ -69,7 +70,7 @@ export function CreateDraftDialog({
           : {}),
       })
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError(studioErrorMessage(cause, t))
     } finally {
       setCreating(false)
     }

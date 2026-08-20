@@ -6,6 +6,7 @@ import type {
   StudioHarmonyProfileUpdateResult,
 } from '../contracts'
 import { useStudioLocale } from './i18n'
+import { studioErrorMessage } from './error-message'
 import {
   isProfilePluginEnabled,
   moveProfilePlugin,
@@ -94,7 +95,7 @@ export function PluginManagement({ selectedDraft, view }: {
       setAppliedGeneration(undefined)
     } catch (cause) {
       setProfile(undefined)
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError(studioErrorMessage(cause, t))
     } finally {
       setLoading(false)
     }
@@ -124,7 +125,7 @@ export function PluginManagement({ selectedDraft, view }: {
       setLoaded(result.profile, nextInspection)
       setAppliedGeneration(result.generation)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError(studioErrorMessage(cause, t))
     } finally {
       setSaving(false)
     }

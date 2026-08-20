@@ -200,7 +200,7 @@ const registry = new StudioPreviewRegistry(() => {
   try {
     post({ type: 'registry', registry: registry.snapshot() })
   } catch (error) {
-    post({ type: 'registry-error', error: error instanceof Error ? error.message : String(error) })
+    post({ type: 'registry-error', code: 'preview-registry', error: error instanceof Error ? error.message : String(error) })
   }
 })
 const studioGlobal = globalThis as typeof globalThis & { [STUDIO_RUNTIME_KEY]?: StudioBrowserRuntime }
@@ -393,7 +393,7 @@ async function click(event: MouseEvent): Promise<void> {
     if (mode === 'inspect' && request === selectionRequest) post({ type: 'selection', selection })
   } catch (error) {
     if (mode === 'inspect' && request === selectionRequest) {
-      post({ type: 'selection-error', error: error instanceof Error ? error.message : String(error) })
+      post({ type: 'selection-error', code: 'preview-selection', error: error instanceof Error ? error.message : String(error) })
     }
   }
 }
@@ -534,7 +534,7 @@ function receiveParentCommand(portEvent: MessageEvent): void {
     void registry.set(command.target).then(() => {
       post({ type: 'variable-result', requestId: command.requestId, ok: true })
     }).catch(error => {
-      post({ type: 'variable-result', requestId: command.requestId, ok: false, error: error instanceof Error ? error.message : String(error) })
+      post({ type: 'variable-result', requestId: command.requestId, ok: false, code: 'preview-variable', error: error instanceof Error ? error.message : String(error) })
     })
   }
   if (command.type === 'set-element-style' && boundedText(command.requestId, 200)
@@ -543,7 +543,7 @@ function receiveParentCommand(portEvent: MessageEvent): void {
       updateElementStyle(command.target)
       post({ type: 'element-style-result', requestId: command.requestId, ok: true })
     } catch (error) {
-      post({ type: 'element-style-result', requestId: command.requestId, ok: false, error: error instanceof Error ? error.message : String(error) })
+      post({ type: 'element-style-result', requestId: command.requestId, ok: false, code: 'preview-style', error: error instanceof Error ? error.message : String(error) })
     }
   }
   if (command.type === 'get-element-style-selectors' && boundedText(command.requestId, 200)

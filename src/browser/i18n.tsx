@@ -10,16 +10,8 @@ import {
 
 export const STUDIO_LOCALE_STORAGE_KEY = 'dsh-webui-studio.locale'
 
-export const STUDIO_LANGUAGES = [
-  { locale: 'en', nativeName: 'English' },
-  { locale: 'zh-CN', nativeName: '简体中文' },
-] as const
-
-export type StudioLocale = typeof STUDIO_LANGUAGES[number]['locale']
-
-const DEFAULT_STUDIO_LOCALE: StudioLocale = 'en'
-
-const messages = {
+export const STUDIO_MESSAGES = {
+  localeNativeName: { en: 'English', 'zh-CN': '简体中文' },
   appSubtitle: { en: 'Plugin client workspace', 'zh-CN': '插件客户端工作区' },
   settings: { en: 'Settings', 'zh-CN': '设置' },
   settingsClose: { en: 'Close settings', 'zh-CN': '关闭设置' },
@@ -54,7 +46,6 @@ const messages = {
   draftWorkspace: { en: 'Draft workspace', 'zh-CN': 'Draft 工作区' },
   draftTabs: { en: 'Draft tabs', 'zh-CN': '草稿标签页' },
   draftLoading: { en: 'Loading drafts…', 'zh-CN': '正在载入草稿…' },
-  draftUnsaved: { en: 'unsaved changes', 'zh-CN': '有未保存修改' },
   draftTabLabel: { en: '{name}, {state}{dirty}', 'zh-CN': '{name}，{state}{dirty}' },
   draftTabDirtySuffix: { en: ', unsaved changes', 'zh-CN': '，有未保存修改' },
   draftTabMoveHint: { en: 'Drag to reorder; use Alt+Left/Right Arrow to move', 'zh-CN': '拖动排序；按 Alt+左右方向键移动' },
@@ -86,19 +77,7 @@ const messages = {
   pluginManagementSearch: { en: 'Search plugins', 'zh-CN': '搜索插件' },
   pluginManagementEmpty: { en: 'No plugins are loaded in this Preview.', 'zh-CN': '当前 Preview 尚未加载插件。' },
   pluginManagementNoResults: { en: 'No plugins match this search.', 'zh-CN': '没有匹配当前搜索的插件。' },
-  patchManagementTitle: { en: 'Harmony Patches', 'zh-CN': 'Harmony Patch' },
-  patchManagementDescription: {
-    en: 'Enable, disable, or reorder individual Patches and apply the profile transactionally.',
-    'zh-CN': '启停或排序单个 Patch，并通过一次事务应用配置。',
-  },
-  patchManagementSearch: { en: 'Search Patches', 'zh-CN': '搜索 Patch' },
-  patchManagementNoResults: { en: 'No Patches match this search.', 'zh-CN': '没有匹配当前搜索的 Patch。' },
-  patchManagementNoProviders: { en: 'No installed plugins currently provide Harmony Patches.', 'zh-CN': '当前没有已安装插件提供 Harmony Patch。' },
   patchManagementEmpty: { en: 'No Harmony Patches', 'zh-CN': '没有 Harmony Patch' },
-  patchManagementEmptyDescription: {
-    en: 'Install or enable a plugin that declares Patches to manage it here.',
-    'zh-CN': '安装或启用声明了 Patch 的插件后，即可在这里管理。',
-  },
   patchManagementMatches: { en: '{count} matches', 'zh-CN': '命中 {count} 处' },
   patchManagementDraftPatches: { en: 'Current Draft Patches', 'zh-CN': '当前 Draft Patch' },
   patchManagementDraftDescription: {
@@ -115,19 +94,12 @@ const messages = {
   },
   patchManagementEnablePatch: { en: 'Enable Patch', 'zh-CN': '启用 Patch' },
   patchManagementDisablePatch: { en: 'Disable Patch', 'zh-CN': '停用 Patch' },
-  profileManagerTitle: { en: 'Draft Preview profile', 'zh-CN': 'Draft Preview 配置' },
-  profileManagerDescription: {
-    en: 'Reorder providers and individual Patches, toggle either level, then commit everything in one Harmony transaction.',
-    'zh-CN': '调整 Provider 与单个 Patch 的顺序，按任一层级启停，再通过一次 Harmony 事务提交全部修改。',
-  },
   profileRefresh: { en: 'Refresh', 'zh-CN': '刷新' },
   profileLoading: { en: 'Reading the active profile…', 'zh-CN': '正在读取当前配置…' },
   profileLoadError: { en: 'The Harmony profile could not be loaded', 'zh-CN': '无法读取 Harmony 配置' },
   retry: { en: 'Retry', 'zh-CN': '重试' },
   profilePinned: { en: 'Pinned', 'zh-CN': '固定' },
   profileMovePlugin: { en: 'Move {name}; use Alt and arrow keys or drag', 'zh-CN': '移动 {name}；可按 Alt 加方向键或拖动' },
-  profileMovePatch: { en: 'Move {name}; use Alt and arrow keys or drag', 'zh-CN': '移动 {name}；可按 Alt 加方向键或拖动' },
-  profileNoPatches: { en: 'No patches', 'zh-CN': '无 Patch' },
   profileVersionUnknown: { en: 'Version unknown', 'zh-CN': '版本未知' },
   profileProviderNoDescription: { en: 'This provider has no description.', 'zh-CN': '该 Provider 没有描述。' },
   profileDraftNotRunning: { en: 'Draft Preview is not running', 'zh-CN': 'Draft Preview 未运行' },
@@ -144,8 +116,6 @@ const messages = {
   profilePatchCount: { en: '{count} Patches', 'zh-CN': '{count} 个 Patch' },
   profileProviderOrder: { en: 'Plugin application order', 'zh-CN': '插件应用顺序' },
   profilePatchOrder: { en: 'Patch execution order', 'zh-CN': 'Patch 执行顺序' },
-  profileCompositeMembers: { en: '{count} members', 'zh-CN': '{count} 个成员' },
-  profileConstraint: { en: 'Order', 'zh-CN': '顺序约束' },
   profilePatchStatusNormal: { en: 'Ready', 'zh-CN': '正常' },
   profilePatchStatusWarning: { en: 'Warning', 'zh-CN': '警告' },
   profilePatchStatusError: { en: 'Failed', 'zh-CN': '失败' },
@@ -236,7 +206,6 @@ const messages = {
   lockAspectRatio: { en: 'Lock aspect ratio', 'zh-CN': '锁定宽高比' },
   unlockAspectRatio: { en: 'Unlock aspect ratio', 'zh-CN': '解锁宽高比' },
   custom: { en: 'Custom', 'zh-CN': '自定义' },
-  webuiSize: { en: 'WebUI size', 'zh-CN': 'WebUI 尺寸' },
   viewportWidth: { en: 'WebUI viewport width', 'zh-CN': 'WebUI viewport 宽度' },
   viewportHeight: { en: 'WebUI viewport height', 'zh-CN': 'WebUI viewport 高度' },
   previewZoom: { en: 'Studio preview zoom', 'zh-CN': 'Studio 预览缩放' },
@@ -411,7 +380,6 @@ const messages = {
   agentLeaving: { en: 'Leaving…', 'zh-CN': '正在退出…' },
   agentLeaveDescription: { en: 'Remove the temporary Studio scope and return this session to ordinary DSH use.', 'zh-CN': '移除临时 Studio 作用域，让这个会话回到普通 DSH 使用方式。' },
   agentLeaveRunning: { en: 'Stop the current turn before leaving Studio mode.', 'zh-CN': '请先停止当前回合，再退出 Studio 模式。' },
-  you: { en: 'You', 'zh-CN': '你' },
   agentMessage: { en: 'Message Studio Agent', 'zh-CN': '给 Studio Agent 的消息' },
   agentPlaceholderStart: { en: 'Start Studio Agent first', 'zh-CN': '先启动 Studio Agent' },
   agentPlaceholder: { en: 'Describe the changes you want to apply to WebUI…', 'zh-CN': '描述你希望叠加到 WebUI 的修改…' },
@@ -421,6 +389,8 @@ const messages = {
   agentImage: { en: 'Image attachment', 'zh-CN': '图片附件' },
   agentImageCount: { en: '{count} image attachments', 'zh-CN': '{count} 张图片附件' },
   agentContext: { en: 'Context', 'zh-CN': '上下文' },
+  agentMaximumOutput: { en: 'Maximum output reached', 'zh-CN': '已达到最大输出长度' },
+  agentTruncated: { en: 'truncated', 'zh-CN': '已截断' },
   agentInterrupted: { en: 'Stopped', 'zh-CN': '已停止' },
   agentToolRunning: { en: 'Running', 'zh-CN': '执行中' },
   agentToolDone: { en: 'Done', 'zh-CN': '已完成' },
@@ -431,7 +401,6 @@ const messages = {
   agentSteering: { en: 'Steering next step', 'zh-CN': '下一步指令' },
   agentLoadOlder: { en: 'Load earlier messages', 'zh-CN': '加载更早消息' },
   agentLoadingOlder: { en: 'Loading…', 'zh-CN': '正在加载…' },
-  sending: { en: 'Sending…', 'zh-CN': '发送中…' },
   send: { en: 'Send', 'zh-CN': '发送' },
   interactionApproval: { en: 'Agent is waiting for tool approval. Continue in the official WebUI for now.', 'zh-CN': 'Agent 正在等待工具授权；请暂时在官方 WebUI 中处理。' },
   interactionQuestion: { en: 'Agent is waiting for more information. Reply in the official WebUI for now.', 'zh-CN': 'Agent 正在等待补充信息；请暂时在官方 WebUI 中回答。' },
@@ -443,9 +412,33 @@ const messages = {
   errorUnsavedOpenFile: { en: 'Save the current file before opening another file.', 'zh-CN': '当前文件尚未保存。请先保存，再打开其他文件。' },
   errorUnsavedSwitchDraft: { en: 'Press Ctrl+S or Command+S to save before switching drafts.', 'zh-CN': '当前文件尚未保存。请先按 Ctrl+S 或 Command+S 保存，再切换草稿。' },
   errorUnsavedCloseDraft: { en: 'Save the current file before closing this draft tab.', 'zh-CN': '当前文件尚未保存。保存后才能关闭这个草稿标签。' },
+  errorTransport: { en: 'Could not connect to Studio.', 'zh-CN': '无法连接到 Studio。' },
+  errorRequestCanceled: { en: 'The operation was canceled.', 'zh-CN': '操作已取消。' },
+  errorRequestInvalid: { en: 'Studio rejected the request.', 'zh-CN': 'Studio 拒绝了该请求。' },
+  errorServiceUnavailable: { en: 'The requested Studio service is unavailable.', 'zh-CN': '请求的 Studio 服务当前不可用。' },
+  errorBuildBusy: { en: 'A Draft build is already running.', 'zh-CN': '已有 Draft 构建正在运行。' },
+  errorBuildConfig: { en: 'The Draft build configuration is invalid.', 'zh-CN': 'Draft 构建配置无效。' },
+  errorBuildFailed: { en: 'The Draft build failed.', 'zh-CN': 'Draft 构建失败。' },
+  errorBuildTimeout: { en: 'The Draft build timed out.', 'zh-CN': 'Draft 构建超时。' },
+  errorBuildCanceled: { en: 'The Draft build was canceled.', 'zh-CN': 'Draft 构建已取消。' },
+  errorPreviewRegistry: { en: 'The Preview registry could not be read.', 'zh-CN': '无法读取 Preview 注册信息。' },
+  errorPreviewSelection: { en: 'The selected Preview element could not be inspected.', 'zh-CN': '无法检查选中的 Preview 元素。' },
+  errorPreviewVariable: { en: 'The Preview variable could not be updated.', 'zh-CN': '无法更新 Preview 变量。' },
+  errorPreviewStyle: { en: 'The Preview element style could not be updated.', 'zh-CN': '无法更新 Preview 元素样式。' },
+  errorUnexpected: { en: 'The operation failed.', 'zh-CN': '操作失败。' },
+  errorDiagnostic: { en: '{summary} Diagnostic: {details}', 'zh-CN': '{summary} 诊断信息：{details}' },
 } as const
 
-export type StudioMessageKey = keyof typeof messages
+export type StudioLocale = keyof typeof STUDIO_MESSAGES.localeNativeName
+
+export const STUDIO_LANGUAGES = Object.entries(STUDIO_MESSAGES.localeNativeName).map(([locale, nativeName]) => ({
+  locale: locale as StudioLocale,
+  nativeName,
+}))
+
+const DEFAULT_STUDIO_LOCALE: StudioLocale = 'en'
+
+export type StudioMessageKey = keyof typeof STUDIO_MESSAGES
 export type StudioTranslate = (key: StudioMessageKey, values?: Record<string, string | number>) => string
 
 export interface StudioLocaleState {
@@ -476,7 +469,7 @@ export function translate(
 ): string {
   return Object.entries(values).reduce(
     (message, [name, value]) => message.replaceAll(`{${name}}`, String(value)),
-    messages[key][locale] as string,
+    STUDIO_MESSAGES[key][locale] as string,
   )
 }
 
