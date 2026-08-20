@@ -1,5 +1,6 @@
 import type { AgentRegistry } from '@deepseek-ai/dsh-agent'
 import type { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
+import { fileURLToPath } from 'node:url'
 import type {
   StudioBuildResult,
   StudioAgentBinding,
@@ -34,6 +35,8 @@ import { applyProjectPatch, listProjectFiles, readProjectFile, writeProjectFile 
 import { inspectReadiness, StudioPackRunner } from './readiness.js'
 import { assertDraftPackageIdentity, installDraftDependencies } from './runtime-profile.js'
 import type { StudioWorkspaceStore } from './workspace.js'
+
+const HARMONY_BIN_ENTRY = fileURLToPath(import.meta.resolve('dsh-harmony/bin'))
 
 function objectPayload(payload: unknown): Record<string, unknown> {
   if (typeof payload !== 'object' || payload === null) throw new Error('request payload must be an object')
@@ -278,7 +281,6 @@ class StudioDraftController implements StudioAgentWorkspace {
       this.record.name,
       inspection.harmony,
       `${this.record.runtimeHome}/profiles/web`,
-      inspection.dependencies,
     )
   }
 
@@ -572,10 +574,10 @@ export class StudioBackend {
   private makeController(record: StudioDraftRecord): StudioDraftController {
     const controller = new StudioDraftController(
       record,
-      this.harmony.profileDir,
+      this.harmony.profile().dir,
       this.parentOrigin,
       this.commands,
-      this.harmony.binEntry,
+      HARMONY_BIN_ENTRY,
       this.agents,
       this.subprocess,
     )

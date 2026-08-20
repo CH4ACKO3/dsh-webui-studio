@@ -246,9 +246,9 @@ export function PluginManagement({ selectedDraft, view }: {
                       {patch.kind} · {t('patchManagementMatches', { count: patch.matches })}
                     </span></span>
                     <span className="profile-patch-controls">
-                      <Badge tone={patch.status === 'error' ? 'danger' : patch.status === 'warning' ? 'warning'
-                        : patch.status === 'normal' ? 'success' : 'neutral'}>{t(patch.status === 'error' ? 'profilePatchStatusError'
-                          : patch.status === 'warning' ? 'profilePatchStatusWarning' : patch.status === 'normal'
+                      <Badge tone={patch.state === 'failed' ? 'danger' : patch.state === 'pending' ? 'warning'
+                        : patch.state === 'bound' ? 'success' : 'neutral'}>{t(patch.state === 'failed' ? 'profilePatchStatusError'
+                          : patch.state === 'pending' ? 'profilePatchStatusWarning' : patch.state === 'bound'
                             ? 'profilePatchStatusNormal' : 'profilePatchStatusDisabled')}</Badge>
                     </span>
                   </article>)}

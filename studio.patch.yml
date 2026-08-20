@@ -8,3 +8,6 @@
     - id: harmony-studio-binding
       name: the-binding-of-dsh
       inject: [harmony]
+    - id: harmony-studio
+      name: dsh-webui-studio
+      inject: [harmony]

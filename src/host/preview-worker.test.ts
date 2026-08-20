@@ -30,7 +30,7 @@ beforeEach(() => {
   sourceResolver.readDependencyTarget.mockReset()
 })
 
-function worker(harmony: StudioHarmonyService = { profileDir: '/profile' } as StudioHarmonyService) {
+function worker(harmony: StudioHarmonyService = { profile: () => ({ dir: '/profile' }) } as StudioHarmonyService) {
   return new StudioPreviewWorkerService(new Context(), harmony, { root: '/draft', packageDirs: [] })
 }
 
@@ -85,14 +85,12 @@ it('returns installed dependency source and version for automatic Patch analysis
 it('normalizes Harmony inspection output like the native JSON carrier', async () => {
   previewDraft.open.mockResolvedValue({ snapshot: () => ({ name: 'draft-plugin' }), async close() {} })
   const service = worker({
-    profileDir: '/profile',
+    profile: () => ({ dir: '/profile' }),
     inspect: () => ({ patches: [{ key: 'draft/patch', error: undefined }] }),
-    inspectDependencies: () => [{ patch: 'draft/patch', reason: undefined }],
   } as unknown as StudioHarmonyService)
 
   await expect(service.inspect({}, signal)).resolves.toEqual({
     harmony: { patches: [{ key: 'draft/patch' }] },
-    dependencies: [{ patch: 'draft/patch' }],
   })
 })
 
@@ -115,9 +113,9 @@ it('reads and transactionally updates the active Preview Harmony profile', async
     plugins: [], orderViolations: [], patchOrderViolations: [], pluginConflicts: [],
   }
   const updateProfile = vi.fn(async (input: { disabled?: string[] }) => ({
-    profile: { ...profile, ...input }, generation: 3, reload: { state: 'succeeded' as const }, clientGraphRev: 'graph-3',
+    mode: 'live' as const, profile: { ...profile, ...input }, generation: 3, reload: { state: 'succeeded' as const },
   }))
-  const service = worker({ profileDir: profile.dir, profile: () => profile, updateProfile } as unknown as StudioHarmonyService)
+  const service = worker({ profile: () => profile, updateProfile } as unknown as StudioHarmonyService)
 
   await expect(service.profile(signal)).resolves.toEqual(profile)
   await expect(service.updateProfile({ operationId: 'profile-update-1', disabled: ['draft-plugin/one'] }, signal)).resolves.toMatchObject({

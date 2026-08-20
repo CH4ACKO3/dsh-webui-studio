@@ -37,8 +37,8 @@ WebUI Studio 不是模拟页面生成器。它运行在官方 DSH WebUI 和真�
 把可视化检查与源码修改转化为可分发、由插件自身拥有的产物。
 
 Studio 是 [`dsh-harmony`](https://github.com/CH4ACKO3/dsh-harmony)
-的独立下游应用。它通过公共 package exports 使用 Harmony 的 Host extension、runtime、
-Patch engine 与 service API，并使用
+的独立下游应用。它通过公共 package exports 使用 Harmony 的 runtime、Patch engine、
+service API 与 CLI 控制面，并使用
 [`dsh-harmony-react`](https://github.com/CH4ACKO3/dsh-harmony/tree/main/packages/react)
 提供的通用 React 注册 API。依赖始终保持单向：Studio 依赖 Harmony，Harmony 不依赖 Studio。
 
@@ -116,8 +116,8 @@ Draft 显示名与 npm package identity 相互独立，可在实例面板中重�
 
 > [!IMPORTANT]
 > Studio 依赖 [`docs/harmony-api-requirements.md`](docs/harmony-api-requirements.md)
-> 中列出的 Harmony 公共 extension 与 service API，最低兼容版本为
-> `dsh-harmony@0.4.2`。
+> 中列出的 Harmony 公共 service 与 CLI API，最低兼容版本为
+> `dsh-harmony@0.6.0`。
 
 ```sh
 dsh plugin --profile web add dsh-webui-studio
@@ -199,11 +199,11 @@ Agent，而是为 Agent 和开发者提供更好的交互式修改体验。
 DSH WebUI 已经提供了许多 Slot 点位，但 Studio 不满足于此。我们希望实现更深层、
 更高自由度的修改，包括修改其他插件加入的 UI 和逻辑，同时让不同修改插件之间尽可能
 兼容。[`dsh-harmony`](https://github.com/CH4ACKO3/dsh-harmony) 提供的运行时 Patch 与
-扩展模型，让这种能力成为可能。
+运行时模型，让这种能力成为可能。
 
 ## 相关项目
 
-- [`dsh-harmony`](https://github.com/CH4ACKO3/dsh-harmony) - runtime patch、Host extension 挂载、插件重载与 Patch 检查
+- [`dsh-harmony`](https://github.com/CH4ACKO3/dsh-harmony) - runtime patch、事务式插件重载与 Patch 检查
 - [`dsh-harmony-react`](https://github.com/CH4ACKO3/dsh-harmony/tree/main/packages/react) - React-aware Patch 工厂与 Studio element/variable 注册
 
 ## 许可证

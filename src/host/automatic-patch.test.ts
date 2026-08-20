@@ -57,8 +57,8 @@ test('analyzes every string-literal match and generates one exact-count Patch pe
   expect(plan.provider.patchIds).toHaveLength(2)
   expect(plan.provider.source).toContain('expect: 2')
   expect(plan.provider.source).toContain('expect: 1')
-  expect(plan.provider.source).toContain('files: ["lib/client.js"]')
-  expect(plan.provider.source).toContain('files: ["dist/web.js"]')
+  expect(plan.provider.source).toContain('file: "lib/client.js"')
+  expect(plan.provider.source).toContain('file: "dist/web.js"')
   expect(plan.provider.source).not.toContain('lib/unused.js')
   expect(ts.createSourceFile('content-client.js', plan.client!.source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS).parseDiagnostics).toEqual([])
   const generated: { exports: Array<{ apply(context: {

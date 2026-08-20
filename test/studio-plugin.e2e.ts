@@ -23,6 +23,8 @@ const packageRoot = fileURLToPath(new URL('..', import.meta.url))
 const studioPath = '/studio'
 const dshBin = fileURLToPath(import.meta.resolve('@deepseek-ai/dsh/lib/bin.js'))
 const harmonyBin = process.env.DSH_HARMONY_BIN_ENTRY ?? fileURLToPath(import.meta.resolve('dsh-harmony/bin'))
+const harmonyPackageSpec = process.env.DSH_HARMONY_PACKAGE_SPEC
+const bindingPackageSpec = process.env.DSH_BINDING_PACKAGE_SPEC
 const root = mkdtempSync(join(tmpdir(), 'dsh-harmony-studio-'))
 const home = join(root, 'home')
 const draftRoot = join(root, 'draft-plugin')
@@ -55,7 +57,7 @@ writeFileSync(join(draftRoot, 'index.js'), draftIndexSource)
 writeFileSync(join(draftRoot, 'preview.patch.cjs'), `
 module.exports = {
   id: 'preview-runtime',
-  target: { package: 'studio-draft', files: ['index.js'] },
+  target: { package: 'studio-draft', file: 'index.js' },
   select: 'FunctionDeclaration[name.name="apply"] ReturnStatement',
   expect: 1,
   apply({ node, edit }) { edit.overwrite(node.getStart(), node.getEnd(), 'return "patched Preview"') },
@@ -118,6 +120,20 @@ try {
   const studioTarball = join(root, tarballs[0]!)
   const installed = add(studioTarball)
   assert.equal(installed.status, 0, `${installed.stdout}\n${installed.stderr}`)
+  const localPackages = [harmonyPackageSpec, bindingPackageSpec].filter((spec): spec is string => spec !== undefined)
+  if (localPackages.length > 0) {
+    const installedLocalPackages = spawnSync('npm', ['install', '--ignore-scripts', ...localPackages], {
+      cwd: join(home, 'profiles', 'web'),
+      env,
+      encoding: 'utf8',
+    })
+    assert.equal(installedLocalPackages.status, 0, `${installedLocalPackages.stdout}\n${installedLocalPackages.stderr}`)
+    const profileManifestPath = join(home, 'profiles', 'web', 'package.json')
+    const profileManifest = JSON.parse(readFileSync(profileManifestPath, 'utf8')) as { dependencies: Record<string, string> }
+    if (harmonyPackageSpec !== undefined) profileManifest.dependencies['dsh-harmony'] = `file:${harmonyPackageSpec}`
+    if (bindingPackageSpec !== undefined) profileManifest.dependencies['the-binding-of-dsh'] = `file:${bindingPackageSpec}`
+    writeFileSync(profileManifestPath, `${JSON.stringify(profileManifest, null, 2)}\n`)
+  }
 
   const dump = spawnSync(process.execPath, [dshBin, '--profile', 'web', '--dump-config'], {
     cwd: root,
@@ -127,7 +143,7 @@ try {
   assert.equal(dump.status, 0, dump.stderr)
   assert.match(dump.stdout, /id: harmony-studio-runtime/)
   assert.match(dump.stdout, /name: dsh-harmony/)
-  assert.doesNotMatch(dump.stdout, /^\s*name: dsh-webui-studio$/m)
+  assert.match(dump.stdout, /^\s*name: dsh-webui-studio$/m)
 
   const harmonyDump = spawnSync(process.execPath, [harmonyBin, '--profile', 'web', '--dump-config'], {
     cwd: root,

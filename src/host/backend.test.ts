@@ -36,12 +36,12 @@ vi.mock('./preview.js', () => ({
     async state() { return previewState.project }
     async activate(graphRev: string) { return { ...previewState.project, state: 'active', graphRev } }
     async applyBuild() { return { ...previewState.project, state: 'preview-pending', graphRev: 'graph-2' } }
-    async inspect() { return { harmony: { patches: [], targets: [] }, dependencies: [] } }
+    async inspect() { return { harmony: { patches: [], targets: [] } } }
     async profile() { return previewState.profile }
     async updateProfile(input: { order?: string[]; patchOrder?: string[]; disabled?: string[] }) {
       previewState.updateProfile(input)
       previewState.profile = { ...previewState.profile, ...input }
-      return { profile: previewState.profile, generation: 2, reload: { state: 'succeeded' }, clientGraphRev: 'graph-2' }
+      return { mode: 'live', profile: previewState.profile, generation: 2, reload: { state: 'succeeded' } }
     }
     async readPatchTarget(packageName: string, file: string) {
       return { package: packageName, file, version: '1.2.3', source: 'const first = "Original";\nconst second = "Original";\n' }
@@ -74,7 +74,7 @@ function record(root: string): StudioDraftRecord {
 function backend(
   draft: StudioDraftRecord,
   get = vi.fn(async () => draft),
-  harmony = { profileDir: '/home/profiles/web' } as StudioHarmonyService,
+  harmony = { profile: () => ({ dir: '/home/profiles/web' }) } as StudioHarmonyService,
   agentRegistry?: AgentRegistry,
 ): StudioBackend {
   previewState.project = { name: draft.name, root: draft.root, state: 'preview-pending', graphRev: 'graph-1' }
@@ -124,7 +124,7 @@ describe('StudioBackend', () => {
       disabled: [`${draft.name}/*`],
     })
     expect(updated).toMatchObject({
-      profile: { disabled: [`${draft.name}/*`] }, generation: 2, clientGraphRev: 'graph-2',
+      profile: { disabled: [`${draft.name}/*`] }, generation: 2,
     })
   })
 

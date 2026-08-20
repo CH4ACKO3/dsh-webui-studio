@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { StudioHarmonyService } from '../contracts.js'
+import type { StudioCommandRunner } from './drafts.js'
 import { StudioPreviewDraft } from './preview-draft.js'
 
 const roots: string[] = []
@@ -31,7 +32,7 @@ function previewHost() {
   const entries: Array<{ id: string; options: { name: string } }> = []
   let graph = { rev: 'graph-1', entries: [] as Array<{ id: string }> }
   const calls: string[] = []
-  const reloadPlugin = vi.fn(async (name: string) => { calls.push(`reload:${name}`) })
+  const reload = vi.fn(async (_command: string, args: string[]) => { calls.push(`reload:${args.at(-1)}`) })
   const ctx = {
     loader: {
       *entries() { yield* entries },
@@ -53,22 +54,23 @@ function previewHost() {
     },
   } as unknown as Context
   const harmony = {
-    profileDir: profile,
-    reloadPlugin,
+    profile: () => ({ dir: profile }),
   } as unknown as StudioHarmonyService
+  const commands = { run: reload } as StudioCommandRunner
   return {
     root,
     ctx,
     harmony,
     calls,
-    reloadPlugin,
+    commands,
+    reload,
     setGraph(rev: string) { graph = { rev, entries: [{ id: 'draft-plugin' }] } },
   }
 }
 
 it('loads real Draft Patches before reporting the Preview as pending', async () => {
   const host = previewHost()
-  const draft = await new StudioPreviewDraft(host.ctx, host.harmony, host.root).open()
+  const draft = await new StudioPreviewDraft(host.ctx, host.harmony, host.root, host.commands).open()
 
   expect(draft.snapshot()).toEqual({
     name: 'draft-plugin', root: realpathSync(host.root), state: 'preview-pending', graphRev: 'graph-1',
@@ -78,22 +80,28 @@ it('loads real Draft Patches before reporting the Preview as pending', async () 
   expect(draft.activate('graph-1').state).toBe('active')
   host.setGraph('graph-2')
   await expect(draft.applyBuild()).resolves.toMatchObject({ state: 'preview-pending', graphRev: 'graph-2' })
+  expect(host.calls).toEqual(['create:draft-plugin', 'reload:draft-plugin'])
   await draft.close()
-  expect(host.calls.slice(-3)).toEqual(['reload:draft-plugin', 'remove:draft-entry', 'reload:draft-plugin'])
+  expect(host.calls).toEqual([
+    'create:draft-plugin',
+    'reload:draft-plugin',
+    'remove:draft-entry',
+    'reload:draft-plugin',
+  ])
 })
 
 it('fails Preview startup and removes its Loader entry when the reload transaction fails', async () => {
   const host = previewHost()
-  host.reloadPlugin.mockRejectedValueOnce(new Error('Draft plugin reload failed'))
+  host.reload.mockRejectedValueOnce(new Error('Draft plugin reload failed'))
 
-  await expect(new StudioPreviewDraft(host.ctx, host.harmony, host.root).open()).rejects.toThrow('Draft plugin reload failed')
-  expect(host.reloadPlugin).toHaveBeenCalledTimes(2)
+  await expect(new StudioPreviewDraft(host.ctx, host.harmony, host.root, host.commands).open()).rejects.toThrow('Draft plugin reload failed')
+  expect(host.reload).toHaveBeenCalledTimes(2)
   expect(host.calls).toEqual(['create:draft-plugin', 'remove:draft-entry', 'reload:draft-plugin'])
 })
 
 it('accepts only the live Preview graph', async () => {
   const host = previewHost()
-  const draft = await new StudioPreviewDraft(host.ctx, host.harmony, host.root).open()
+  const draft = await new StudioPreviewDraft(host.ctx, host.harmony, host.root, host.commands).open()
 
   expect(() => draft.activate('stale-graph')).toThrow('did not confirm')
   expect(draft.snapshot().state).toBe('preview-pending')

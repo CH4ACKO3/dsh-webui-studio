@@ -239,14 +239,16 @@ export class StudioPreviewSupervisor {
   }
 
   async applyBuild(): Promise<StudioProjectState> {
-    const operationId = randomUUID()
-    try {
-      return await this.invoke(this.remote().applyBuild(operationId))
-    } catch (error) {
-      if (!this.isGenerationLoss(error)) throw error
-    }
+    await this.commands.run(
+      process.execPath,
+      [this.harmonyBinEntry, 'harmony', 'reload', this.draft.name],
+      this.draft.worktreeDir,
+      chunk => { this.runtime.log = appendLog(this.runtime.log, chunk) },
+      undefined,
+      { ...process.env, DSH_HOME: this.draft.runtimeHome },
+    )
     await this.reconnectPeer()
-    return this.invoke(this.remote().applyBuild(operationId))
+    return this.invoke(this.remote().applyBuild(randomUUID()))
   }
 
   async inspect(input: { package?: string; file?: string } = {}): Promise<StudioPreviewInspection> {

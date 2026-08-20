@@ -137,7 +137,7 @@ function patchId(request: StudioAutomaticPatchRequest, target: StudioAutomaticPa
 function stringPatch(request: Extract<StudioAutomaticPatchRequest, { kind: 'replace-string' }>, target: StudioAutomaticPatchTargetAnalysis, id: string): string {
   return `  {
     id: ${JSON.stringify(id)},
-    target: { package: ${JSON.stringify(target.package)}, version: ${JSON.stringify(target.version)}, files: [${JSON.stringify(target.file)}] },
+    target: { package: ${JSON.stringify(target.package)}, version: ${JSON.stringify(target.version)}, file: ${JSON.stringify(target.file)} },
     select: ${JSON.stringify(`StringLiteral[text=${JSON.stringify(request.text)}]`)},
     expect: ${target.matches.length},
     apply({ node, sourceFile, edit }) {
@@ -154,7 +154,7 @@ function cssPatch(
 ): string {
   return `  component({
     id: ${JSON.stringify(id)},
-    target: { package: ${JSON.stringify(target.package)}, version: ${JSON.stringify(target.version)}, files: [${JSON.stringify(target.file)}] },
+    target: { package: ${JSON.stringify(target.package)}, version: ${JSON.stringify(target.version)}, file: ${JSON.stringify(target.file)} },
     select: { name: ${JSON.stringify(request.component)} },
     expect: ${target.matches.length},
     operation: { kind: 'decorate', with: { module: ${JSON.stringify(owner)}, export: AUTO_EXPORT } },

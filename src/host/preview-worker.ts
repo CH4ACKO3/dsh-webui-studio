@@ -84,7 +84,7 @@ const profileUpdateSchema = z.object({
 })
 const inspectInputSchema = z.object({ package: z.string().optional(), file: z.string().optional() })
 const healthSchema = z.object({ ready: z.boolean(), error: z.string().optional() })
-const previewInspectionSchema = z.object({ harmony: z.unknown(), dependencies: z.array(z.unknown()) })
+const previewInspectionSchema = z.object({ harmony: z.unknown() })
 const patchTargetSchema = z.object({
   package: z.string(),
   file: z.string(),
@@ -175,7 +175,7 @@ export class StudioPreviewWorkerService extends TypertRemoteService {
       () => { this.readiness = { state: 'ready' } },
       error => { this.readiness = { state: 'failed', error } },
     )
-    this.sources = new StudioSourceResolver(options.root, harmony.profileDir, options.packageDirs)
+    this.sources = new StudioSourceResolver(options.root, harmony.profile().dir, options.packageDirs)
   }
 
   async health(signal: AbortSignal): Promise<StudioPreviewHealth> {
@@ -221,10 +221,9 @@ export class StudioPreviewWorkerService extends TypertRemoteService {
     signal: AbortSignal,
   ): Promise<StudioPreviewInspection> {
     signal.throwIfAborted()
-    const opened = await this.ready
+    await this.ready
     return jsonTransport({
       harmony: this.harmony.inspect(input),
-      dependencies: this.harmony.inspectDependencies(opened.snapshot().name),
     })
   }
 

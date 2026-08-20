@@ -12,7 +12,7 @@ import { isProfilePatchEnabled, sameStringList, setProfilePatchEnabled, setProfi
 import { Badge, Button, Notice } from './ui'
 
 type PatchStatus = StudioHarmonyInspection['patches'][number]
-type PatchCardStatus = PatchStatus['status']
+type PatchCardStatus = 'normal' | 'disabled' | 'warning' | 'error'
 type Selection = { kind: 'plugin' | 'patch'; key: string }
 type PatchViewNode =
   | { type: 'patch'; key: string; owner: string; index: number }
@@ -175,9 +175,9 @@ export function HarmonyPatchOrder({ profile, inspection, order, disabled, saving
   const warningPatchKeys = useMemo(() => new Set(profile.patchOrderViolations.flatMap(item => [item.before, item.after])), [profile.patchOrderViolations])
   const cardStatus = (key: string): PatchCardStatus => {
     const patch = patchMap.get(key)
-    if (!isProfilePatchEnabled(disabled, patch?.owner ?? patchOwner(key, patchMap), key)) return 'disabled'
-    if (patch?.status === 'error' || patch?.state === 'failed') return 'error'
-    if (patch?.status === 'warning' || warningPatchKeys.has(key)) return 'warning'
+    if (!isProfilePatchEnabled(disabled, patch?.owner ?? patchOwner(key, patchMap), key) || patch?.state === 'disabled') return 'disabled'
+    if (patch?.state === 'failed') return 'error'
+    if (patch?.state === 'pending' || warningPatchKeys.has(key)) return 'warning'
     return 'normal'
   }
   const stackStatuses = (keys: string[]): PatchCardStatus[] => keys.map(cardStatus)
@@ -557,7 +557,7 @@ export function HarmonyPatchOrder({ profile, inspection, order, disabled, saving
           <p className="dshHarmonyScope">{selectedPatch.key}</p></div>
         <p className="dshHarmonyDescription">{selectedPatch.kind}{selectedPatch.operation ? ` / ${selectedPatch.operation}` : selectedPatch.loader ? ` / ${selectedPatch.loader}` : ''}</p>
         <div className="dshHarmonyFacts"><span>{t('profilePatchProvider')}: {displayName(selectedPatch.owner)}</span>
-          <span>{t('profilePatchTarget')}: {selectedPatch.targets.map(target => `${target.package}/${target.files.join(' | ')}`).join(', ')}</span>
+          <span>{t('profilePatchTarget')}: {selectedPatch.targets.map(target => `${target.package}/${target.file}`).join(', ')}</span>
           <span>{t('profilePatchMatches')}: {selectedPatch.matches}</span><span>{t('profilePatchGeneration')}: {selectedPatch.generation}</span></div>
         <div className="dshHarmonyPatchActions">
           <Button size="small" onClick={() => onDisabledChange(setProfilePluginEnabled(disabled, selectedPatch.owner, !ownerEnabled))}>

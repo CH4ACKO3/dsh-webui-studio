@@ -56,7 +56,7 @@
     "build:browser": "vite build && vite build -c vite.bridge.config.ts",
     "typecheck": "tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.browser.json --noEmit && tsc -p tsconfig.bridge.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "test": "vitest run",
-    "test:integration": "npm run build && node test/studio-extension.e2e.ts",
+    "test:integration": "npm run build && node test/studio-plugin.e2e.ts",
     "check": "npm run typecheck && npm test && npm run test:integration",
     "remote": "node scripts/remote-studio.ts",
     "prepublishOnly": "npm run check",
@@ -77,9 +77,6 @@
         "en": "Build and test Harmony patches against a live DSH WebUI preview."
       },
       "category": "plugin-development"
-    },
-    "harmony": {
-      "extension": "./lib/index.js"
     },
     "bundle": {
       "patch": "./studio.patch.yml"

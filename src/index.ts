@@ -57,7 +57,7 @@ export function apply(ctx: Context): void {
       return () => {}
     }
     const host = `127.0.0.1:${ctx.webServer.port}`
-    const dshHome = dshHomeFromProfile(harmony.profileDir)
+    const dshHome = dshHomeFromProfile(harmony.profile().dir)
     const backend = new StudioBackend(
       harmony,
       ctx.agents,

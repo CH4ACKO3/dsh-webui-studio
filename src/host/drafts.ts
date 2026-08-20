@@ -8,13 +8,20 @@ const PACKAGE_NAME = /^(?:@[a-z0-9._~-]+\/)?[a-z0-9._~-]+$/
 const COMMAND_OUTPUT_LIMIT = 2 * 1024 * 1024
 
 export interface StudioCommandRunner {
-  run(command: string, args: string[], cwd?: string, onOutput?: (chunk: string) => void, signal?: AbortSignal): Promise<void>
+  run(
+    command: string,
+    args: string[],
+    cwd?: string,
+    onOutput?: (chunk: string) => void,
+    signal?: AbortSignal,
+    env?: NodeJS.ProcessEnv,
+  ): Promise<void>
 }
 
 export const studioCommands: StudioCommandRunner = {
-  run(command, args, cwd, onOutput, signal) {
+  run(command, args, cwd, onOutput, signal, env) {
     return new Promise<void>((resolve, reject) => {
-      const child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], signal })
+      const child = spawn(command, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'], signal })
       let output = ''
       const read = (chunk: Buffer | string): void => {
         const text = chunk.toString()

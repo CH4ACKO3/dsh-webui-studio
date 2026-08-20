@@ -39,7 +39,7 @@ distributable plugin-owned artifacts.
 
 Studio is an independent downstream application of
 [`dsh-harmony`](https://github.com/CH4ACKO3/dsh-harmony). It uses Harmony's
-public Host extension, runtime, Patch engine, and service APIs together with the
+public runtime, Patch engine, service API, and CLI control surface together with the
 generic React registration API from
 [`dsh-harmony-react`](https://github.com/CH4ACKO3/dsh-harmony/tree/main/packages/react).
 The dependency direction stays one-way: Studio depends on Harmony; Harmony does
@@ -126,9 +126,9 @@ workspace and never stops or deletes the Draft. Unsaved Source changes must be s
 ## Getting started
 
 > [!IMPORTANT]
-> Studio requires the public Harmony extension and service APIs documented in
+> Studio requires the public Harmony service and CLI APIs documented in
 > [`docs/harmony-api-requirements.md`](docs/harmony-api-requirements.md).
-> `dsh-harmony@0.4.2` is the minimum compatible release.
+> `dsh-harmony@0.6.0` is the minimum compatible release.
 
 ```sh
 dsh plugin --profile web add dsh-webui-studio
@@ -218,11 +218,11 @@ The DSH WebUI exposes many useful slots, but Studio aims for deeper and more
 flexible changes—including UI and behavior introduced by other plugins—while
 keeping independently authored modifications as compatible as possible.
 [`dsh-harmony`](https://github.com/CH4ACKO3/dsh-harmony) provides the runtime
-patching and extension model that makes this possible.
+patching and runtime model that makes this possible.
 
 ## Related projects
 
-- [`dsh-harmony`](https://github.com/CH4ACKO3/dsh-harmony) - runtime patching, Host extension mounting, plugin reloads, and Patch inspection
+- [`dsh-harmony`](https://github.com/CH4ACKO3/dsh-harmony) - runtime patching, transactional plugin reloads, and Patch inspection
 - [`dsh-harmony-react`](https://github.com/CH4ACKO3/dsh-harmony/tree/main/packages/react) - React-aware Patch factories and Studio element/variable registration
 
 ## License

@@ -1,11 +1,13 @@
 import { readFileSync, realpathSync } from 'node:fs'
 import { createRequire, findPackageJSON } from 'node:module'
 import { dirname, isAbsolute, join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import type { StudioHarmonyService, StudioProjectState } from '../contracts.js'
+import { studioCommands, type StudioCommandRunner } from './drafts.js'
 
 const CLIENT_ENTRY_TIMEOUT_MS = 10_000
+const HARMONY_BIN_ENTRY = fileURLToPath(import.meta.resolve('dsh-harmony/bin'))
 
 function packageNameOf(specifier: string): string | undefined {
   const clean = specifier.replace(/\?dsh-harmony=\d+$/, '')
@@ -54,8 +56,9 @@ export class StudioPreviewDraft {
     private readonly ctx: Context,
     private readonly harmony: StudioHarmonyService,
     root: string,
+    private readonly commands: StudioCommandRunner = studioCommands,
   ) {
-    const draft = resolveDraft(harmony.profileDir, root)
+    const draft = resolveDraft(harmony.profile().dir, root)
     this.name = draft.name
     this.root = draft.root
   }
@@ -71,7 +74,7 @@ export class StudioPreviewDraft {
         this.createdEntry = true
       }
       await this.waitForClientEntry()
-      await this.harmony.reloadPlugin(this.name)
+      await this.reload()
       const graph = this.ctx.clientModules.graph()
       if (!graph.entries.some(entry => entry.id === this.name)) {
         throw new Error(`harmony-studio: Draft ${JSON.stringify(this.name)} left the client graph while loading its Patches`)
@@ -87,7 +90,7 @@ export class StudioPreviewDraft {
         cleanupErrors.push(cleanupError)
       }
       try {
-        await this.harmony.reloadPlugin(this.name)
+        await this.reload()
       } catch (cleanupError) {
         cleanupErrors.push(cleanupError)
       }
@@ -115,7 +118,6 @@ export class StudioPreviewDraft {
 
   async applyBuild(): Promise<StudioProjectState> {
     if (this.project?.state !== 'active') throw new Error('harmony-studio: Draft is not active')
-    await this.harmony.reloadPlugin(this.name)
     const graph = this.ctx.clientModules.graph()
     if (!graph.entries.some(entry => entry.id === this.name)) {
       throw new Error(`harmony-studio: Draft ${JSON.stringify(this.name)} left the client graph while applying its build`)
@@ -128,7 +130,7 @@ export class StudioPreviewDraft {
     if (this.project?.state === 'closed') return
     if (this.createdEntry && this.entryId !== undefined) {
       await this.ctx.loader.remove(this.entryId)
-      await this.harmony.reloadPlugin(this.name)
+      await this.reload()
     }
     this.project = { name: this.name, root: this.root, state: 'closed', graphRev: this.project?.graphRev ?? '' }
   }
@@ -148,5 +150,9 @@ export class StudioPreviewDraft {
         resolve()
       })
     })
+  }
+
+  private reload(): Promise<void> {
+    return this.commands.run(process.execPath, [HARMONY_BIN_ENTRY, 'harmony', 'reload', this.name])
   }
 }

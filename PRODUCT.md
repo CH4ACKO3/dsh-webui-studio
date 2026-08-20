@@ -47,7 +47,7 @@ The normal loop is to start a Draft Preview Host, interact with the WebUI in Bro
 - Automatic CSS Patch creation analyzes named Component declarations, presents every match for confirmation, and emits a Component decorator plus Draft client export without touching existing JSX call sites or Props.
 - Stopping a Draft terminates its child Host but preserves its repository, worktree, profile, and registry record. Closing the Studio page does not delete Drafts.
 - A Draft package must be a buildable DSH Web Client package with `dsh.client.platform: "web"`, the required package exports, and a non-empty `scripts.build`.
-- Studio is a local development surface. Its Host extension is disabled when `dsh web` is not bound to `127.0.0.1`.
+- Studio is a local development surface. Its Host plugin is disabled when `dsh web` is not bound to `127.0.0.1`.
 
 ## Brand Commitments
 
@@ -57,7 +57,7 @@ Studio is a focused developer environment rather than a decorative mod manager. 
 
 ## Evidence on Hand
 
-- The runnable Studio Host extension and browser application live under `src`.
+- The runnable Studio Host plugin and browser application live under `src`.
 - The implemented architecture and development contract are documented in `README.md`.
 - Harmony runtime behavior and public terminology are documented in the repository root `README.md`.
 - React-aware patch factories available to Draft plugin authors are documented by the upstream `dsh-harmony-react` package.

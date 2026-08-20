@@ -6,7 +6,6 @@ import type {
   StudioPackResult,
   StudioReadinessFinding,
   StudioReadinessReport,
-  StudioPatchDependency,
 } from '../contracts.js'
 
 const PACK_TIMEOUT_MS = 120_000
@@ -75,7 +74,6 @@ export function inspectReadiness(
   projectName: string,
   inspection: StudioHarmonyInspection,
   profileDir: string,
-  dependencies: StudioPatchDependency[] = [],
 ): StudioReadinessReport {
   const manifest = readManifest(root)
   const findings: StudioReadinessFinding[] = []
@@ -139,7 +137,6 @@ export function inspectReadiness(
   }
 
   const declared = new Set([...Object.keys(manifest.dependencies ?? {}), ...Object.keys(manifest.peerDependencies ?? {})])
-  const declaredAfter = new Set(stringArray(harmony?.after))
   for (const dependency of stringArray(manifest.dsh?.client?.inject)) {
     if (!declared.has(dependency)) {
       findings.push(finding('warning', 'ambient-client-service', `Client inject ${JSON.stringify(dependency)} is supplied by the current profile but is not declared as a dependency or peer dependency`))
@@ -153,6 +150,7 @@ export function inspectReadiness(
 
   const patches = inspection.patches.filter(patch => patch.owner === projectName)
   for (const patch of patches) {
+    const file = patch.targets[0]?.file
     const targets = new Map(patch.targets.map(target => [`${target.package}\0${target.version ?? ''}`, target]))
     for (const target of targets.values()) {
       if (!declared.has(target.package)) {
@@ -163,23 +161,12 @@ export function inspectReadiness(
       }
     }
     if (patch.state === 'failed') {
-      findings.push(finding('error', 'patch-failed', patch.error ?? `Patch ${JSON.stringify(patch.key)} failed against the current provider stack`, { patch: patch.key, file: patch.file }))
+      findings.push(finding('error', 'patch-failed', patch.error ?? `Patch ${JSON.stringify(patch.key)} failed against the current provider stack`, { patch: patch.key, file }))
     } else if (patch.state === 'disabled') {
-      findings.push(finding('warning', 'patch-disabled', `Patch ${JSON.stringify(patch.key)} is disabled in the current profile`, { patch: patch.key, file: patch.file }))
-    } else if (patch.state === 'pending' || !patch.loaded) {
-      findings.push(finding('warning', 'patch-unverified', `Patch ${JSON.stringify(patch.key)} has not been exercised by the current Preview`, { patch: patch.key, file: patch.file }))
+      findings.push(finding('warning', 'patch-disabled', `Patch ${JSON.stringify(patch.key)} is disabled in the current profile`, { patch: patch.key, file }))
+    } else if (patch.state === 'pending') {
+      findings.push(finding('warning', 'patch-unverified', `Patch ${JSON.stringify(patch.key)} has not been exercised by the current Preview`, { patch: patch.key, file }))
     }
-  }
-
-  for (const dependency of dependencies) {
-    const explicit = dependency.providerCandidates.filter(provider => declared.has(provider) && declaredAfter.has(provider))
-    if (dependency.providerCandidates.length === 1 && explicit.length === 1) continue
-    findings.push(finding(
-      'warning',
-      'differential-provider-stack',
-      `Patch ${JSON.stringify(dependency.patch)} fails against the base target but succeeds against the current transformed stack. Earlier provider candidates: ${dependency.providerCandidates.map(provider => JSON.stringify(provider)).join(', ')}. Inspect the ordered Patch steps before declaring a dependency or dsh.harmony.after relationship`,
-      { patch: dependency.patch, file: dependency.target.file },
-    ))
   }
 
   const orderPath = join(profileDir, 'harmony.json')

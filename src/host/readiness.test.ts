@@ -36,8 +36,8 @@ test('reports a built, declared Draft as ready', () => {
 
   expect(inspectReadiness(root, '@scope/draft', inspection([{
     key: '@scope/draft/title', id: 'title', owner: '@scope/draft',
-    index: 0, targets: [{ package: 'target-ui', files: ['lib/client.js'], version: '^1.0.0' }],
-    kind: 'source', state: 'bound', status: 'normal', loaded: true, matches: 1, generation: 1, declaration: 'patch.cjs',
+    index: 0, targets: [{ package: 'target-ui', file: 'lib/client.js', version: '^1.0.0' }],
+    kind: 'source', state: 'bound', matches: 1, generation: 1, declaration: 'patch.cjs',
   }]), root)).toEqual({ findings: [] })
 })
 
@@ -63,8 +63,8 @@ test('separates definite failures from ambient provider warnings and effective o
   writeFileSync(join(root, 'harmony.json'), JSON.stringify({ order: ['draft', 'provider-a'] }))
   const report = inspectReadiness(root, 'draft', inspection([{
     key: 'draft/title', id: 'title', owner: 'draft', index: 0,
-    targets: [{ package: 'provider-a', files: ['lib/client.js'] }],
-    kind: 'source', state: 'failed', status: 'error', loaded: false, matches: 0, generation: 1,
+    targets: [{ package: 'provider-a', file: 'lib/client.js' }],
+    kind: 'source', state: 'failed', matches: 0, generation: 1,
     declaration: 'patch.cjs', error: 'selector did not match',
   }]), root)
 
@@ -76,46 +76,6 @@ test('separates definite failures from ambient provider warnings and effective o
     expect.objectContaining({ level: 'warning', code: 'ambient-provider' }),
     expect.objectContaining({ level: 'info', code: 'effective-order' }),
   ]))
-})
-
-test('warns when a Source Patch only applies after an undeclared provider transformation', () => {
-  const root = project({
-    name: 'draft', version: '1.0.0', scripts: { build: 'tsc' },
-    exports: { '.': './index.js', './client': './client.js' },
-    dsh: { client: { platform: 'web' }, harmony: {} },
-  })
-  writeFileSync(join(root, 'index.js'), '')
-  writeFileSync(join(root, 'client.js'), '')
-
-  const report = inspectReadiness(root, 'draft', inspection(), root, [{
-    patch: 'draft/slot', target: { package: 'target-ui', file: 'lib/client.js' },
-    providerCandidates: ['provider-a'], reason: 'selector did not match',
-  }])
-
-  expect(report.findings).toContainEqual(expect.objectContaining({
-    level: 'warning', code: 'differential-provider-stack', patch: 'draft/slot',
-    message: expect.stringContaining('Earlier provider candidates'),
-  }))
-})
-
-test('keeps an ambiguous provider-stack warning when every earlier candidate is declared', () => {
-  const root = project({
-    name: 'draft', version: '1.0.0', scripts: { build: 'tsc' },
-    exports: { '.': './index.js', './client': './client.js' },
-    dependencies: { 'provider-a': '1', 'provider-b': '1' },
-    dsh: { client: { platform: 'web' }, harmony: { after: ['provider-a', 'provider-b'] } },
-  })
-  writeFileSync(join(root, 'index.js'), '')
-  writeFileSync(join(root, 'client.js'), '')
-
-  const report = inspectReadiness(root, 'draft', inspection(), root, [{
-    patch: 'draft/slot', target: { package: 'target-ui', file: 'lib/client.js' },
-    providerCandidates: ['provider-a', 'provider-b'], reason: 'selector did not match',
-  }])
-
-  expect(report.findings).toContainEqual(expect.objectContaining({
-    code: 'differential-provider-stack', message: expect.stringContaining('provider-a'),
-  }))
 })
 
 function outputReader(text: string) {

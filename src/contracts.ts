@@ -1,6 +1,5 @@
 import type {
   HarmonyInspection,
-  HarmonyPatchDependency,
   HarmonyProfileView,
   HarmonyRuntimeProfileUpdateResult,
   HarmonyService,
@@ -335,7 +334,4 @@ export type StudioHarmonyService = HarmonyService
 
 export interface StudioPreviewInspection {
   harmony: StudioHarmonyInspection
-  dependencies: StudioPatchDependency[]
 }
-
-export type StudioPatchDependency = HarmonyPatchDependency

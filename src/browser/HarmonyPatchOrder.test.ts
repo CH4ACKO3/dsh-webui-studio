@@ -7,7 +7,7 @@ type Patch = StudioHarmonyInspection['patches'][number]
 function patch(key: string, owner: string): Patch {
   return {
     key, owner, id: key.slice(owner.length + 1), index: 0, targets: [], kind: 'source', state: 'bound',
-    status: 'normal', loaded: true, matches: 1, generation: 1, declaration: `${owner}/harmony.patch.yml`,
+    matches: 1, generation: 1, declaration: `${owner}/harmony.patch.yml`,
   }
 }
 
