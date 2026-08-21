@@ -1,5 +1,10 @@
 import { type KeyboardEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
-import type { ToolCallView, ToolResultView } from '@deepseek-ai/dsh-host-apiproxy/api'
+import type {
+  ModelSelection,
+  SessionModels,
+  ToolCallView,
+  ToolResultView,
+} from '@deepseek-ai/dsh-host-apiproxy/api'
 import {
   buildAgentConversation,
   type AgentContentBlock,
@@ -9,6 +14,14 @@ import {
   type StudioConversationEntry,
 } from './agent-conversation'
 import type { StudioTranslate } from './i18n'
+import {
+  agentContextOccupancy,
+  agentModelSelection,
+  agentModelValue,
+  selectedAgentCatalogModel,
+  type AgentContextBreakdown,
+  type AgentContextPressure,
+} from './agent-session-controls'
 
 interface AgentSessionProps {
   entries: readonly StudioConversationEntry[]
@@ -17,14 +30,24 @@ interface AgentSessionProps {
   prompt: string
   sessionActive: boolean
   sending: boolean
+  models?: SessionModels
+  modelsLoading: boolean
+  modelSelecting: boolean
+  contextPressure?: AgentContextPressure
+  contextBreakdown?: AgentContextBreakdown
   loadingOlder: boolean
   hasOlder: boolean
   empty: ReactNode
   notice?: ReactNode
   t: StudioTranslate
   onPromptChange(value: string): void
+  onSelectModel(selection: ModelSelection): void
   onSubmit(): void
   onLoadOlder(): void
+}
+
+function ChevronIcon(): JSX.Element {
+  return <svg aria-hidden="true" viewBox="0 0 16 16"><path d="m4.5 6 3.5 3.5L11.5 6" /></svg>
 }
 
 function AgentMark(): JSX.Element {
@@ -111,6 +134,133 @@ function QueueContent({ item, t }: { item: AgentQueueItem; t: StudioTranslate })
   </p>
 }
 
+function formatTokens(value: number): string {
+  if (value < 1_000) return String(Math.round(value))
+  if (value < 1_000_000) return `${(value / 1_000).toFixed(value < 10_000 ? 1 : 0)}K`
+  return `${(value / 1_000_000).toFixed(value < 10_000_000 ? 1 : 0)}M`
+}
+
+function AgentModelControls({
+  models,
+  loading,
+  selecting,
+  disabled,
+  t,
+  onSelect,
+}: {
+  models?: SessionModels
+  loading: boolean
+  selecting: boolean
+  disabled: boolean
+  t: StudioTranslate
+  onSelect(selection: ModelSelection): void
+}): JSX.Element {
+  const selectedModel = selectedAgentCatalogModel(models)
+  const selectedValue = selectedModel === undefined || models === undefined ? '' : agentModelValue(models.current)
+  const efforts = selectedModel?.reasoning?.efforts ?? []
+
+  return <div className="agent-model-controls">
+    <label className="agent-model-select">
+      <select value={selectedValue} aria-label={t('agentModel')} disabled={disabled || loading || selecting}
+        onChange={event => {
+          const selection = agentModelSelection(models, event.target.value)
+          if (selection !== undefined) onSelect(selection)
+        }}>
+        <option value="">{loading ? t('agentModelsLoading') : selecting ? t('agentModelChanging') : t('agentSelectModel')}</option>
+        {models?.groups.map(group => <optgroup key={group.id} label={group.name}>
+          {group.models.map(model => <option key={`${group.id}:${model.id}`}
+            value={agentModelValue({ provider: group.id, model: model.id })}>{model.name}</option>)}
+        </optgroup>)}
+      </select>
+      <ChevronIcon />
+    </label>
+    {models !== undefined && selectedModel !== undefined && efforts.length > 0 && <label className="agent-effort-select">
+      <select value={models.current.reasoningEffort ?? ''} aria-label={t('agentReasoningEffort')}
+        disabled={disabled || selecting} onChange={event => onSelect({
+          provider: models.current.provider,
+          model: models.current.model,
+          ...(event.target.value === '' ? {} : { reasoningEffort: event.target.value }),
+        })}>
+        <option value="">{t('agentDefaultEffort')}</option>
+        {efforts.map(effort => <option key={effort.id} value={effort.id}>{effort.name}</option>)}
+      </select>
+      <ChevronIcon />
+    </label>}
+  </div>
+}
+
+function AgentContextMeter({
+  pressure,
+  breakdown,
+  t,
+}: {
+  pressure?: AgentContextPressure
+  breakdown?: AgentContextBreakdown
+  t: StudioTranslate
+}): JSX.Element | null {
+  const context = agentContextOccupancy(pressure)
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLSpanElement>(null)
+
+  useEffect(() => {
+    if (context === undefined && open) setOpen(false)
+  }, [context, open])
+
+  useEffect(() => {
+    if (!open || context === undefined) return
+    const closeOutside = (event: PointerEvent): void => {
+      if (event.target instanceof Node && rootRef.current?.contains(event.target) === true) return
+      setOpen(false)
+    }
+    const closeOnEscape = (event: globalThis.KeyboardEvent): void => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('pointerdown', closeOutside)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [context, open])
+
+  if (context === undefined) return null
+  const circumference = 2 * Math.PI * 5.5
+  const breakdownRows = breakdown === undefined ? [] : [
+    { key: 'system', label: t('agentContextSystem'), value: breakdown.systemTokens },
+    { key: 'tools', label: t('agentContextTools'), value: breakdown.toolsTokens },
+    { key: 'messages', label: t('agentContextMessages'), value: breakdown.messageTokens },
+  ]
+  const breakdownTotal = breakdownRows.reduce((total, row) => total + row.value, 0)
+  const label = t('agentContextUsed', { percent: context.percent })
+
+  return <span className="agent-context-meter" ref={rootRef}>
+    <button type="button" aria-label={label} title={label} aria-haspopup="dialog" aria-expanded={open}
+      onClick={() => setOpen(current => !current)}>
+      <svg viewBox="0 0 14 14" aria-hidden="true">
+        <circle className="agent-context-track" cx="7" cy="7" r="5.5" />
+        <circle className="agent-context-fill" cx="7" cy="7" r="5.5"
+          strokeDasharray={`${circumference * context.percent / 100} ${circumference}`}
+          transform="rotate(-90 7 7)" />
+      </svg>
+    </button>
+    {open && <div className="agent-context-popover" role="dialog" aria-label={t('agentContextDetails')}>
+      <header>
+        <span>{label}</span>
+        <strong>~{formatTokens(context.usedTokens)} / {formatTokens(context.contextWindow)}</strong>
+      </header>
+      <div className="agent-context-bar" aria-hidden="true">
+        {breakdownRows.length === 0 || breakdownTotal === 0
+          ? <i data-kind="total" style={{ width: `${context.percent}%` }} />
+          : breakdownRows.map(row => <i key={row.key} data-kind={row.key}
+              style={{ width: `${context.percent * row.value / breakdownTotal}%` }} />)}
+      </div>
+      {breakdownRows.length > 0 && <dl>{breakdownRows.map(row => <div key={row.key}>
+        <dt><i data-kind={row.key} />{row.label}</dt><dd>~{formatTokens(row.value)}</dd>
+      </div>)}</dl>}
+    </div>}
+  </span>
+}
+
 function AgentToolCard({ item, t }: {
   item: Extract<AgentConversationItem, { kind: 'tool' }>
   t: StudioTranslate
@@ -147,12 +297,18 @@ export function AgentSession({
   prompt,
   sessionActive,
   sending,
+  models,
+  modelsLoading,
+  modelSelecting,
+  contextPressure,
+  contextBreakdown,
   loadingOlder,
   hasOlder,
   empty,
   notice,
   t,
   onPromptChange,
+  onSelectModel,
   onSubmit,
   onLoadOlder,
 }: AgentSessionProps): JSX.Element {
@@ -173,6 +329,8 @@ export function AgentSession({
   }
   const steering = queue.filter(item => item.placement === 'steering')
   const queued = queue.filter(item => item.placement === 'queued')
+
+  const composerEnabled = sessionActive && models?.routable !== false
 
   return <>
     <div className="agent-transcript" ref={transcriptRef} aria-live="polite" onScroll={event => {
@@ -224,14 +382,22 @@ export function AgentSession({
     {notice}
     <form className="agent-composer" onSubmit={event => { event.preventDefault(); onSubmit() }}>
       <textarea aria-label={t('agentMessage')} value={prompt} onChange={event => onPromptChange(event.target.value)}
-        onKeyDown={onComposerKeyDown} placeholder={sessionActive ? t('agentPlaceholder') : t('agentPlaceholderStart')}
-        disabled={!sessionActive || sending} rows={3} />
+        onKeyDown={onComposerKeyDown} placeholder={composerEnabled ? t('agentPlaceholder') : sessionActive
+          ? t('agentModelUnavailable') : t('agentPlaceholderStart')}
+        disabled={!composerEnabled || sending} rows={3} />
       <footer>
-        <span>{sessionActive ? t('agentSendHint') : t('agentStartHint')}</span>
-        <button className="agent-send" type="submit" aria-label={t('send')} disabled={!sessionActive || sending || prompt.trim() === ''}>
+        <AgentModelControls models={models} loading={modelsLoading} selecting={modelSelecting}
+          disabled={!sessionActive} t={t} onSelect={onSelectModel} />
+        <div className="agent-composer-trailing">
+          <AgentContextMeter pressure={contextPressure} breakdown={contextBreakdown} t={t} />
+          <button className="agent-send" type="submit" aria-label={t('send')}
+            disabled={!composerEnabled || sending || prompt.trim() === ''}>
           <SendIcon />
-        </button>
+          </button>
+        </div>
       </footer>
+      <span className="agent-composer-hint">{composerEnabled ? t('agentSendHint') : sessionActive
+        ? t('agentModelUnavailable') : t('agentStartHint')}</span>
     </form>
   </>
 }

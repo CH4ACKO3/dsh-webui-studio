@@ -52,6 +52,7 @@ describe('Studio locale', () => {
       'patchManagementNoResults', 'patchManagementNoProviders', 'patchManagementEmptyDescription',
       'profileManagerTitle', 'profileManagerDescription', 'profileMovePatch', 'profileNoPatches',
       'profileCompositeMembers', 'profileConstraint', 'webuiSize', 'you', 'sending',
+      'agentWorking', 'agentWaiting', 'agentReady', 'agentScope', 'agentStudioMode', 'agentNoSession',
     ]
     for (const key of removed) expect(STUDIO_MESSAGES).not.toHaveProperty(key)
   })

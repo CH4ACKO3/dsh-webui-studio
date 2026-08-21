@@ -11,7 +11,12 @@ import {
   useState,
 } from 'react'
 import { createPortal } from 'react-dom'
-import type { HistoryEntry, SessionSummary } from '@deepseek-ai/dsh-host-apiproxy/api'
+import type {
+  HistoryEntry,
+  ModelSelection,
+  SessionModels,
+  SessionSummary,
+} from '@deepseek-ai/dsh-host-apiproxy/api'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {
   StudioVariableDefinition,
@@ -87,6 +92,13 @@ import {
   type AgentQueueItem,
   type StudioConversationEntry,
 } from './agent-conversation'
+import {
+  mergeAgentProjectionBaseline,
+  mergeAgentProjectionFrame,
+  readAgentContextBreakdown,
+  readAgentContextPressure,
+  type AgentProjectionStore,
+} from './agent-session-controls'
 import {
   boundedBridgeText,
   isBridgeEnvelope,
@@ -660,6 +672,10 @@ export function App(): JSX.Element {
   const [buildOperations, setBuildOperations] = useState<Record<string, true>>({})
   const [buildOutputs, setBuildOutputs] = useState<Record<string, StudioBuildOutput>>({})
   const [sending, setSending] = useState(false)
+  const [agentModels, setAgentModels] = useState<SessionModels>()
+  const [loadingAgentModels, setLoadingAgentModels] = useState(false)
+  const [selectingAgentModel, setSelectingAgentModel] = useState(false)
+  const [agentProjections, setAgentProjections] = useState<AgentProjectionStore>({})
   const [error, setError] = useState<string>()
   const [agentInteractions, setAgentInteractions] = useState<Record<string, 'approval' | 'question'>>({})
   const [previewVersions, setPreviewVersions] = useState<Record<string, number>>({})
@@ -729,6 +745,7 @@ export function App(): JSX.Element {
   const fileRequest = useRef(0)
   const draftViewRequest = useRef(0)
   const packRequest = useRef(0)
+  const agentModelRequest = useRef(0)
   const activeDragCleanupRef = useRef<() => void>()
   const openDrafts = openDraftIds.flatMap(id => {
     const draft = drafts.find(candidate => candidate.id === id)
@@ -758,6 +775,8 @@ export function App(): JSX.Element {
   const previewSession = selectedDraft?.runtime.bridgeCapability
   const previewUrl = selectedDraft?.runtime.previewUrl
   const streaming = useMemo(() => agentStreamingContent(events), [events])
+  const agentContextPressure = useMemo(() => readAgentContextPressure(agentProjections), [agentProjections])
+  const agentContextBreakdown = useMemo(() => readAgentContextBreakdown(agentProjections), [agentProjections])
   const draftElements = useMemo(() => registry.elements.filter(item => item.owner === selectedDraft?.name), [registry, selectedDraft?.name])
   const draftVariables = useMemo(() => registry.variables.filter(item => item.owner === selectedDraft?.name), [registry, selectedDraft?.name])
   const matchedElement = useMemo(
@@ -832,6 +851,8 @@ export function App(): JSX.Element {
     setSelectedDraftId(draftId)
     setSessionId(nextSessionId)
     setEvents([])
+    setAgentModels(undefined)
+    setAgentProjections({})
     setHasOlderMessages(false)
     setLoadingOlderMessages(false)
     runningVersion.current += 1
@@ -840,6 +861,23 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     sessionRef.current = sessionId
+  }, [sessionId])
+
+  useEffect(() => {
+    const request = ++agentModelRequest.current
+    setAgentModels(undefined)
+    setAgentProjections({})
+    setLoadingAgentModels(sessionId !== undefined)
+    setSelectingAgentModel(false)
+    if (sessionId === undefined) return
+    void studioApi.sessions.models({ sessionId: sessionId as SessionId }).then(response => {
+      if (agentModelRequest.current !== request || sessionRef.current !== sessionId) return
+      setAgentModels(apiValue(response))
+    }).catch(cause => {
+      if (agentModelRequest.current === request && sessionRef.current === sessionId) setError(localizeError(cause))
+    }).finally(() => {
+      if (agentModelRequest.current === request && sessionRef.current === sessionId) setLoadingAgentModels(false)
+    })
   }, [sessionId])
 
   useEffect(() => {
@@ -909,6 +947,7 @@ export function App(): JSX.Element {
       const restored = history.events as HistoryEntry[]
       setEvents(live => [...restored, ...live.filter(entry => !restored.some(item => item.event.seq === entry.event.seq))]
         .sort((a, b) => a.event.seq - b.event.seq))
+      setAgentProjections(current => mergeAgentProjectionBaseline(current, history.projections))
       setHasOlderMessages(history.hasMore)
       if (runningVersion.current === initialRunningVersion) {
         setRunning(sessions.items.some(item => item.sessionId === sessionId && item.running))
@@ -1169,6 +1208,13 @@ export function App(): JSX.Element {
     if (frame.type === 'host/session-status') {
       runningVersion.current += 1
       setRunning(frame.running === true)
+    }
+    if (frame.type === 'session/projection' && typeof frame.key === 'string'
+      && typeof frame.seq === 'number' && Number.isFinite(frame.seq)) {
+      const projectionKey = frame.key
+      const projectionSeq = frame.seq
+      setAgentProjections(previous => mergeAgentProjectionFrame(previous, projectionKey, frame.value, projectionSeq))
+      return
     }
     if (frame.type !== 'session/event' || typeof frame.event !== 'object' || frame.event === null) return
     const event = frame.event as HistoryEntry['event']
@@ -1933,6 +1979,31 @@ export function App(): JSX.Element {
       setError(localizeError(cause))
     } finally {
       setSending(false)
+    }
+  }
+
+  const selectAgentModel = async (selection: ModelSelection): Promise<void> => {
+    if (sessionId === undefined || selectingAgentModel) return
+    const targetSessionId = sessionId
+    setSelectingAgentModel(true)
+    setError(undefined)
+    try {
+      const result = apiValue(await studioApi.sessions.selectModel({
+        sessionId: targetSessionId as SessionId,
+        provider: selection.provider,
+        model: selection.model,
+        ...(selection.reasoningEffort === undefined ? {} : { reasoningEffort: selection.reasoningEffort }),
+      }))
+      if (sessionRef.current !== targetSessionId) return
+      setAgentModels(current => current === undefined ? current : {
+        ...current,
+        current: result.selected,
+        routable: true,
+      })
+    } catch (cause) {
+      if (sessionRef.current === targetSessionId) setError(localizeError(cause))
+    } finally {
+      if (sessionRef.current === targetSessionId) setSelectingAgentModel(false)
     }
   }
 
@@ -2881,7 +2952,7 @@ export function App(): JSX.Element {
 
         {panel === 'agent' && <PanelBody id="studio-panel-agent" aria-labelledby="studio-tab-agent" className="agent-panel" role="tabpanel">
           <div className="panel-heading agent-heading">
-            <div><h2>{t('agentTitle')}</h2><p>{running ? t('agentWorking') : sessionId === undefined ? t('agentWaiting') : t('agentReady')}</p></div>
+            <div><h2>{t('agentTitle')}</h2><p>{t('agentSubtitle')}</p></div>
             <div className="agent-heading-actions">
               {running && <Button variant="danger" size="small" onClick={() => void cancel()}>{t('agentCancel')}</Button>}
               {sessionId !== undefined && <Button size="small" loading={leavingAgentDraftId === selectedDraftId}
@@ -2889,13 +2960,13 @@ export function App(): JSX.Element {
                 onClick={() => void leaveAgent()}>{t('agentLeave')}</Button>}
             </div>
           </div>
-          <div className="agent-mode-strip" data-active={sessionId !== undefined || undefined}>
-            <span><i />{sessionId === undefined ? t('agentNoSession') : t('agentStudioMode')}</span>
-            <p>{t('agentScope')}</p>
-          </div>
           <AgentSession entries={events} streaming={streaming} queue={queuedPrompts} prompt={prompt}
-            sessionActive={sessionId !== undefined} sending={sending} loadingOlder={loadingOlderMessages}
+            sessionActive={sessionId !== undefined} sending={sending} models={agentModels}
+            modelsLoading={loadingAgentModels} modelSelecting={selectingAgentModel}
+            contextPressure={agentContextPressure} contextBreakdown={agentContextBreakdown}
+            loadingOlder={loadingOlderMessages}
             hasOlder={hasOlderMessages} t={t} onPromptChange={setPrompt} onSubmit={() => void sendPrompt()}
+            onSelectModel={selection => void selectAgentModel(selection)}
             onLoadOlder={() => void loadOlderAgentMessages()}
             notice={interaction === undefined ? undefined
               : <Notice className="interaction-notice" tone="warning">{interaction}</Notice>}
