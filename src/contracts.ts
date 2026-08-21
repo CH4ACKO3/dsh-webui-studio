@@ -162,8 +162,15 @@ export interface StudioProjectFile {
 }
 
 export type StudioHarmonyInspection = HarmonyInspection
-export type StudioHarmonyProfile = HarmonyProfileView
-export type StudioHarmonyProfileUpdateResult = HarmonyRuntimeProfileUpdateResult
+export interface StudioRuntimePluginEntry {
+  entryId: string
+  moduleName: string
+  enabled: boolean
+}
+export type StudioHarmonyProfile = HarmonyProfileView & { runtimePlugins: StudioRuntimePluginEntry[] }
+export type StudioHarmonyProfileUpdateResult = Omit<HarmonyRuntimeProfileUpdateResult, 'profile'> & {
+  profile: StudioHarmonyProfile
+}
 
 export type StudioReadinessLevel = 'error' | 'warning' | 'info'
 

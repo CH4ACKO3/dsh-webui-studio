@@ -1,5 +1,15 @@
+import type { StudioRuntimePluginEntry } from '../contracts.js'
+
 export function sameStringList(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index])
+}
+
+export function providerRuntimeStatus(
+  entries: readonly StudioRuntimePluginEntry[],
+  provider: string,
+): { enabled: number; total: number } {
+  const matches = entries.filter(entry => entry.moduleName === provider || entry.moduleName.startsWith(`${provider}/`))
+  return { enabled: matches.filter(entry => entry.enabled).length, total: matches.length }
 }
 
 export function moveProfilePlugin(order: readonly string[], name: string, targetIndex: number): string[] {

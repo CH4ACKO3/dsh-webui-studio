@@ -655,7 +655,7 @@ button, input, textarea, select, iframe { border: 0; }
 .profile-plugin-index { color: var(--studio-text-tertiary); font: var(--studio-font-size-xs)/14px var(--studio-font-mono); text-align: right; }
 .profile-plugin-identity { min-width: 0; display: grid; }
 .profile-plugin-identity strong { overflow: hidden; color: var(--studio-text); font-size: var(--studio-font-size-xs); line-height: 14px; text-overflow: ellipsis; white-space: nowrap; }
-.profile-plugin-identity > span { color: var(--studio-text-tertiary); font-size: var(--studio-font-size-xs); line-height: 11px; }
+.profile-plugin-identity > span { overflow: hidden; color: var(--studio-text-tertiary); font-size: var(--studio-font-size-xs); line-height: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .profile-plugin-row .studio-ui-badge { padding: 1px 4px; font-size: var(--studio-font-size-xs); white-space: nowrap; }
 .profile-plugin-toggle {
   display: grid;

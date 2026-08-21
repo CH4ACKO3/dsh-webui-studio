@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isProfilePatchEnabled, isProfilePluginEnabled, moveProfilePatch, moveProfilePlugin, setProfilePatchEnabled, setProfilePluginEnabled } from './profile-order.js'
+import { isProfilePatchEnabled, isProfilePluginEnabled, moveProfilePatch, moveProfilePlugin, providerRuntimeStatus, setProfilePatchEnabled, setProfilePluginEnabled } from './profile-order.js'
 
 describe('Harmony profile editing', () => {
   it('moves plugins while keeping Harmony pinned first', () => {
@@ -27,5 +27,18 @@ describe('Harmony profile editing', () => {
     expect(isProfilePatchEnabled(['a/*'], 'a', 'a/one')).toBe(false)
     expect(setProfilePatchEnabled(['a/*'], 'a', 'a/one', true, ['a/one', 'a/two'])).toEqual(['a/two'])
     expect(setProfilePatchEnabled([], 'a', 'a/one', false, ['a/one', 'a/two'])).toEqual(['a/one'])
+  })
+
+  it('summarizes Loader entries separately from the Harmony provider switch', () => {
+    const entries = [
+      { entryId: 'include:hmr', moduleName: '@deepseek-ai/cordis-plugin-hmr', enabled: false },
+      { entryId: 'runtime:hmr', moduleName: '@deepseek-ai/cordis-plugin-hmr', enabled: true },
+      { entryId: 'include:subpath', moduleName: '@deepseek-ai/cordis-plugin-hmr/client', enabled: true },
+      { entryId: 'include:timer', moduleName: '@deepseek-ai/cordis-plugin-timer', enabled: true },
+    ]
+
+    expect(providerRuntimeStatus(entries, '@deepseek-ai/cordis-plugin-hmr')).toEqual({ enabled: 2, total: 3 })
+    expect(providerRuntimeStatus(entries, '@deepseek-ai/cordis-plugin-timer')).toEqual({ enabled: 1, total: 1 })
+    expect(providerRuntimeStatus(entries, '@deepseek-ai/dsh-agent')).toEqual({ enabled: 0, total: 0 })
   })
 })

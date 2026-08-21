@@ -3,7 +3,7 @@ import { createRequire, findPackageJSON } from 'node:module'
 import { dirname, isAbsolute, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
-import type { StudioHarmonyService, StudioProjectState } from '../contracts.js'
+import type { StudioHarmonyService, StudioProjectState, StudioRuntimePluginEntry } from '../contracts.js'
 import { studioCommands, type StudioCommandRunner } from './drafts.js'
 
 const CLIENT_ENTRY_TIMEOUT_MS = 10_000
@@ -104,6 +104,12 @@ export class StudioPreviewDraft {
   snapshot(): StudioProjectState {
     if (this.project === undefined) throw new Error('harmony-studio: Draft Preview is still preparing')
     return { ...this.project }
+  }
+
+  runtimePlugins(): StudioRuntimePluginEntry[] {
+    return [...this.ctx.loader.entries()]
+      .filter(entry => !entry.options.group)
+      .map(entry => ({ entryId: entry.id, moduleName: entry.options.name, enabled: !entry.disabled }))
   }
 
   activate(graphRev: string): StudioProjectState {

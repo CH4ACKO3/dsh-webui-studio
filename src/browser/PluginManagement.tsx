@@ -10,6 +10,7 @@ import { studioErrorMessage } from './error-message'
 import {
   isProfilePluginEnabled,
   moveProfilePlugin,
+  providerRuntimeStatus,
   sameStringList,
   setProfilePluginEnabled,
 } from './profile-order'
@@ -34,6 +35,7 @@ export function PluginManagement({ selectedDraft, view }: {
 }): JSX.Element {
   const { t } = useStudioLocale()
   const patchDialogRef = useRef<HTMLDialogElement>(null)
+  const loadRequest = useRef(0)
   const [profile, setProfile] = useState<StudioHarmonyProfile>()
   const [inspection, setInspection] = useState<StudioHarmonyInspection>({ patches: [], targets: [] })
   const [order, setOrder] = useState<string[]>([])
@@ -76,6 +78,7 @@ export function PluginManagement({ selectedDraft, view }: {
   }
 
   const load = async (): Promise<void> => {
+    const request = ++loadRequest.current
     if (selectedDraft.runtime.state !== 'running') {
       setProfile(undefined)
       setInspection({ patches: [], targets: [] })
@@ -91,14 +94,16 @@ export function PluginManagement({ selectedDraft, view }: {
         callStudio<StudioHarmonyProfile>('studio.drafts.harmony.profile', payload),
         callStudio<StudioHarmonyInspection>('studio.drafts.harmony.inspect', payload),
       ])
+      if (loadRequest.current !== request) return
       setLoaded(nextProfile, nextInspection)
       setSelectedProvider(current => current !== undefined && nextProfile.order.includes(current) ? current : undefined)
       setAppliedGeneration(undefined)
     } catch (cause) {
+      if (loadRequest.current !== request) return
       setProfile(undefined)
       setError(studioErrorMessage(cause, t))
     } finally {
-      setLoading(false)
+      if (loadRequest.current === request) setLoading(false)
     }
   }
 
@@ -106,6 +111,7 @@ export function PluginManagement({ selectedDraft, view }: {
     setSelectedProvider(undefined)
     setPatchDialogOpen(false)
     void load()
+    return () => { loadRequest.current += 1 }
   }, [selectedDraft?.id, selectedDraft?.runtime.state])
 
   useEffect(() => {
@@ -190,6 +196,11 @@ export function PluginManagement({ selectedDraft, view }: {
                     const plugin = plugins.get(name)
                     const fixed = name === 'dsh-harmony'
                     const enabled = isProfilePluginEnabled(disabled, name)
+                    const runtime = providerRuntimeStatus(profile?.runtimePlugins ?? [], name)
+                    const runtimeLabel = runtime.total === 0 ? t('profileLoaderUnavailable')
+                      : runtime.enabled === 0 ? t('profileLoaderDisabled')
+                        : runtime.enabled === runtime.total ? t('profileLoaderEnabled')
+                          : t('profileLoaderPartial', runtime)
                     const keys = ownerPatchKeys(name)
                     return <article role="option" aria-selected={selectedProvider === name} key={name} className="profile-plugin-row"
                       data-selected={selectedProvider === name || undefined} data-disabled={!enabled || undefined}
@@ -201,7 +212,7 @@ export function PluginManagement({ selectedDraft, view }: {
                       <span className="profile-plugin-grip"><GripIcon pinned={fixed} /></span>
                       <span className="profile-plugin-index">{String(index + 1).padStart(2, '0')}</span>
                       <span className="profile-plugin-identity"><strong title={name}>{name}</strong><span>
-                        {plugin?.version ? `v${plugin.version}` : t('profileVersionUnknown')} · {t('profilePatchCount', { count: keys.length })}
+                        {plugin?.version ? `v${plugin.version}` : t('profileVersionUnknown')} · {t('profilePatchCount', { count: keys.length })} · {runtimeLabel}
                       </span></span>
                       {fixed ? <Badge>{t('profilePinned')}</Badge> : <button type="button" className="profile-plugin-toggle"
                         role="switch" aria-checked={enabled} disabled={saving}

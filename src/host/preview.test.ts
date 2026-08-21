@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import type { StudioDraftRecord } from '../contracts.js'
 import type { StudioCommandRunner } from './drafts.js'
 import { StudioPreviewSupervisor } from './preview.js'
@@ -14,10 +14,53 @@ const children: ChildProcess[] = []
 const harmonyBinEntry = fileURLToPath(import.meta.resolve('dsh-harmony/bin'))
 
 afterEach(async () => {
+  vi.unstubAllEnvs()
   for (const child of children.splice(0)) {
     if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
   }
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
+})
+
+it('keeps the Preview runtime starting until its worker survives initial Harmony setup', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-studio-preview-readiness-'))
+  roots.push(root)
+  const mainProfile = join(root, 'main', 'profiles', 'web')
+  const draftRoot = join(root, 'draft')
+  const fakeHarmonyBin = join(root, 'harmony', 'lib', 'bin.js')
+  await Promise.all([
+    mkdir(mainProfile, { recursive: true }),
+    mkdir(draftRoot),
+    mkdir(join(root, 'harmony', 'lib'), { recursive: true }),
+  ])
+  await writeFile(join(mainProfile, 'package.json'), JSON.stringify({ name: 'dsh-profile-web', private: true }))
+  await writeFile(join(draftRoot, 'package.json'), JSON.stringify({
+    name: 'draft-plugin', packageManager: 'npm@11', scripts: { build: 'echo built' },
+  }))
+  await writeFile(fakeHarmonyBin, `
+    process.stdout.write('dsh web: http://127.0.0.1:65534\\n')
+    setInterval(() => {}, 1_000)
+  `)
+  vi.stubEnv('DSH_HARMONY_DSH_ENTRY', fileURLToPath(import.meta.resolve('@deepseek-ai/dsh/lib/bin.js')))
+  const draft: StudioDraftRecord = {
+    id: 'id', name: 'draft-plugin', label: 'Draft plugin', source: { kind: 'new', packageName: 'draft-plugin' },
+    repositoryDir: root, worktreeDir: draftRoot, root: draftRoot,
+    runtimeHome: join(root, 'runtime-home'), profileMode: 'main-home', createdAt: 'now',
+  }
+  const preview = new StudioPreviewSupervisor(
+    draft,
+    mainProfile,
+    'http://127.0.0.1:3081',
+    { async run() {} },
+    fakeHarmonyBin,
+    100,
+  )
+
+  const start = preview.start().catch(error => error as Error)
+  await vi.waitFor(() => expect(preview.snapshot().previewUrl)
+    .toMatch(/^http:\/\/127\.0\.0\.1:65534\/#dsh-studio-preview=.+/))
+  expect(preview.snapshot().state).toBe('starting')
+  await expect(preview.stop()).resolves.toMatchObject({ state: 'stopped' })
+  await expect(start).resolves.toMatchObject({ message: 'Preview start canceled' })
 })
 
 it('publishes profile installation progress and a failed runtime snapshot', async () => {

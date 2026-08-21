@@ -229,8 +229,8 @@ export class StudioPreviewWorkerService extends TypertRemoteService {
 
   async profile(signal: AbortSignal): Promise<StudioHarmonyProfile> {
     signal.throwIfAborted()
-    await this.ready
-    return jsonTransport(this.harmony.profile())
+    const opened = await this.ready
+    return jsonTransport({ ...this.harmony.profile(), runtimePlugins: opened.runtimePlugins() })
   }
 
   async updateProfile(
@@ -251,7 +251,13 @@ export class StudioPreviewWorkerService extends TypertRemoteService {
       if (existing.input !== serialized) throw new Error('Profile update operation input changed')
       return existing.result
     }
-    const result = this.harmony.updateProfile(update).then(jsonTransport)
+    const result = this.harmony.updateProfile(update).then(async result => {
+      const opened = await this.ready
+      return jsonTransport({
+        ...result,
+        profile: { ...result.profile, runtimePlugins: opened.runtimePlugins() },
+      })
+    })
     profileUpdateOperations.set(operationId, { input: serialized, result })
     while (profileUpdateOperations.size > PROFILE_UPDATE_OPERATION_LIMIT) {
       const oldest = profileUpdateOperations.keys().next().value as string | undefined

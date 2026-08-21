@@ -158,7 +158,6 @@ export class StudioPreviewSupervisor {
           const { error: _error, ...runtime } = this.runtime
           this.runtime = {
             ...runtime,
-            state: 'running',
             previewUrl: `${match[1]}/#dsh-studio-preview=${encodeURIComponent(bridgeCapability)}`,
             bridgeCapability,
           }
@@ -176,7 +175,7 @@ export class StudioPreviewSupervisor {
         const error = `Preview Host exited (${signal ?? code ?? 'unknown'})`
         this.runtime = { state: 'failed', error, log: this.runtime.log }
       })
-      await this.waitUntilRunning(child, signal)
+      await this.waitForPreviewUrl(child, signal)
       const peerClient = new NodePeerClient({
         baseUrl: new URL('/', this.runtime.previewUrl),
         contribution: STUDIO_PREVIEW_REMOTE,
@@ -184,6 +183,7 @@ export class StudioPreviewSupervisor {
       this.peerClient = peerClient
       await this.waitForWorker(child, signal)
       await this.invoke(this.remote().state(signal))
+      this.runtime = { ...this.runtime, state: 'running' }
       return this.snapshot()
     } catch (error) {
       await this.closePeer()
@@ -295,13 +295,13 @@ export class StudioPreviewSupervisor {
     await this.stop()
   }
 
-  private async waitUntilRunning(child: ChildProcess, signal: AbortSignal): Promise<void> {
+  private async waitForPreviewUrl(child: ChildProcess, signal: AbortSignal): Promise<void> {
     const started = Date.now()
-    while (this.child === child && this.runtime.state === 'starting' && Date.now() - started < START_TIMEOUT_MS) {
+    while (this.child === child && this.runtime.previewUrl === undefined && Date.now() - started < START_TIMEOUT_MS) {
       await this.delay(50, signal)
     }
     signal.throwIfAborted()
-    if (this.runtime.state !== 'running') {
+    if (this.runtime.previewUrl === undefined) {
       throw new Error(`${this.runtime.error ?? 'Preview Host did not publish its URL before timeout'}\n${this.runtime.log}`)
     }
   }

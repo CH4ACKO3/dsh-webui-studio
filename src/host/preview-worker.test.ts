@@ -107,7 +107,15 @@ it('resumes one build application after a Connection generation change', async (
 })
 
 it('reads and transactionally updates the active Preview Harmony profile', async () => {
-  previewDraft.open.mockResolvedValue({ snapshot: () => ({ name: 'draft-plugin' }), async close() {} })
+  const runtimePlugins = [
+    { entryId: 'include:draft', moduleName: 'draft-plugin', enabled: true },
+    { entryId: 'include:tool', moduleName: 'tool-plugin', enabled: false },
+  ]
+  previewDraft.open.mockResolvedValue({
+    snapshot: () => ({ name: 'draft-plugin' }),
+    runtimePlugins: () => runtimePlugins,
+    async close() {},
+  })
   const profile = {
     dir: '/draft/profile', order: ['dsh-harmony', 'draft-plugin'], patchOrder: ['draft-plugin/one'], disabled: [],
     plugins: [], orderViolations: [], patchOrderViolations: [], compatibility: [],
@@ -117,7 +125,7 @@ it('reads and transactionally updates the active Preview Harmony profile', async
   }))
   const service = worker({ profile: () => profile, updateProfile } as unknown as StudioHarmonyService)
 
-  await expect(service.profile(signal)).resolves.toEqual(profile)
+  await expect(service.profile(signal)).resolves.toEqual({ ...profile, runtimePlugins })
   await expect(service.updateProfile({ operationId: 'profile-update-1', disabled: ['draft-plugin/one'] }, signal)).resolves.toMatchObject({
     generation: 3, profile: { disabled: ['draft-plugin/one'] },
   })
