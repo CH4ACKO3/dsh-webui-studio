@@ -1454,7 +1454,42 @@ body[data-studio-dragging="true"] iframe { pointer-events: none; }
 .agent-queue header { display: flex; align-items: center; justify-content: space-between; color: var(--studio-text-tertiary); font-size: var(--studio-font-size-xs); }
 .agent-queue p { display: flex; min-width: 0; gap: 6px; margin: 0; overflow: hidden; color: var(--studio-text-secondary); font-size: var(--studio-font-size-xs); white-space: nowrap; }
 .agent-queue p span { overflow: hidden; text-overflow: ellipsis; }
-.interaction-notice { flex: none; margin: 0 var(--agent-inline-space) 7px; }
+.agent-interaction { flex: none; max-height: min(64vh, 34rem); min-width: 0; display: flex; flex-direction: column; margin: 0 var(--agent-inline-space) 10px; overflow: hidden; border: 1px solid var(--studio-border-strong); border-radius: var(--studio-radius-md); background: var(--studio-panel-raised); box-shadow: 0 3px 12px rgb(0 0 0 / 8%); }
+.agent-interaction > header { min-width: 0; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 10px; border-bottom: 1px solid var(--studio-border); background: color-mix(in srgb, var(--studio-warning-soft) 34%, var(--studio-panel-raised)); }
+.agent-interaction > header h3 { min-width: 0; margin: 0; overflow-wrap: anywhere; font-size: var(--studio-font-size-md); line-height: 18px; }
+.agent-interaction > header > div { min-width: 0; display: flex; align-items: center; gap: 7px; color: var(--studio-text-secondary); font-size: var(--studio-font-size-xs); }
+.agent-interaction-count { flex: none; color: var(--studio-text-tertiary); font-size: var(--studio-font-size-xs); white-space: nowrap; }
+.agent-interaction > footer { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 7px; padding: 8px 9px; border-top: 1px solid var(--studio-border); }
+.agent-interaction > footer > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
+.agent-interaction > footer .studio-ui-button { min-height: 27px; padding-inline: 8px; font-size: var(--studio-font-size-xs); }
+.agent-interaction-error { min-width: 0; color: var(--studio-danger); font-size: var(--studio-font-size-xs); line-height: 14px; overflow-wrap: anywhere; }
+.agent-approval dl { min-width: 0; display: grid; gap: 8px; margin: 0; padding: 10px; overflow-y: auto; }
+.agent-approval dl > div { min-width: 0; display: grid; grid-template-columns: 3.8rem minmax(0, 1fr); gap: 8px; }
+.agent-approval dt { color: var(--studio-text-tertiary); font-size: var(--studio-font-size-xs); }
+.agent-approval dd { min-width: 0; margin: 0; color: var(--studio-text-secondary); font-size: var(--studio-font-size-sm); line-height: 16px; overflow-wrap: anywhere; }
+.agent-approval code { color: var(--studio-text); font: inherit; font-weight: 650; }
+.agent-approval-input { min-height: 0; padding: 0 10px 10px; overflow-y: auto; }
+.agent-approval-input > span { display: block; margin-bottom: 4px; color: var(--studio-text-tertiary); font-size: var(--studio-font-size-xs); }
+.agent-approval-input pre { max-height: min(24vh, 12rem); margin: 0; overflow: auto; padding: 7px 8px; border-radius: var(--studio-radius-sm); background: var(--studio-code-bg); color: var(--studio-code-text); font: var(--studio-font-size-xs)/15px var(--studio-font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-question fieldset { min-width: 0; min-height: 0; display: grid; gap: 8px; margin: 0; padding: 10px; overflow-y: auto; border: 0; }
+.agent-question legend { width: 100%; padding: 0; color: var(--studio-text); font-size: var(--studio-font-size-md); font-weight: 650; line-height: 18px; overflow-wrap: anywhere; }
+.agent-question-group { color: var(--studio-text-secondary); font-size: var(--studio-font-size-xs); font-weight: 650; }
+.agent-question-detail { margin: 0; color: var(--studio-text-secondary); font-size: var(--studio-font-size-sm); line-height: 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-question-options { display: grid; gap: 4px; }
+.agent-question-options > label { min-width: 0; display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: start; gap: 7px; padding: 7px; border: 1px solid transparent; border-radius: var(--studio-radius-sm); color: var(--studio-text-secondary); cursor: pointer; }
+.agent-question-options > label:hover { background: var(--studio-control); }
+.agent-question-options > label[data-selected="true"] { border-color: var(--studio-border-strong); background: var(--studio-control-pressed); color: var(--studio-text); }
+.agent-question-options input { width: 14px; height: 14px; margin: 2px 0 0; accent-color: var(--studio-accent); }
+.agent-question-options label > span { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; }
+.agent-question-options strong { font-size: var(--studio-font-size-sm); line-height: 16px; overflow-wrap: anywhere; }
+.agent-question-options small { padding: 1px 4px; border-radius: var(--studio-radius-sm); background: var(--studio-accent-soft); color: var(--studio-accent); font-size: var(--studio-font-size-xs); font-weight: 650; }
+.agent-question-options em { flex-basis: 100%; color: var(--studio-text-tertiary); font-size: var(--studio-font-size-xs); font-style: normal; line-height: 14px; overflow-wrap: anywhere; }
+.agent-question-custom { display: grid; gap: 5px; }
+.agent-question-custom > span { color: var(--studio-text-secondary); font-size: var(--studio-font-size-xs); font-weight: 650; }
+.agent-question-custom textarea { width: 100%; min-height: 52px; max-height: 9rem; resize: vertical; padding: 7px 8px; border: 1px solid var(--studio-border); border-radius: var(--studio-radius-sm); outline: 0; background: var(--studio-control); color: var(--studio-text); font-size: var(--studio-font-size-sm); line-height: 16px; }
+.agent-question-custom textarea:focus-visible { border-color: var(--studio-focus); box-shadow: 0 0 0 2px color-mix(in srgb, var(--studio-focus) 24%, transparent); }
+.agent-question-custom textarea::placeholder { color: var(--studio-text-tertiary); }
+.agent-plan-review-body { min-height: 0; padding: 10px; overflow-y: auto; color: var(--studio-text-secondary); font-size: var(--studio-font-size-sm); line-height: 17px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .agent-composer { flex: none; display: grid; gap: 6px; margin: 0 var(--agent-inline-space) 10px; padding: 8px; border: 1px solid var(--studio-border-strong); border-radius: var(--studio-radius-md); background: var(--studio-panel-raised); box-shadow: 0 3px 12px rgb(0 0 0 / 8%); }
 .agent-composer textarea { width: 100%; min-height: clamp(52px, 16vh, 96px); max-height: min(34vh, 18rem); resize: vertical; padding: 2px 3px; outline: 0; background: transparent; color: var(--studio-text); font-size: var(--studio-font-size-md); line-height: 17px; }
 .agent-composer textarea:focus-visible { outline: 0; }
@@ -1495,6 +1530,12 @@ body[data-studio-dragging="true"] iframe { pointer-events: none; }
 .agent-context-popover dt { display: flex; align-items: center; min-width: 0; }
 .agent-context-popover dt i { width: 8px; height: 8px; flex: none; margin-right: 6px; border-radius: 2px; }
 .agent-context-popover dd { margin: 0; color: var(--studio-text); font-variant-numeric: tabular-nums; }
+
+@container studio-agent (max-width: 360px) {
+  .agent-interaction > footer { align-items: stretch; flex-direction: column; }
+  .agent-interaction > footer > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .agent-interaction > footer .studio-ui-button { min-height: 34px; }
+}
 
 @media (max-width: 1050px) {
   .studio-header { grid-template-columns: minmax(170px, 210px) minmax(0, 1fr) auto; }
@@ -1559,6 +1600,10 @@ body[data-studio-dragging="true"] iframe { pointer-events: none; }
   .settings-choice button { min-width: 0; min-height: 40px; flex: 1; }
   .profile-plugin-row { min-height: 48px; }
   .profile-plugin-toggle { min-height: 40px; }
+  .agent-interaction > footer { align-items: stretch; flex-direction: column; }
+  .agent-interaction > footer > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .agent-interaction > footer .studio-ui-button { min-height: 40px; }
+  .agent-question-custom textarea { font-size: 16px; }
 }
 
 @media (prefers-reduced-motion: no-preference) {

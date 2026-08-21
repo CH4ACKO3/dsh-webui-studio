@@ -38,7 +38,7 @@ interface AgentSessionProps {
   loadingOlder: boolean
   hasOlder: boolean
   empty?: ReactNode
-  notice?: ReactNode
+  interaction?: ReactNode
   t: StudioTranslate
   onPromptChange(value: string): void
   onSelectModel(selection: ModelSelection): void
@@ -305,7 +305,7 @@ export function AgentSession({
   loadingOlder,
   hasOlder,
   empty,
-  notice,
+  interaction,
   t,
   onPromptChange,
   onSelectModel,
@@ -379,8 +379,7 @@ export function AgentSession({
         {queued.map(item => <QueueContent item={item} t={t} key={item.id} />)}
       </section>}
     </div>
-    {notice}
-    <form className="agent-composer" onSubmit={event => { event.preventDefault(); onSubmit() }}>
+    {interaction ?? <form className="agent-composer" onSubmit={event => { event.preventDefault(); onSubmit() }}>
       <textarea aria-label={t('agentMessage')} value={prompt} onChange={event => onPromptChange(event.target.value)}
         onKeyDown={onComposerKeyDown} placeholder={composerEnabled ? t('agentPlaceholder') : sessionActive
           ? t('agentModelUnavailable') : t('agentPlaceholderStart')}
@@ -398,6 +397,6 @@ export function AgentSession({
       </footer>
       {sessionActive && <span className="agent-composer-hint">{composerEnabled
         ? t('agentSendHint') : t('agentModelUnavailable')}</span>}
-    </form>
+    </form>}
   </>
 }

@@ -36,6 +36,7 @@ describe('Studio Agent session controls', () => {
       loadingOlder={false}
       hasOlder={false}
       empty={<div>Empty</div>}
+      interaction={undefined}
       t={(key, values) => translate('en', key, values)}
       onPromptChange={() => undefined}
       onSelectModel={() => undefined}
@@ -47,5 +48,31 @@ describe('Studio Agent session controls', () => {
     expect(html).toContain('DeepSeek Chat')
     expect(html).toContain('aria-label="Reasoning effort"')
     expect(html).toContain('aria-label="25% of context used"')
+  })
+
+  it('lets a pending interaction take over the composer', () => {
+    const html = renderToStaticMarkup(<AgentSession
+      entries={[]}
+      streaming={{ reasoning: '', text: '' }}
+      queue={[]}
+      prompt="draft message"
+      sessionActive
+      sending={false}
+      models={models}
+      modelsLoading={false}
+      modelSelecting={false}
+      loadingOlder={false}
+      hasOlder={false}
+      interaction={<section>Approval required</section>}
+      t={(key, values) => translate('en', key, values)}
+      onPromptChange={() => undefined}
+      onSelectModel={() => undefined}
+      onSubmit={() => undefined}
+      onLoadOlder={() => undefined}
+    />)
+
+    expect(html).toContain('Approval required')
+    expect(html).not.toContain('Message Studio Agent')
+    expect(html).not.toContain('draft message')
   })
 })

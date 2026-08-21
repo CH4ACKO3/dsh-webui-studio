@@ -54,6 +54,7 @@ service API 与 CLI 控制面，并使用
 - [x] 使用 CodeMirror 编辑 Draft 源码，并保持已安装依赖源码只读
 - [x] 构建、经 Harmony 应用、重载，并确认实时 Client graph revision
 - [x] 新建 Draft 级 Agent，或让已有 DSH 会话临时挂载 Studio tools、Skill 与上下文后继续工作
+- [x] 无需离开 Studio 即可处理单次工具授权、结构化问题和计划审核
 - [x] 检查 package exports、构建产物、Patch 状态、顺序、依赖和 pack 输出
 - [x] 同时运行多个相互隔离的 Draft Preview Host
 - [x] 将当前 WebUI profile 或其它本地 profile 复制到每个 Draft 的隔离运行环境

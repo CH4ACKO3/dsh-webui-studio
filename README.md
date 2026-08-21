@@ -57,6 +57,7 @@ not depend on Studio.
 - [x] Edit Draft source with CodeMirror and protect installed dependency sources as read-only
 - [x] Build, apply through Harmony, reload, and confirm the live Client graph revision
 - [x] Start a Draft-scoped Agent or continue an existing DSH session with temporary Studio tools, skill, and context
+- [x] Answer one-shot tool approvals, structured questions, and plan reviews without leaving Studio
 - [x] Check package exports, artifacts, Patch state, ordering, dependencies, and pack output
 - [x] Run multiple isolated Draft Preview Hosts at the same time
 - [x] Snapshot the current WebUI profile or another local profile into each isolated Draft runtime

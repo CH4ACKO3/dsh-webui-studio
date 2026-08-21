@@ -12,6 +12,7 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import type {
+  ClientResponse,
   HistoryEntry,
   ModelSelection,
   SessionModels,
@@ -86,6 +87,11 @@ import { PluginManagement } from './PluginManagement'
 import { SettingsDialog, SettingsIcon } from './SettingsDialog'
 import { AutomaticPatchDialog, automaticPatchScope } from './AutomaticPatchDialog'
 import { AgentSession } from './AgentSession'
+import { AgentInteractionComposer } from './AgentInteractionComposer'
+import {
+  updateAgentInteractions,
+  type AgentInteractionStore,
+} from './agent-interactions'
 import {
   agentStreamingContent,
   agentQueueItems,
@@ -632,6 +638,14 @@ function eventSessionId(envelope: StudioServerRequest<Record<string, unknown>>):
   return typeof envelope.payload.sessionId === 'string' ? envelope.payload.sessionId : undefined
 }
 
+function agentToolArguments(entries: readonly StudioConversationEntry[], callId: string): string | undefined {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const event = entries[index]?.event
+    if (event?.type === 'tool/call' && event.data.callId === callId) return event.data.arguments
+  }
+  return undefined
+}
+
 function sessionTitle(session: SessionSummary): string {
   const values = session.projections?.values as Record<string, unknown> | undefined
   const title = values?.title
@@ -677,7 +691,7 @@ export function App(): JSX.Element {
   const [selectingAgentModel, setSelectingAgentModel] = useState(false)
   const [agentProjections, setAgentProjections] = useState<AgentProjectionStore>({})
   const [error, setError] = useState<string>()
-  const [agentInteractions, setAgentInteractions] = useState<Record<string, 'approval' | 'question'>>({})
+  const [agentInteractions, setAgentInteractions] = useState<AgentInteractionStore>({})
   const [previewVersions, setPreviewVersions] = useState<Record<string, number>>({})
   const [previewMode, setPreviewMode] = useState<'browse' | 'inspect'>('browse')
   const [previewAspectRatio, setPreviewAspectRatio] = useState<PreviewAspectRatio>(
@@ -755,9 +769,12 @@ export function App(): JSX.Element {
   const attachedAgentSessionIds = drafts.flatMap(draft => draft.agent === undefined ? [] : [draft.agent.sessionId]).sort().join('\0')
   const selectedAgentSession = agentSessions.find(session => String(session.sessionId) === selectedAgentSessionId)
   const queuedPrompts = sessionId === undefined ? [] : agentQueues[sessionId] ?? []
-  const interactionKind = sessionId === undefined ? undefined : agentInteractions[sessionId]
-  const interaction = interactionKind === 'approval' ? t('interactionApproval')
-    : interactionKind === 'question' ? t('interactionQuestion') : undefined
+  const pendingAgentInteractions = sessionId === undefined ? [] : agentInteractions[sessionId] ?? []
+  const activeAgentInteraction = pendingAgentInteractions[0]
+  const activeAgentApprovalArguments = activeAgentInteraction?.kind === 'approval'
+    && activeAgentInteraction.request.callId !== undefined
+    ? agentToolArguments(events, activeAgentInteraction.request.callId)
+    : undefined
   const hasUnsavedSource = filePath !== '' && source !== savedSource
   const selectedInstanceOperation = selectedDraftId === undefined ? undefined : instanceOperations[selectedDraftId]
   const selectedInstanceStarting = selectedInstanceOperation === 'start' || selectedInstanceOperation === 'restart'
@@ -1161,26 +1178,15 @@ export function App(): JSX.Element {
 
   useEffect(() => subscribeStudioEvents(envelope => {
     const frame = envelope.payload
+    setAgentInteractions(current => updateAgentInteractions(current, envelope))
     if (frame.type === 'host/session-added'
       || frame.type === 'host/session-removed'
       || frame.type === 'host/session-status') {
       refreshAgentSessionsRef.current?.()
     }
     const frameSessionId = eventSessionId(envelope)
-    if (frame.type === 'session/subscribed' && frameSessionId !== undefined) {
-      setAgentInteractions(current => {
-        const next = { ...current }
-        delete next[frameSessionId]
-        return next
-      })
-    }
     if (frame.type === 'host/session-removed' && frameSessionId !== undefined) {
       setAgentQueues(current => {
-        const next = { ...current }
-        delete next[frameSessionId]
-        return next
-      })
-      setAgentInteractions(current => {
         const next = { ...current }
         delete next[frameSessionId]
         return next
@@ -1189,19 +1195,6 @@ export function App(): JSX.Element {
     if (frame.type === 'session/queue' && frameSessionId !== undefined && Array.isArray(frame.items)) {
       const items = agentQueueItems(frame.items)
       setAgentQueues(current => ({ ...current, [frameSessionId]: items }))
-    }
-    if (frameSessionId !== undefined && (frame.type === 'approval/requested' || frame.type === 'question/requested')) {
-      setAgentInteractions(current => ({
-        ...current,
-        [frameSessionId]: frame.type === 'approval/requested' ? 'approval' : 'question',
-      }))
-    }
-    if (frameSessionId !== undefined && (frame.type === 'approval/resolved' || frame.type === 'question/resolved')) {
-      setAgentInteractions(current => {
-        const next = { ...current }
-        delete next[frameSessionId]
-        return next
-      })
     }
     const current = sessionRef.current
     if (current === undefined || frameSessionId !== current) return
@@ -1980,6 +1973,15 @@ export function App(): JSX.Element {
     } finally {
       setSending(false)
     }
+  }
+
+  const respondToAgentInteraction = async (response: ClientResponse): Promise<void> => {
+    const receipt = await studioApi.respond(response).catch(cause => {
+      throw new Error(localizeError(cause))
+    })
+    if (!receipt.accepted) throw new Error(receipt.reason === 'not-pending'
+      ? t('agentInteractionExpired')
+      : t('agentInteractionRejected'))
   }
 
   const selectAgentModel = async (selection: ModelSelection): Promise<void> => {
@@ -2968,8 +2970,10 @@ export function App(): JSX.Element {
             hasOlder={hasOlderMessages} t={t} onPromptChange={setPrompt} onSubmit={() => void sendPrompt()}
             onSelectModel={selection => void selectAgentModel(selection)}
             onLoadOlder={() => void loadOlderAgentMessages()}
-            notice={interaction === undefined ? undefined
-              : <Notice className="interaction-notice" tone="warning">{interaction}</Notice>}
+            interaction={activeAgentInteraction === undefined ? undefined
+              : <AgentInteractionComposer key={activeAgentInteraction.rpcId} interaction={activeAgentInteraction}
+                  pendingCount={pendingAgentInteractions.length} approvalArguments={activeAgentApprovalArguments}
+                  t={t} onRespond={respondToAgentInteraction} />}
             empty={project?.state === 'active' && sessionId === undefined
               ? <div className="agent-entry-actions">
                     <Button variant="primary" loading={creatingAgentDraftId === selectedDraftId} loadingLabel={t('agentStarting')}
