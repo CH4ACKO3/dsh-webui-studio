@@ -1461,7 +1461,7 @@ body[data-studio-dragging="true"] iframe { pointer-events: none; }
 .agent-queue p span { overflow: hidden; text-overflow: ellipsis; }
 .interaction-notice { flex: none; margin: 0 12px 7px; }
 .agent-composer { flex: none; display: grid; gap: 4px; margin: 0 10px 10px; padding: 7px; border: 1px solid var(--studio-border-strong); border-radius: var(--studio-radius-md); background: var(--studio-panel-raised); box-shadow: 0 3px 12px rgb(0 0 0 / 8%); }
-.agent-composer:focus-within { border-color: var(--studio-focus); box-shadow: 0 0 0 1px color-mix(in srgb, var(--studio-focus) 36%, transparent); }
+.agent-composer:focus-within { border-color: var(--studio-focus); }
 .agent-composer textarea { width: 100%; min-height: 48px; max-height: 116px; resize: vertical; padding: 2px 3px; outline: 0; background: transparent; color: var(--studio-text); font-size: var(--studio-font-size-md); line-height: 17px; }
 .agent-composer textarea::placeholder { color: var(--studio-text-tertiary); }
 .agent-composer footer { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
