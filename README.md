@@ -26,7 +26,7 @@
   [![npm](https://img.shields.io/npm/v/dsh-webui-studio.svg?color=0b63f6)](https://www.npmjs.com/package/dsh-webui-studio)
   [![Node.js](https://img.shields.io/badge/node-%5E22.22.3%20%7C%7C%20%3E%3D24.11.1-2f6f3e.svg)](package.json)
   [![GitHub stars](https://img.shields.io/github/stars/CH4ACKO3/dsh-webui-studio?style=flat&color=0b63f6)](https://github.com/CH4ACKO3/dsh-webui-studio/stargazers)
-  [![Powered by Harmony](https://img.shields.io/badge/powered%20by-dsh--harmony-111827.svg)](https://github.com/CH4ACKO3/dsh-harmony)
+  [![Powered by Harmony](https://memorax-ai.github.io/dsh-harmony/harmony-powered.svg)](https://memorax-ai.github.io/dsh-harmony/)
 
   [简体中文](README.zh-CN.md) / [English](README.md)
 </div>
