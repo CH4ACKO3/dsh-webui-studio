@@ -41,6 +41,10 @@ function studioPackageRoot(): string {
   return fileURLToPath(new URL('../../', import.meta.url))
 }
 
+function harmonyPackageRoot(harmonyBinEntry: string): string {
+  return dirname(dirname(harmonyBinEntry))
+}
+
 function dshPackageModules(harmonyBinEntry: string): string {
   const configured = process.env.DSH_HARMONY_DSH_ENTRY
   const dshEntry = configured === undefined
@@ -122,6 +126,7 @@ export class StudioPreviewSupervisor {
         this.draft,
         this.mainProfileDir,
         studioPackageRoot(),
+        harmonyPackageRoot(this.harmonyBinEntry),
         this.commands,
         chunk => { this.runtime.log = appendLog(this.runtime.log, chunk) },
         signal,
@@ -177,7 +182,6 @@ export class StudioPreviewSupervisor {
         contribution: STUDIO_PREVIEW_REMOTE,
       })
       this.peerClient = peerClient
-      await peerClient.connect(signal)
       await this.waitForWorker(child, signal)
       await this.invoke(this.remote().state(signal))
       return this.snapshot()
@@ -308,6 +312,7 @@ export class StudioPreviewSupervisor {
     while (this.child === child && Date.now() - started < START_TIMEOUT_MS) {
       try {
         const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(1_000)])
+        await this.peerClient?.connect(requestSignal)
         const health = await this.invoke(this.remote().health(requestSignal))
         if (health.ready) return
         if (health.error !== undefined) throw new Error(health.error)

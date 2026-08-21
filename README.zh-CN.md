@@ -117,7 +117,7 @@ Draft 显示名与 npm package identity 相互独立，可在实例面板中重�
 > [!IMPORTANT]
 > Studio 依赖 [`docs/harmony-api-requirements.md`](docs/harmony-api-requirements.md)
 > 中列出的 Harmony 公共 service 与 CLI API，最低兼容版本为
-> `dsh-harmony@0.6.0`。
+> `dsh-harmony@0.7.2`。
 
 ```sh
 dsh plugin --profile web add dsh-webui-studio

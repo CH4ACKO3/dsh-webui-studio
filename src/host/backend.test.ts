@@ -19,7 +19,7 @@ const previewState = vi.hoisted(() => ({
     plugins: [],
     orderViolations: [],
     patchOrderViolations: [],
-    pluginConflicts: [],
+    compatibility: [],
   },
   updateProfile: vi.fn(),
 }))

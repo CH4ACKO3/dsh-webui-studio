@@ -118,7 +118,13 @@ try {
   const tarballs = readdirSync(root).filter((entry) => entry.endsWith('.tgz'))
   assert.equal(tarballs.length, 1, `npm pack created unexpected artifacts: ${tarballs.join(', ')}`)
   const studioTarball = join(root, tarballs[0]!)
-  const installed = add(studioTarball)
+  let installed = add(studioTarball)
+  // Harmony's postinstall is global-only, so explicitly reject it when a fresh pnpm policy asks for approval.
+  if (installed.status !== 0 && `${installed.stdout}\n${installed.stderr}`.includes('ERR_PNPM_IGNORED_BUILDS')) {
+    const workspacePath = join(home, 'profiles', 'web', 'pnpm-workspace.yaml')
+    writeFileSync(workspacePath, readFileSync(workspacePath, 'utf8').replace('dsh-harmony: set this to true or false', 'dsh-harmony: false'))
+    installed = add(studioTarball)
+  }
   assert.equal(installed.status, 0, `${installed.stdout}\n${installed.stderr}`)
   const localPackages = [harmonyPackageSpec, bindingPackageSpec].filter((spec): spec is string => spec !== undefined)
   if (localPackages.length > 0) {
@@ -292,7 +298,10 @@ try {
     disabled: draftProfile.disabled,
   })
   assert.equal(restoredProfile.reload.state, 'succeeded')
-  assert.deepEqual(restoredProfile.profile, draftProfile)
+  const { revision: restoredRevision, ...restoredProfileState } = restoredProfile.profile
+  const { revision: initialRevision, ...initialProfileState } = draftProfile
+  assert.ok(restoredRevision > initialRevision)
+  assert.deepEqual(restoredProfileState, initialProfileState)
   const initialInspection = await call<StudioHarmonyInspection>('studio.harmony.inspect', { draftId: created.id })
   assert.equal(initialInspection.patches.find(patch => patch.key === 'studio-draft/preview-runtime')?.state, 'bound')
   const initialPatchedTarget = initialInspection.targets.find(target => target.package === 'studio-draft' && target.file === 'index.js')

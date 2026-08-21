@@ -101,10 +101,10 @@
   },
   "dependencies": {
     "@phenomnomnominal/tsquery": "^6.2.0",
-    "dsh-harmony": "^0.6.0",
-    "dsh-harmony-react": "^0.2.4",
+    "dsh-harmony": "^0.7.2",
+    "dsh-harmony-react": "^0.3.0",
     "pnpm": "^10.34.5",
-    "the-binding-of-dsh": "github:CH4ACKO3/the-binding-of-dsh",
+    "the-binding-of-dsh": "0.1.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

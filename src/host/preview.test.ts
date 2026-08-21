@@ -3,6 +3,7 @@ import { once } from 'node:events'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, expect, it } from 'vitest'
 import type { StudioDraftRecord } from '../contracts.js'
 import type { StudioCommandRunner } from './drafts.js'
@@ -10,6 +11,7 @@ import { StudioPreviewSupervisor } from './preview.js'
 
 const roots: string[] = []
 const children: ChildProcess[] = []
+const harmonyBinEntry = fileURLToPath(import.meta.resolve('dsh-harmony/bin'))
 
 afterEach(async () => {
   for (const child of children.splice(0)) {
@@ -46,7 +48,7 @@ it('publishes profile installation progress and a failed runtime snapshot', asyn
       await install
     },
   }
-  const preview = new StudioPreviewSupervisor(draft, mainProfile, 'http://127.0.0.1:3081', commands, '/unused/dsh.js')
+  const preview = new StudioPreviewSupervisor(draft, mainProfile, 'http://127.0.0.1:3081', commands, harmonyBinEntry)
 
   const start = preview.start()
   await started
@@ -83,7 +85,7 @@ it('forcefully reaps a Preview Host that ignores SIGTERM', async () => {
     root,
     'http://127.0.0.1:3081',
     { async run() {} },
-    '/unused/dsh.js',
+    harmonyBinEntry,
     500,
   )
   const mutablePreview = preview as unknown as { child: ChildProcess }
@@ -122,7 +124,7 @@ it('cancels and waits for a Preview start that is still installing dependencies'
       })
     },
   }
-  const preview = new StudioPreviewSupervisor(draft, mainProfile, 'http://127.0.0.1:3081', commands, '/unused/dsh.js')
+  const preview = new StudioPreviewSupervisor(draft, mainProfile, 'http://127.0.0.1:3081', commands, harmonyBinEntry)
 
   const start = preview.start().catch(error => error as Error)
   await started
@@ -141,7 +143,7 @@ it('terminates a spawned Preview child before waiting for start to settle', asyn
     repositoryDir: root, worktreeDir: root, root,
     runtimeHome: join(root, 'runtime-home'), profileMode: 'main-home', createdAt: 'now',
   }
-  const preview = new StudioPreviewSupervisor(draft, root, 'http://127.0.0.1:3081', { async run() {} }, '/unused/dsh.js', 100)
+  const preview = new StudioPreviewSupervisor(draft, root, 'http://127.0.0.1:3081', { async run() {} }, harmonyBinEntry, 100)
   const abort = new AbortController()
   const start = once(child, 'exit').then(() => { throw abort.signal.reason })
   const mutablePreview = preview as unknown as {

@@ -145,7 +145,7 @@ test('generates a CSS Patch that registers the same Element variable contract', 
     devDependencies: Record<string, string>
     dsh: { client: { immediately: boolean } }
   }
-  expect(manifest.dependencies['dsh-harmony-react']).toBe('^0.2.1')
+  expect(manifest.dependencies['dsh-harmony-react']).toBe('^0.3.0')
   expect(manifest.devDependencies['@tsdown/css']).toBe('0.22.14')
   expect(manifest.dsh.client.immediately).toBe(true)
 })

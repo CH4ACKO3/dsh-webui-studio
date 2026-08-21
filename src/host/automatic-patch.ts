@@ -412,7 +412,7 @@ export async function writeAutomaticPatch(root: string, plan: StudioAutomaticPat
   }
   const nextManifest: DraftManifest = {
     ...manifest,
-    dependencies: plan.client === undefined ? manifest.dependencies : { ...manifest.dependencies, 'dsh-harmony-react': '^0.2.1' },
+    dependencies: plan.client === undefined ? manifest.dependencies : { ...manifest.dependencies, 'dsh-harmony-react': '^0.3.0' },
     devDependencies: plan.request.kind !== 'css-style' || manifest.devDependencies?.tsdown !== '0.22.14'
       || manifest.dependencies?.['@tsdown/css'] !== undefined || manifest.devDependencies['@tsdown/css'] !== undefined
       ? manifest.devDependencies

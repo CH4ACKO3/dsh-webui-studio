@@ -12,6 +12,7 @@ const roots: string[] = []
 const exec = promisify(execFile)
 const require = createRequire(import.meta.url)
 const bindingRoot = dirname(require.resolve('the-binding-of-dsh/package.json'))
+const harmonyRoot = dirname(require.resolve('dsh-harmony/package.json'))
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
@@ -39,12 +40,13 @@ it('snapshots main profile declarations and links the Draft worktree', async () 
   }
   const run = vi.fn(async () => {})
 
-  const profile = await materializeDraftProfile(draft, mainProfile, studioRoot, { run })
+  const profile = await materializeDraftProfile(draft, mainProfile, studioRoot, harmonyRoot, { run })
   const manifest = JSON.parse(await readFile(join(profile, 'package.json'), 'utf8'))
 
   expect(manifest.dependencies).toEqual({
     existing: `link:${join(root, 'plugin')}`,
     'dsh-webui-studio': `link:${studioRoot}`,
+    'dsh-harmony': `link:${harmonyRoot}`,
     'the-binding-of-dsh': `link:${bindingRoot}`,
     'draft-plugin': `link:${draftRoot}`,
   })
@@ -52,7 +54,7 @@ it('snapshots main profile declarations and links the Draft worktree', async () 
   expect(await readFile(join(profile, 'pnpm-workspace.yaml'), 'utf8')).toBe(workspacePolicy)
   const [command, args] = bundledPnpmCommand(['install', '--prefer-offline'])
   expect(run).toHaveBeenCalledWith(command, args, profile, undefined, undefined)
-  await materializeDraftProfile(draft, mainProfile, studioRoot, { run })
+  await materializeDraftProfile(draft, mainProfile, studioRoot, harmonyRoot, { run })
   expect(run).toHaveBeenCalledTimes(2)
 })
 
@@ -88,7 +90,7 @@ it('snapshots a selected custom profile and resolves its relative links from tha
   }
   const run = vi.fn(async () => {})
 
-  const profile = await materializeDraftProfile(draft, mainProfile, studioRoot, { run })
+  const profile = await materializeDraftProfile(draft, mainProfile, studioRoot, harmonyRoot, { run })
   const manifest = JSON.parse(await readFile(join(profile, 'package.json'), 'utf8'))
 
   expect(manifest.name).toBe('custom-web-profile')
@@ -96,6 +98,7 @@ it('snapshots a selected custom profile and resolves its relative links from tha
     'custom-only': `link:${linkedPlugin}`,
     'draft-plugin': `link:${draftRoot}`,
     'dsh-webui-studio': `link:${studioRoot}`,
+    'dsh-harmony': `link:${harmonyRoot}`,
     'the-binding-of-dsh': `link:${bindingRoot}`,
   })
   expect(await readFile(join(profile, 'cordis.yml'), 'utf8')).toBe('custom: true\n')

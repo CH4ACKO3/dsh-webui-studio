@@ -19,7 +19,7 @@ Profile paths come from `HarmonyService.profile().dir`. Studio resolves the CLI
 entry through the package export rather than through the Cordis service.
 Studio and Harmony releases must keep this public contract aligned.
 
-`dsh-harmony-react@0.1.2` exposes the generic `./studio` React element and
+`dsh-harmony-react@0.3.0` exposes the generic `./studio` React element and
 variable registration API used by the browser and Preview bridge. Studio uses
 the package published on the npm registry and resolves it exclusively through
 the `dsh-harmony-react/studio` package export. Source persistence additionally

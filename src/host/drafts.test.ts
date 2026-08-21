@@ -38,7 +38,7 @@ describe('StudioDraftRegistry', () => {
     expect(JSON.parse(await readFile(join(draft.root, 'package.json'), 'utf8'))).toMatchObject({
       name: 'dsh-test-draft',
       scripts: { 'build:client': 'tsdown --config-loader unrun' },
-      dependencies: { 'dsh-harmony-react': '^0.2.1' },
+      dependencies: { 'dsh-harmony-react': '^0.3.0' },
       devDependencies: { '@tsdown/css': '0.22.14', tsdown: '0.22.14' },
       dsh: { client: { platform: 'web', immediately: true } },
     })

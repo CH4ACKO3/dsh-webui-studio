@@ -128,7 +128,7 @@ workspace and never stops or deletes the Draft. Unsaved Source changes must be s
 > [!IMPORTANT]
 > Studio requires the public Harmony service and CLI APIs documented in
 > [`docs/harmony-api-requirements.md`](docs/harmony-api-requirements.md).
-> `dsh-harmony@0.6.0` is the minimum compatible release.
+> `dsh-harmony@0.7.2` is the minimum compatible release.
 
 ```sh
 dsh plugin --profile web add dsh-webui-studio

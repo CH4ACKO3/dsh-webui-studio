@@ -49,7 +49,7 @@ function templateManifest(name: string): string {
     exports: { '.': './lib/index.js', './client': './lib/client.js', './package.json': './package.json' },
     scripts: { build: 'npm run build:client && npm run build:host', 'build:client': 'tsdown --config-loader unrun', 'build:host': 'tsc -p tsconfig.host.json' },
     dsh: { client: { immediately: true, inject: ['@deepseek-ai/dsh-client-runtime'], platform: 'web' }, harmony: { patches: [] } },
-    dependencies: { 'dsh-harmony-react': '^0.2.1' },
+    dependencies: { 'dsh-harmony-react': '^0.3.0' },
     peerDependencies: { '@deepseek-ai/dsh-client-runtime': '0.1.0-rc.7', react: '^18.3.1' },
     devDependencies: {
       '@deepseek-ai/dsh-client-runtime': '0.1.0-rc.7', '@tsdown/css': '0.22.14', '@types/react': '~18.3.1', react: '^18.3.1',

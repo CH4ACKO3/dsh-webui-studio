@@ -51,6 +51,7 @@ export function PluginManagement({ selectedDraft, view }: {
   const plugins = useMemo(() => new Map(profile?.plugins.map(plugin => [plugin.name, plugin]) ?? []), [profile])
   const patches = useMemo(() => new Map(inspection.patches.map(patch => [patch.key, patch])), [inspection])
   const ownerPatchKeys = (owner: string): string[] => patchOrder.filter(key => patches.get(key)?.owner === owner)
+  const compatibilityWarnings = profile?.compatibility.filter(item => item.kind !== 'integration') ?? []
   const dirty = profile !== undefined && (!sameStringList(order, profile.order)
     || !sameStringList(patchOrder, profile.patchOrder) || !sameStringList(disabled, profile.disabled))
 
@@ -175,8 +176,8 @@ export function PluginManagement({ selectedDraft, view }: {
           <div className="profile-management-scroll">
             {(profile?.orderViolations.length ?? 0) > 0
               && <Notice tone="warning">{t('profileOrderWarning', { count: profile?.orderViolations.length ?? 0 })}</Notice>}
-            {(profile?.pluginConflicts.length ?? 0) > 0
-              && <Notice tone="warning">{t('profileConflictWarning', { count: profile?.pluginConflicts.length ?? 0 })}</Notice>}
+            {compatibilityWarnings.length > 0
+              && <Notice tone="warning">{t('profileConflictWarning', { count: compatibilityWarnings.length })}</Notice>}
             <div className="plugin-management-list-heading"><strong>{t('profileProviderOrder')}</strong>
               <span>{visiblePlugins.length === order.length ? order.length
                 : `${visiblePlugins.length}/${order.length}`}</span></div>

@@ -102,6 +102,7 @@ export async function materializeDraftProfile(
   draft: StudioDraftRecord,
   mainProfileDir: string,
   studioPackageRoot: string,
+  harmonyPackageRoot: string,
   commands: StudioCommandRunner,
   onOutput?: (chunk: string) => void,
   signal?: AbortSignal,
@@ -121,6 +122,7 @@ export async function materializeDraftProfile(
   )
   dependencies[draft.name] = `link:${draft.root}`
   dependencies['dsh-webui-studio'] = `link:${studioPackageRoot}`
+  dependencies['dsh-harmony'] = `link:${harmonyPackageRoot}`
   dependencies['the-binding-of-dsh'] = `link:${BINDING_PACKAGE_ROOT}`
   await writeFile(join(profileDir, 'package.json'), `${JSON.stringify({ ...manifest, dependencies }, null, 2)}\n`)
   for (const file of PROFILE_FILES) {
