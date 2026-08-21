@@ -2971,8 +2971,7 @@ export function App(): JSX.Element {
             notice={interaction === undefined ? undefined
               : <Notice className="interaction-notice" tone="warning">{interaction}</Notice>}
             empty={project?.state === 'active' && sessionId === undefined
-              ? <EmptyState className="agent-empty" title={t('agentStartFromDraft')} description={t('agentDescription')}
-                action={<div className="agent-entry-actions">
+              ? <div className="agent-entry-actions">
                     <Button variant="primary" loading={creatingAgentDraftId === selectedDraftId} loadingLabel={t('agentStarting')}
                       onClick={() => void createAgent()}>{t('agentStart')}</Button>
                     <div className="agent-entry-divider"><span>{t('agentOrExisting')}</span></div>
@@ -2989,7 +2988,7 @@ export function App(): JSX.Element {
                       disabled={selectedAgentSession === undefined || selectedAgentSession.running}
                       onClick={() => void attachAgent()}>{t('agentAttach')}</Button>
                     <small>{t('agentAttachDescription')}</small>
-                  </div>} />
+                  </div>
               : undefined} />
         </PanelBody>}
       </Panel>

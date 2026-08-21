@@ -54,6 +54,7 @@ describe('Studio locale', () => {
       'profileCompositeMembers', 'profileConstraint', 'webuiSize', 'you', 'sending',
       'agentWorking', 'agentWaiting', 'agentReady', 'agentScope', 'agentStudioMode', 'agentNoSession',
       'agentOpenDraftFirst',
+      'agentStartFromDraft', 'agentDescription', 'agentStartHint',
     ]
     for (const key of removed) expect(STUDIO_MESSAGES).not.toHaveProperty(key)
   })

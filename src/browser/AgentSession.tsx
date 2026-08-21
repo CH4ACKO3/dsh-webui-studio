@@ -396,8 +396,8 @@ export function AgentSession({
           </button>
         </div>
       </footer>
-      <span className="agent-composer-hint">{composerEnabled ? t('agentSendHint') : sessionActive
-        ? t('agentModelUnavailable') : t('agentStartHint')}</span>
+      {sessionActive && <span className="agent-composer-hint">{composerEnabled
+        ? t('agentSendHint') : t('agentModelUnavailable')}</span>}
     </form>
   </>
 }
