@@ -1457,8 +1457,8 @@ body[data-studio-dragging="true"] iframe { pointer-events: none; }
 .agent-queue p span { overflow: hidden; text-overflow: ellipsis; }
 .interaction-notice { flex: none; margin: 0 var(--agent-inline-space) 7px; }
 .agent-composer { flex: none; display: grid; gap: 6px; margin: 0 var(--agent-inline-space) 10px; padding: 8px; border: 1px solid var(--studio-border-strong); border-radius: var(--studio-radius-md); background: var(--studio-panel-raised); box-shadow: 0 3px 12px rgb(0 0 0 / 8%); }
-.agent-composer:focus-within { border-color: var(--studio-focus); }
 .agent-composer textarea { width: 100%; min-height: clamp(52px, 16vh, 96px); max-height: min(34vh, 18rem); resize: vertical; padding: 2px 3px; outline: 0; background: transparent; color: var(--studio-text); font-size: var(--studio-font-size-md); line-height: 17px; }
+.agent-composer textarea:focus-visible { outline: 0; }
 .agent-composer textarea::placeholder { color: var(--studio-text-tertiary); }
 .agent-composer footer { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .agent-model-controls { min-width: 0; display: flex; align-items: center; gap: 2px; }
