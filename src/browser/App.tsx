@@ -2970,11 +2970,9 @@ export function App(): JSX.Element {
             onLoadOlder={() => void loadOlderAgentMessages()}
             notice={interaction === undefined ? undefined
               : <Notice className="interaction-notice" tone="warning">{interaction}</Notice>}
-            empty={<EmptyState className="agent-empty"
-              title={project?.state === 'active' ? t('agentStartFromDraft') : t('agentOpenDraftFirst')}
-              description={t('agentDescription')}
-              action={project?.state === 'active' && sessionId === undefined
-                ? <div className="agent-entry-actions">
+            empty={project?.state === 'active' && sessionId === undefined
+              ? <EmptyState className="agent-empty" title={t('agentStartFromDraft')} description={t('agentDescription')}
+                action={<div className="agent-entry-actions">
                     <Button variant="primary" loading={creatingAgentDraftId === selectedDraftId} loadingLabel={t('agentStarting')}
                       onClick={() => void createAgent()}>{t('agentStart')}</Button>
                     <div className="agent-entry-divider"><span>{t('agentOrExisting')}</span></div>
@@ -2991,8 +2989,8 @@ export function App(): JSX.Element {
                       disabled={selectedAgentSession === undefined || selectedAgentSession.running}
                       onClick={() => void attachAgent()}>{t('agentAttach')}</Button>
                     <small>{t('agentAttachDescription')}</small>
-                  </div>
-                : undefined} />} />
+                  </div>} />
+              : undefined} />
         </PanelBody>}
       </Panel>
       </aside>

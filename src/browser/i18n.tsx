@@ -358,7 +358,6 @@ export const STUDIO_MESSAGES = {
   agentSubtitle: { en: 'Let an Agent with integrated development tools help you modify the client.', 'zh-CN': '让具有集成开发工具的 Agent 帮助你修改客户端' },
   agentCancel: { en: 'Stop', 'zh-CN': '停止' },
   agentStartFromDraft: { en: 'Start Agent from the current Draft', 'zh-CN': '让 Agent 从当前 Draft 开始' },
-  agentOpenDraftFirst: { en: 'Open and activate a linked Draft first', 'zh-CN': '先打开并激活 linked Draft' },
   agentDescription: { en: 'Agent uses DSH models and sessions. Draft lifecycle does not depend on Agent.', 'zh-CN': 'Agent 使用 DSH 自身的模型与 session；Draft 生命周期不依赖 Agent。' },
   agentStarting: { en: 'Creating…', 'zh-CN': '正在创建…' },
   agentStart: { en: 'Start Studio Agent', 'zh-CN': '新建 Studio Agent' },

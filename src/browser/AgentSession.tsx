@@ -37,7 +37,7 @@ interface AgentSessionProps {
   contextBreakdown?: AgentContextBreakdown
   loadingOlder: boolean
   hasOlder: boolean
-  empty: ReactNode
+  empty?: ReactNode
   notice?: ReactNode
   t: StudioTranslate
   onPromptChange(value: string): void
