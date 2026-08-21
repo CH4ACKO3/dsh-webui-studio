@@ -1356,7 +1356,6 @@ body[data-studio-dragging="true"] iframe { pointer-events: none; }
 .readiness-section { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--studio-border); }
 .readiness-heading { align-items: center; }
 .readiness-heading h3 { margin: 0; font-size: var(--studio-font-size-lg); line-height: 18px; }
-.readiness-heading p { margin: 3px 0 0; color: var(--studio-text-secondary); font-size: var(--studio-font-size-sm); line-height: 16px; text-wrap: pretty; }
 .readiness-summary {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

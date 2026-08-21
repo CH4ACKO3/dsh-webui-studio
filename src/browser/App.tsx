@@ -2916,7 +2916,7 @@ export function App(): JSX.Element {
           </section>}
           <section className="readiness-section" aria-labelledby="studio-readiness-title">
             <div className="panel-heading readiness-heading">
-              <div><h3 id="studio-readiness-title">{t('readinessTitle')}</h3><p>{t('readinessDescription')}</p></div>
+              <h3 id="studio-readiness-title">{t('readinessTitle')}</h3>
               <Button size="small" onClick={() => void runPack()} loading={packingDraftId === selectedDraftId} loadingLabel={t('checking')}
                 disabled={project === undefined}>{t('packDryRun')}</Button>
             </div>
