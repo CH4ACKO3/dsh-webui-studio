@@ -1400,8 +1400,9 @@ body[data-studio-dragging="true"] iframe { pointer-events: none; }
 .agent-heading-actions { display: flex; align-items: center; gap: 6px; }
 .agent-heading-actions .studio-ui-button { min-height: 25px; padding-inline: 7px; font-size: var(--studio-font-size-xs); }
 .agent-transcript { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 12px var(--agent-inline-space); scroll-padding-block: 12px; }
-.agent-empty { margin: auto 0; }
-.agent-entry-actions { width: 100%; max-width: 30rem; display: grid; gap: 7px; text-align: left; }
+.studio-inspector .agent-empty { width: 100%; margin: auto 0; padding: 0; border: 0; }
+.agent-empty > div { width: 100%; }
+.agent-entry-actions { width: 100%; max-width: 30rem; display: grid; gap: 7px; margin-inline: auto; text-align: left; }
 .agent-entry-actions > .studio-ui-button { width: 100%; }
 .agent-entry-actions > small { color: var(--studio-text-secondary); font-size: var(--studio-font-size-xs); line-height: 14px; text-wrap: pretty; }
 .agent-entry-divider { display: flex; align-items: center; gap: 8px; color: var(--studio-text-tertiary); font-size: var(--studio-font-size-xs); }
